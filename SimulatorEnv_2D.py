@@ -372,7 +372,7 @@ def objfun(q_old, u_old, dt, tol, maximum_iter,
 # 环境类：SimulatorEnv
 ############################
 
-class SimulatorEnv:
+class SimulatorEnv_2D:
     """
     一个规范化的弹性杆仿真环境：
       - 控制量: (x, y, theta) 由外部给定，对应右端末端的位置与方向
