@@ -451,11 +451,14 @@ class SimulatorEnv_2D:
         # 总步数
         self.Nsteps = int(round(total_time / dt))
 
+        self.dlamda = 1 / self.Nsteps
+
         # 状态变量（在 reset 中初始化）
         self.q = None
         self.u = None
         self.ctime = None
         self.current_step = None
+        self.lamda = None
 
         # 历史记录（可选）
         self.history = {
@@ -531,6 +534,7 @@ class SimulatorEnv_2D:
         self.u = np.zeros_like(self.q)
         self.ctime = 0.0
         self.current_step = 0
+        self.lamda = 0.0
 
         # 清空历史
         if self.save_history:
@@ -553,8 +557,6 @@ class SimulatorEnv_2D:
 
         # x, y, theta = control
         control_node = self._control_node_from_xytheta(control)
-
-        self.lamda = self.current_step / self.Nsteps
 
         # 调用隐式积分器
         q_new, flag, J = objfun(
@@ -580,6 +582,7 @@ class SimulatorEnv_2D:
         self.u = u_new
         self.ctime += self.dt
         self.current_step += 1
+        self.lamda = self.current_step * self.dlamda
 
         # 观测与误差
         obs = self._get_observation()
