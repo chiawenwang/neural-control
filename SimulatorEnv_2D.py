@@ -325,7 +325,8 @@ def getFb(q, EI, deltaL):
 
 def objfun(q_old, u_old, dt, tol, maximum_iter,
            m, mMat, EI, EA, W, deltaL, free_index,
-           control_node=None):
+           control_node=None,
+           use_inertia=False):
     """
     单步隐式时间积分（Newton-Raphson）
     """
@@ -333,16 +334,21 @@ def objfun(q_old, u_old, dt, tol, maximum_iter,
         raise ValueError("Control node position must be provided.")
 
     q_new = q_old.copy()
-    # 施加控制节点位置（末端 2 个节点）
-    q_new[-4:] = control_node
+    q_new[:4] = control_node[:4]  # left end nodes
+    q_new[-4:] = control_node[4:]  # right end nodes
 
     iter_count = 0
     error = tol * 10
     flag = 1
 
     while error > tol:
-        F_inertia = m / dt * ((q_new - q_old) / dt - u_old)
-        J_inertia = mMat / dt ** 2
+        # inertia term should be 0 for quasi-static assumption
+        if use_inertia:
+            F_inertia = m / dt * ((q_new - q_old) / dt - u_old)
+            J_inertia = mMat / (dt ** 2)
+        else:
+            F_inertia = np.zeros_like(q_new)
+            J_inertia = np.zeros((q_new.size, q_new.size))
 
         Fs, Js = getFs(q_new, EA, deltaL)
         Fb, Jb = getFb(q_new, EI, deltaL)
@@ -365,11 +371,11 @@ def objfun(q_old, u_old, dt, tol, maximum_iter,
             print("Maximum number of iterations reached.")
             break
 
-    return q_new, flag
+    return q_new, flag, J
 
 
 ############################
-# 环境类：SimulatorEnv
+# SimulatorEnv_2D
 ############################
 
 class SimulatorEnv_2D:
@@ -382,10 +388,10 @@ class SimulatorEnv_2D:
 
     def __init__(self,
                  nv=51,
-                #  dt=0.01,
-                 dt=1.0,
+                 dt=0.01,
+                #  dt=1.0,
                  rod_length=1.0,
-                 total_time=1001.0,
+                 total_time=10.0,
                  R_outer=0.013,
                  r_inner=0.011,
                  E_al=70e9,
@@ -435,11 +441,12 @@ class SimulatorEnv_2D:
 
         # 约束 DOF
         all_DOFs = np.arange(2 * nv)
-        fixed_index = np.array([0, 1, 2 * nv - 4, 2 * nv - 3, 2 * nv - 2, 2 * nv - 1])
-        self.free_index = np.setdiff1d(all_DOFs, fixed_index)
+        self.fixed_index = np.array([0, 1, 2, 3, 2 * nv - 4, 2 * nv - 3, 2 * nv - 2, 2 * nv - 1])
+        self.free_index = np.setdiff1d(all_DOFs, self.fixed_index)
 
         # 中间节点索引
-        self.mid_node = nv // 2 + 1  # 与原脚本保持一致
+        # self.mid_node = nv // 2 + 1  # 与原脚本保持一致
+        self.mid_node = nv // 2  # 与原脚本保持一致
 
         # 总步数
         self.Nsteps = int(round(total_time / dt))
@@ -458,20 +465,29 @@ class SimulatorEnv_2D:
             "midy": []
         }
 
-    # ---------- 内部工具函数 ----------
+    # ---------- inner tools ----------
 
-    def _control_node_from_xytheta(self, x, y, theta):
+    def _control_node_from_xytheta(self, control_vec):
+
         """
-        根据末端 (x, y, theta) 计算最后两个节点的坐标：
-          node_{N-1} = (x, y)
-          node_{N-2} = (x - cos(theta)*deltaL, y - sin(theta)*deltaL)
-        返回顺序与原 get_position 一致: [Xn_2, Yn_2, Xn_1, Yn_1]
+          node_0 = (x_l, y_l)
+          node_1 = (x_l + np.cos(th_l)*self.deltaL, y_l + np.sin(th_l)*self.deltaL)
+          ...
+          node_{N-1} = (x_r, y_r)
+          node_{N-2} = (x_r - np.cos(th_r)*self.deltaL, y_r - np.sin(th_r)*self.deltaL)
+        order: [node_0_x, node_0_y, node_1_x, node_1_y, ..., node_{N-2}_x, node_{N-2}_y, node_{N-1}_x, node_{N-1}_y]
         """
-        Xn_1 = x
-        Yn_1 = y
-        Xn_2 = x - np.cos(theta) * self.deltaL
-        Yn_2 = y - np.sin(theta) * self.deltaL
-        return np.array([Xn_2, Yn_2, Xn_1, Yn_1], dtype=float)
+        x_l, y_l, th_l, x_r, y_r, th_r = control_vec
+        
+        X_0 = x_l
+        Y_0 = y_l
+        X_1 = x_l + np.cos(th_l) * self.deltaL
+        Y_1 = y_l + np.sin(th_l) * self.deltaL
+        Xn_2 = x_r - np.cos(th_r) * self.deltaL
+        Yn_2 = y_r - np.sin(th_r) * self.deltaL
+        Xn_1 = x_r
+        Yn_1 = y_r
+        return np.array([X_0, Y_0, X_1, Y_1, Xn_2, Yn_2, Xn_1, Yn_1], dtype=float)
 
     def _get_midpoint(self):
         """返回当前中点的坐标 (midx, midy)。"""
@@ -490,7 +506,7 @@ class SimulatorEnv_2D:
             "midy": midy
         }
 
-    # ---------- 对外接口：reset / step / render ----------
+    # ---------- API ----------
 
     def reset(self,
               init_x=None,
@@ -524,7 +540,7 @@ class SimulatorEnv_2D:
         # 不在 reset 里做一步积分，只返回当前观测
         return self._get_observation()
 
-    def step(self, control):
+    def step(self, control, use_inertia=False):
         """
         单步仿真：
           control: (x, y, theta)，numpy 数组或可迭代
@@ -532,14 +548,16 @@ class SimulatorEnv_2D:
           obs, reward, done, info
         """
         control = np.asarray(control, dtype=float).flatten()
-        if control.shape[0] != 3:
-            raise ValueError("control must be a 3D vector: [x, y, theta].")
+        if control.shape[0] != 6:
+            raise ValueError("control must be a 6D vector: [x_l, y_l, th_l, x_r, y_r, th_r].")
 
-        x, y, theta = control
-        control_node = self._control_node_from_xytheta(x, y, theta)
+        # x, y, theta = control
+        control_node = self._control_node_from_xytheta(control)
+
+        self.lamda = self.current_step / self.Nsteps
 
         # 调用隐式积分器
-        q_new, flag = objfun(
+        q_new, flag, J = objfun(
             q_old=self.q,
             u_old=self.u,
             dt=self.dt,
@@ -553,6 +571,7 @@ class SimulatorEnv_2D:
             deltaL=self.deltaL,
             free_index=self.free_index,
             control_node=control_node,
+            use_inertia=use_inertia
         )
 
         # 更新速度、时间
@@ -564,15 +583,17 @@ class SimulatorEnv_2D:
 
         # 观测与误差
         obs = self._get_observation()
-
-        # 结束条件：时间用完或牛顿迭代失败
         done = (self.current_step >= self.Nsteps) or (flag < 0)
 
         info = {
             "converged": (flag > 0),
             "control": control,
             "q": self.q.copy(),
-            "u": self.u.copy()
+            "u": self.u.copy(),
+            "J": J,
+            "free_index": self.free_index.copy(),
+            "fixed_index": self.fixed_index.copy(),
+            "control_node": control_node.copy(),  # 8D 边界DOF
         }
 
         # 保存历史
@@ -618,3 +639,22 @@ class SimulatorEnv_2D:
 
         if show:
             plt.pause(0.01)
+
+if __name__ == "__main__":
+    # 简单测试环境
+    env = SimulatorEnv_2D(nv=31, dt=0.01, rod_length=1.0, total_time=10.0, save_history=False)
+    obs = env.reset()
+
+    done = False
+    while not done:
+        t = obs["time"]
+        x_target = env.rod_length
+        y_target = 0.1 * np.sin(2 * np.pi * 0.5 * t)
+        theta_target = 0.0
+        control = np.array([0.0, - y_target, theta_target, x_target, y_target, theta_target])
+
+        obs, done, info = env.step(control)
+        env.render(show=True)
+
+    print("Simulation finished.")
+

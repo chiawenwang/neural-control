@@ -1,2 +1,2 @@
 # neural-control
-Neural control in DLO
+Neural control in DLO manipulation
