@@ -1,3 +1,7 @@
+### Pre-processing pictures
+### Using tools on https://automeris.io/ to extract dots along the elastic beams from real-world pictures
+### This programs constructs the elastic beam shape from dots and converts it to a Nx2 matrix
+
 import cv2
 import numpy as np
 from scipy.interpolate import splprep, splev
@@ -97,7 +101,7 @@ def process_curve_configuration(image_path, real_width_cm, real_height_cm, targe
     if len(pixel_points) < 2:
         raise ValueError("Not enough red points detected.")
 
-    # --- 2. Path Tracing) ---
+    # --- 2. Path Tracing ---
     median_step = calculate_median_step(pixel_points)
 
     D = squareform(pdist(pixel_points))
