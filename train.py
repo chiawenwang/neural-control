@@ -142,7 +142,7 @@ def main():
         J_last = None
         info_last = None
 
-        # 每个 epoch 从同一个初始状态开始（同伦从 λ=0 走到 1）
+        # reset, from λ=0 to 1
         env.reset()
 
         # 当前控制 u (torch)
