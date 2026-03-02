@@ -295,7 +295,7 @@ class NeuralControlAgent:
         }
 
 
-def visualize_results(results, env, target_pos, save_path='/mnt/user-data/outputs'):
+def visualize_results(results, env, target_pos, save_path='img'):
     """Visualize results"""
     final_q = results['final_q']
     x_arr = final_q[::2]

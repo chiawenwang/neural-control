@@ -171,8 +171,9 @@ def process_curve_configuration(image_path, real_width_cm, real_height_cm, targe
     
     return output_data
 
+if __name__ == "__main__":
 # Example configurations:
-# process_curve_configuration("config_1.png", 5.5, 20.5)
+    process_curve_configuration("config_1.png", 5.5, 20.5)
 # process_curve_configuration("config_2.png", 16.0, 13.0)
 # process_curve_configuration("config_3.png", 16.5, 5.5)
 # process_curve_configuration("config_4.png", 22.0, 3.0)
