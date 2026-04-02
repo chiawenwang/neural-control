@@ -33,7 +33,7 @@ class StatefulTangentOperator:
     Exact adjoint cost:   O(n_f^3)   per query (full solve each time)
     """
 
-    def __init__(self, kappa_abs=1e6, kappa_ratio=3.0, max_reuse=1000):
+    def __init__(self, kappa_abs=1e6, kappa_ratio=3.0, max_reuse=1000): # Determine the thresholds based on...?
         self.kappa_abs   = kappa_abs
         self.kappa_ratio = kappa_ratio
         self.max_reuse   = max_reuse
@@ -59,8 +59,7 @@ class StatefulTangentOperator:
     # ------------------------------------------------------------------
     def initialise(self, J_full, free_index, fixed_index, control_6d, deltaL):
         """
-        Cache the implicit adjoint operator at a converged equilibrium.
-
+        Extract an implicit adjoint operator at a converged equilibrium.
         Args:
             J_full:      full Jacobian (ndof x ndof) from Newton solver
             free_index:  array of free DOF indices
@@ -73,11 +72,18 @@ class StatefulTangentOperator:
         self._free_idx  = free_index.copy()
         self._fixed_idx = fixed_index.copy()
 
-        J_ff = J_full[np.ix_(free_index, free_index)]
-        self._J_fb = J_full[np.ix_(free_index, fixed_index)].copy()
+        #Extract Jacobian sub-blocks
+        J_ff = J_full[np.ix_(free_index, free_index)] # (n_f × n_f)
+
+        # Check for NaN/Inf before any linear algebra
+        if not np.all(np.isfinite(J_ff)):
+            self._valid = False
+            return False
+
+        self._J_fb = J_full[np.ix_(free_index, fixed_index)].copy() # (n_f × 8)
 
         # boundary_node_jacobian from implicit_grad_tools: (8, 6)
-        self._J_map = boundary_node_jacobian(control_6d, deltaL)
+        self._J_map = boundary_node_jacobian(control_6d, deltaL) # Go to 6D control space
 
         # invert J_ff^T
         J_ff_T = J_ff.T.copy()
@@ -88,7 +94,11 @@ class StatefulTangentOperator:
             return False
 
         # condition number via SVD
-        s = np.linalg.svd(J_ff, compute_uv=False)
+        try:
+            s = np.linalg.svd(J_ff, compute_uv=False)
+        except np.linalg.LinAlgError:
+            self._valid = False
+            return False
         self._kappa = s[0] / max(s[-1], 1e-30)
 
         self._valid = True
@@ -100,15 +110,17 @@ class StatefulTangentOperator:
     # APPLY — cached tangent operator: a_free -> g_u (6D)
     # ------------------------------------------------------------------
     def _apply_cached(self, a_free):
+
+        v      = self._J_ff_T_inv @ a_free       # (n_f,), O(n_f^2)
+        g_qb   = -(self._J_fb.T @ v)             # (8,), O(n_f * 8)
+        g_u    = self._J_map.T @ g_qb            # (6,), O(8 * 6)
+
         """
-        Compute gradient from cache (no linear solve).
-            v      = J_ff^{-T} a_free          O(n_f^2)
-            g_qb   = -J_fb^T v                 O(n_f * 8)
-            g_u    = J_map^T g_qb              O(8 * 6)
+        In implicit_grad_tools:
+        v    = np.linalg.solve(J_ff.T, a_free)   # ← O(n_f^3) linear solve
+        g_qb = -(J_fb.T @ v)                     #
+        g_u  = J_map.T @ g_qb                    # 
         """
-        v      = self._J_ff_T_inv @ a_free       # (n_f,)
-        g_qb   = -(self._J_fb.T @ v)             # (8,)
-        g_u    = self._J_map.T @ g_qb            # (6,)
 
         self.n_cached   += 1
         self._reuse_cnt += 1
@@ -127,17 +139,19 @@ class StatefulTangentOperator:
         if not self._valid:
             return False, np.inf, "already_invalid"
 
+        # Extract J_ff and compute condition number (with NaN/SVD protection)
+        J_ff_new = J_full_new[np.ix_(self._free_idx, self._free_idx)]
+        if not np.all(np.isfinite(J_ff_new)):
+            return False, np.inf, "J_ff contains NaN/Inf"
+        try:
+            s = np.linalg.svd(J_ff_new, compute_uv=False)
+        except np.linalg.LinAlgError:
+            return False, np.inf, "SVD did not converge"
+        kappa_new = s[0] / max(s[-1], 1e-30)
+
         # max reuse exceeded
         if self._reuse_cnt >= self.max_reuse:
-            J_ff_new = J_full_new[np.ix_(self._free_idx, self._free_idx)]
-            s = np.linalg.svd(J_ff_new, compute_uv=False)
-            kappa_new = s[0] / max(s[-1], 1e-30)
             return False, kappa_new, f"max_reuse={self.max_reuse} reached"
-
-        # compute new condition number
-        J_ff_new = J_full_new[np.ix_(self._free_idx, self._free_idx)]
-        s = np.linalg.svd(J_ff_new, compute_uv=False)
-        kappa_new = s[0] / max(s[-1], 1e-30)
 
         # absolute threshold
         if kappa_new > self.kappa_abs:
