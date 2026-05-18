@@ -2,6 +2,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+from render_neurips import render_dlo_neurips
+
 ############################
 
 def crossMat(a):
@@ -465,7 +467,11 @@ class SimulatorEnv_2D:
             "error": [],
             "control": [],
             "midx": [],
-            "midy": []
+            "midy": [],
+            "q1x": [],
+            "q1y": [],
+            "q3x": [],
+            "q3y": [],
         }
 
     # ---------- inner tools ----------
@@ -604,6 +610,12 @@ class SimulatorEnv_2D:
             self.history["control"].append(control.copy())
             self.history["midx"].append(obs["midx"])
             self.history["midy"].append(obs["midy"])
+            q1 = self.nv // 4
+            q3 = 3 * self.nv // 4
+            self.history["q1x"].append(self.q[2 * q1])
+            self.history["q1y"].append(self.q[2 * q1 + 1])
+            self.history["q3x"].append(self.q[2 * q3])
+            self.history["q3y"].append(self.q[2 * q3 + 1])
 
         return obs, done, info
 
@@ -644,20 +656,54 @@ class SimulatorEnv_2D:
             plt.pause(0.01)
 
 if __name__ == "__main__":
-    # 简单测试环境
-    env = SimulatorEnv_2D(nv=31, dt=0.01, rod_length=1.0, total_time=10.0, save_history=False)
-    obs = env.reset()
+    # =========================================================
+    # 用户配置区
+    # =========================================================
+    L = 1.0          # 杆长（m），与 rod_length 保持一致
+    T = 10.0         # 总仿真时长（s）
+
+    # --- 初始位形 [x_l, y_l, th_l, x_r, y_r, th_r] ---
+    start_pos = [0.0, 0.0, np.pi/2,   # 左端：位置(0,0)，角度0
+                 0.7*L, 0.6*L, 0.0]   # 右端：位置(L,0)，角度0
+
+    # --- 控制轨迹：关于时间 t 的函数，返回 6D 向量 ---
+    def control_traj(t):
+        """
+        在整个仿真时间 [0, T] 内定义控制输入。
+        返回 [x_l, y_l, th_l, x_r, y_r, th_r]。
+        左端固定，右端沿正弦轨迹运动。
+        """
+        x_l  = start_pos[0]
+        y_l  = start_pos[1]
+        th_l = start_pos[2]
+
+        x_r  = start_pos[3] - 1.2 * L * (t / T)  # 从0.7L线性移动到-0.9L
+        y_r  = start_pos[4]
+        th_r = 0.0
+
+        return np.array([x_l, y_l, th_l, x_r, y_r, th_r])
+
+    # =========================================================
+    # 仿真主循环（一般不需要修改以下部分）
+    # =========================================================
+    env = SimulatorEnv_2D(nv=31, dt=0.01, rod_length=L,
+                          R_outer=0.003, r_inner=0.0,
+                          E_al=2e9, rho_al=1200,
+                          total_time=T, save_history=True)
+
+    obs = env.reset(init_x=start_pos[3],
+                    init_y=start_pos[4],
+                    init_theta=start_pos[5])
 
     done = False
     while not done:
         t = obs["time"]
-        x_target = env.rod_length
-        y_target = 0.1 * np.sin(2 * np.pi * 0.5 * t)
-        theta_target = 0.0
-        control = np.array([0.0, - y_target, theta_target, x_target, y_target, theta_target])
+        control = control_traj(t)
 
         obs, done, info = env.step(control)
-        env.render(show=True)
+        render_dlo_neurips(env, control=control, show=True,
+                           xlim=(-0.9 * L, 0.9 * L),
+                           ylim=(-0.15 * L,  0.75 * L))
 
     print("Simulation finished.")
 

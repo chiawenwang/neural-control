@@ -1,0 +1,109 @@
+<mujoco model="dlo_reaching">
+  <compiler angle="radian" coordinate="local"/>
+
+  <option timestep="0.002" iterations="50" solver="Newton" tolerance="1e-10"/>
+
+  <default>
+    <joint damping="0.1"/>
+    <geom contype="1" conaffinity="1" condim="3" friction="0.8 0.1 0.1"/>
+  </default>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.8 0.9 1.0" rgb2="0.4 0.6 0.9" width="512" height="512"/>
+    <texture name="floor_tex" type="2d" builtin="checker" rgb1="0.7 0.7 0.7" rgb2="0.5 0.5 0.5" width="512" height="512"/>
+    <material name="floor_mat" texture="floor_tex" texrepeat="4 4" reflectance="0.1"/>
+    <material name="rope_mat" rgba="0.8 0.4 0.1 1"/>
+    <material name="goal_mat"  rgba="0.0 0.9 0.3 0.6"/>
+  </asset>
+
+  <worldbody>
+    <!-- Floor -->
+    <geom name="floor" type="plane" size="2 2 0.1" material="floor_mat" pos="0 0 0"/>
+
+    <!-- Goal marker (small sphere at target position) -->
+    <body name="goal_body" pos="0.3 0.0 0.3">
+      <geom name="goal_geom" type="sphere" size="0.02" material="goal_mat" contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- Fixed anchor for the free end of the rope -->
+    <body name="rope_anchor" pos="0.35 0.0 0.05">
+      <geom type="sphere" size="0.015" rgba="0.8 0.2 0.2 1" contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- Simple 2-DOF planar arm: shoulder + elbow -->
+    <body name="base" pos="0 0 0">
+      <geom type="cylinder" size="0.04 0.05" rgba="0.4 0.4 0.4 1"/>
+      <body name="upper_arm" pos="0 0 0.05">
+        <joint name="shoulder" type="hinge" axis="0 0 1" range="-3.14 3.14"/>
+        <geom type="capsule" fromto="0 0 0 0.25 0 0" size="0.025" rgba="0.5 0.5 0.7 1"/>
+        <body name="lower_arm" pos="0.25 0 0">
+          <joint name="elbow" type="hinge" axis="0 0 1" range="-2.8 2.8"/>
+          <geom type="capsule" fromto="0 0 0 0.2 0 0" size="0.02" rgba="0.5 0.5 0.7 1"/>
+          <!-- Gripper (one end of rope attached here) -->
+          <body name="gripper" pos="0.2 0 0">
+            <geom type="sphere" size="0.025" rgba="0.3 0.3 0.8 1"/>
+            <!-- Rope: 8 segments connected by ball joints -->
+            <!-- Segment 0 (attached to gripper) -->
+            <body name="rope_0" pos="0 0 0">
+              <joint name="rj0x" type="hinge" axis="1 0 0" range="-1.57 1.57" damping="0.05"/>
+              <joint name="rj0y" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.05"/>
+              <geom type="capsule" fromto="0 0 0 0.05 0 0" size="0.008" material="rope_mat"/>
+              <body name="rope_1" pos="0.05 0 0">
+                <joint name="rj1x" type="hinge" axis="1 0 0" range="-1.57 1.57" damping="0.05"/>
+                <joint name="rj1y" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.05"/>
+                <geom type="capsule" fromto="0 0 0 0.05 0 0" size="0.008" material="rope_mat"/>
+                <body name="rope_2" pos="0.05 0 0">
+                  <joint name="rj2x" type="hinge" axis="1 0 0" range="-1.57 1.57" damping="0.05"/>
+                  <joint name="rj2y" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.05"/>
+                  <geom type="capsule" fromto="0 0 0 0.05 0 0" size="0.008" material="rope_mat"/>
+                  <!-- MIDPOINT (segment 3 = rope middle) -->
+                  <body name="rope_mid" pos="0.05 0 0">
+                    <joint name="rj3x" type="hinge" axis="1 0 0" range="-1.57 1.57" damping="0.05"/>
+                    <joint name="rj3y" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.05"/>
+                    <geom type="capsule" fromto="0 0 0 0.05 0 0" size="0.010" material="rope_mat" rgba="1.0 0.2 0.2 1"/>
+                    <site name="mid_site" pos="0.025 0 0" size="0.012"/>
+                    <body name="rope_4" pos="0.05 0 0">
+                      <joint name="rj4x" type="hinge" axis="1 0 0" range="-1.57 1.57" damping="0.05"/>
+                      <joint name="rj4y" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.05"/>
+                      <geom type="capsule" fromto="0 0 0 0.05 0 0" size="0.008" material="rope_mat"/>
+                      <body name="rope_5" pos="0.05 0 0">
+                        <joint name="rj5x" type="hinge" axis="1 0 0" range="-1.57 1.57" damping="0.05"/>
+                        <joint name="rj5y" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.05"/>
+                        <geom type="capsule" fromto="0 0 0 0.05 0 0" size="0.008" material="rope_mat"/>
+                        <body name="rope_6" pos="0.05 0 0">
+                          <joint name="rj6x" type="hinge" axis="1 0 0" range="-1.57 1.57" damping="0.05"/>
+                          <joint name="rj6y" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.05"/>
+                          <geom type="capsule" fromto="0 0 0 0.05 0 0" size="0.008" material="rope_mat"/>
+                          <!-- Free end of rope -->
+                          <body name="rope_end" pos="0.05 0 0">
+                            <geom type="sphere" size="0.01" rgba="0.2 0.2 0.8 1"/>
+                          </body>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <equality>
+    <!-- Weld the free end of the rope to the fixed anchor -->
+    <weld body1="rope_end" body2="rope_anchor" relpose="0 0 0 1 0 0 0" solimp="0.9 0.95 0.001" solref="0.02 1"/>
+  </equality>
+
+  <actuator>
+    <!-- Position-controlled joints for smooth control -->
+    <position name="act_shoulder" joint="shoulder" kp="20" ctrlrange="-3.14 3.14"/>
+    <position name="act_elbow"    joint="elbow"    kp="20" ctrlrange="-2.8  2.8"/>
+  </actuator>
+
+  <sensor>
+    <framepos name="mid_pos"  objtype="site" objname="mid_site"/>
+    <framepos name="goal_pos" objtype="body" objname="goal_body"/>
+  </sensor>
+</mujoco>
