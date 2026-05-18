@@ -1,4 +1,11 @@
 # -*- coding: utf-8 -*-
+import sys
+from pathlib import Path
+_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_ROOT / 'src'))
+_OUT = _ROOT / 'outputs'
+_OUT.mkdir(exist_ok=True)
+
 """
 DLO 实时仿真 + 快照叠加
 
@@ -400,7 +407,7 @@ def _plot_theta_H_curve(theta_hist, H_hist, traj_name):
 
     fig.tight_layout()
 
-    out = f'theta_H_{traj_name}'
+    out = str(_OUT / f'theta_H_{traj_name}')
     fig.savefig(f'{out}.png', dpi=200, bbox_inches='tight')
     fig.savefig(f'{out}.pdf', bbox_inches='tight')
     print(f'Saved: {out}.png / .pdf')
@@ -489,7 +496,7 @@ def run_simulation(traj: Trajectory, show_snaps: bool = True, show_trails: bool 
     print("Simulation finished.")
 
     plt.ioff()
-    out_base = f'snapshot_overlay_{traj.name}'
+    out_base = str(_OUT / f'snapshot_overlay_{traj.name}')
     # add a single colorbar for curvature (left plot) after simulation
     if show_snaps and frozen_snaps:
         try:

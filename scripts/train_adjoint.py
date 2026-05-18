@@ -1,3 +1,8 @@
+import sys
+from pathlib import Path
+_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_ROOT / 'src'))
+
 import numpy as np
 import os
 import torch
@@ -5,12 +10,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-import matplotlib.pyplot as plt  # ← 新增
+import matplotlib.pyplot as plt
 import argparse
 
 from SimulatorEnv_2D import SimulatorEnv_2D
 from implicit_grad_tools import implicit_final_control_grad
-
 from utils import visualize_results
 
 
@@ -102,8 +106,9 @@ def main():
     net = BoundaryVelocityNet(hidden=64).to(device)
     opt = optim.Adam(net.parameters(), lr=1e-3)
 
-    writer = SummaryWriter(log_dir="runs/dlo_final_shape")
-    os.makedirs("runs/dlo_final_shape", exist_ok=True)
+    _log_dir = str(_ROOT / 'experiments' / 'dlo_final_shape')
+    os.makedirs(_log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir=_log_dir)
 
     print("Network structure:")
     print(net)
@@ -210,9 +215,8 @@ def main():
         'all_losses': [l for _, l in loss_history],
     }
     # visualize the results
-    visualize_results(results, env, target_xy)
+    visualize_results(results, env, target_xy, save_path=str(_ROOT / 'outputs'))
 
-    # ← 新增：绘制并保存 loss 曲线
     if loss_history:
         eps, losses = zip(*loss_history)
         fig, ax = plt.subplots(figsize=(8, 4))
@@ -222,7 +226,7 @@ def main():
         ax.set_title("Training Loss Curve")
         ax.grid(True, linestyle="--", alpha=0.5)
         fig.tight_layout()
-        save_path = "runs/dlo_final_shape/loss_curve.png"
+        save_path = str(_ROOT / 'experiments' / 'dlo_final_shape' / 'loss_curve.png')
         fig.savefig(save_path, dpi=150)
         plt.close(fig)
         print(f"Loss curve saved to: {save_path}")

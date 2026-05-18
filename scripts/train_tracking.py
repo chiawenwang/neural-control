@@ -1,3 +1,8 @@
+import sys
+from pathlib import Path
+_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_ROOT / 'src'))
+
 import numpy as np
 import os
 import torch
@@ -130,8 +135,9 @@ def main():
     net = BoundaryVelocityNet(hidden=64).to(device)
     opt = optim.Adam(net.parameters(), lr=1e-3)
 
-    os.makedirs("runs/dlo_tracking", exist_ok=True)
-    writer = SummaryWriter(log_dir="runs/dlo_tracking")
+    _log_dir = str(_ROOT / 'experiments' / 'dlo_tracking')
+    os.makedirs(_log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir=_log_dir)
 
     print("Network structure:")
     print(net)
@@ -273,9 +279,9 @@ def main():
         ax.set_title(f"Tracking Loss ({args.traj})")
         ax.grid(True, linestyle="--", alpha=0.5)
         fig.tight_layout()
-        fig.savefig("runs/dlo_tracking/loss_curve.png", dpi=150)
+        fig.savefig(str(_ROOT / 'experiments' / 'dlo_tracking' / 'loss_curve.png'), dpi=150)
         plt.close(fig)
-        print("Loss curve → runs/dlo_tracking/loss_curve.png")
+        print(f"Loss curve → {_ROOT / 'experiments' / 'dlo_tracking' / 'loss_curve.png'}")
 
     # 最终轨迹可视化
     _visualize_tracking(env, net, u0, N, dlam, targets, device, args.traj)
@@ -312,9 +318,9 @@ def _visualize_tracking(env, net, u0, N, dlam, targets, device, traj_type):
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.4)
     fig.tight_layout()
-    fig.savefig("runs/dlo_tracking/tracking_result.png", dpi=150)
+    fig.savefig(str(_ROOT / 'experiments' / 'dlo_tracking' / 'tracking_result.png'), dpi=150)
     plt.close(fig)
-    print("Tracking result → runs/dlo_tracking/tracking_result.png")
+    print(f"Tracking result → {_ROOT / 'experiments' / 'dlo_tracking' / 'tracking_result.png'}")
 
 
 if __name__ == "__main__":

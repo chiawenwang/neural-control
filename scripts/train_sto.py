@@ -1,3 +1,8 @@
+import sys
+from pathlib import Path
+_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_ROOT / 'src'))
+
 import numpy as np
 import os
 import torch
@@ -113,9 +118,9 @@ def main():
     net = BoundaryVelocityNet(hidden=64).to(device)
     opt = optim.Adam(net.parameters(), lr=1e-3)
 
-    log_dir = "runs/dlo_final_shape"
-    writer = SummaryWriter(log_dir=log_dir)
+    log_dir = str(_ROOT / 'experiments' / 'dlo_final_shape')
     os.makedirs(log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir=log_dir)
 
     # -----------------------------
     # 4) STO
@@ -277,7 +282,7 @@ def main():
         'final_error': float(L_np ** 0.5) if L_np is not None else float('inf'),
         'all_losses': [l for _, l in loss_history],
     }
-    visualize_results(results, env, target_xy)
+    visualize_results(results, env, target_xy, save_path=str(_ROOT / 'outputs'))
 
     # Loss curve
     if loss_history:

@@ -78,31 +78,59 @@ The controller successfully drives the midpoint from (0.50, 0.00) to near the ta
 ✅ **Multi-stability handling**: Warm-started solver follows realized equilibrium branch
 ✅ **Smooth actuation**: Incremental boundary control for numerical stability
 
-## Code Structure
+## Project Structure
 
 ```
-neural_control_simple.py          # Main implementation (recommended)
-├── SimpleController              # Polynomial controller u(λ)
-├── CMAESOptimizer               # Evolution strategy optimizer
-├── NeuralControlAgent           # Main agent class
-│   ├── forward_rollout()        # Execute trajectory with equilibrium solves
-│   ├── compute_loss()           # Terminal loss ||p_mid - p_target||²
-│   ├── train_segment()          # Optimize one RHC segment
-│   └── run_rhc()                # Full receding horizon loop
-└── visualize_results()          # Generate plots
-
-neural_control_numpy.py           # Full adjoint implementation (slower)
-└── AdjointSolver                # Implicit differentiation (numerical)
+neural-control/
+├── src/                        # Core library
+│   ├── SimulatorEnv_2D.py      # Elastic rod physics simulator
+│   ├── implicit_grad_tools.py  # Adjoint/implicit gradient tools
+│   ├── sto_simulation.py       # Stateful Tangent Operator (STO)
+│   ├── render_neurips.py       # NeurIPS-style DLO renderer
+│   └── utils.py                # Shared visualization utilities
+│
+├── scripts/                    # Entry-point scripts (run from neural-control/)
+│   ├── train_adjoint.py        # Task 1: adjoint-based gradient training
+│   ├── train_cmaes.py          # Task 1: CMA-ES evolution strategy (recommended)
+│   ├── train_tracking.py       # Task 2: trajectory tracking
+│   ├── train_sto.py            # Task 1: STO-accelerated adjoint training
+│   ├── snapshot_overlay.py     # DLO snapshot visualization
+│   └── test_gpu.py             # MPS/GPU availability check
+│
+├── experiments/                # TensorBoard logs (auto-created at runtime)
+├── outputs/                    # Generated figures and PDFs
+├── toy_case/                   # Toy-case analysis and figures
+├── preprocessing/              # Robot data preprocessing (Sawyer ee/force data)
+├── rl_based/                   # RL baseline (MuJoCo DLO environment)
+└── img/                        # README images
 ```
 
 ## Usage
 
-```python
-# Run the main script
-python neural_control_simple.py
+```bash
+# Run from the neural-control/ directory
 
-# Or use programmatically:
-from neural_control_simple import NeuralControlAgent, SimulatorEnv_2D
+# Task 1: point-to-point (CMA-ES, recommended)
+python scripts/train_cmaes.py
+
+# Task 1: adjoint-based gradient
+python scripts/train_adjoint.py --epochs 200
+
+# Task 1: STO-accelerated adjoint
+python scripts/train_sto.py --epochs 200 --kappa_abs 1e6
+
+# Task 2: trajectory tracking
+python scripts/train_tracking.py --epochs 300 --traj circle
+
+# DLO snapshot visualization
+python scripts/snapshot_overlay.py --traj angle_oscillation
+```
+
+```python
+# Programmatic usage
+import sys; sys.path.insert(0, 'src')
+from SimulatorEnv_2D import SimulatorEnv_2D
+from scripts.train_cmaes import NeuralControlAgent
 
 env = SimulatorEnv_2D(nv=15, dt=0.01, rod_length=1.0, total_time=1.0)
 agent = NeuralControlAgent(env, segment_horizon=6, degree=3)
