@@ -2,7 +2,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from render_neurips import render_dlo_neurips
+try:
+    from render_neurips import render_dlo_neurips
+except ImportError:
+    render_dlo_neurips = None
+
+from contact import get_contact_forces
+from matplotlib.patches import Circle
 
 ############################
 
@@ -328,7 +334,8 @@ def getFb(q, EI, deltaL):
 def objfun(q_old, u_old, dt, tol, maximum_iter,
            m, mMat, EI, EA, W, deltaL, free_index,
            control_node=None,
-           use_inertia=False):
+           use_inertia=False,
+           obstacles=None):
     """
     单步隐式时间积分（Newton-Raphson）
     """
@@ -357,8 +364,10 @@ def objfun(q_old, u_old, dt, tol, maximum_iter,
         F_elastic = Fs + Fb
         J_elastic = Js + Jb
 
-        f = F_inertia - F_elastic - W
-        J = J_inertia - J_elastic
+        Fc, Jc = get_contact_forces(q_new, obstacles or [])
+
+        f = F_inertia - F_elastic - Fc - W
+        J = J_inertia - J_elastic - Jc
 
         f_free = f[free_index]
         J_free = J[np.ix_(free_index, free_index)]
@@ -455,6 +464,8 @@ class SimulatorEnv_2D:
 
         self.dlamda = 1 / self.Nsteps
 
+        self.obstacles = []
+
         # 状态变量（在 reset 中初始化）
         self.q = None
         self.u = None
@@ -473,6 +484,20 @@ class SimulatorEnv_2D:
             "q3x": [],
             "q3y": [],
         }
+
+    # ---------- obstacle management ----------
+
+    def add_obstacle(self, obstacle):
+        """Add a rigid circular obstacle to the simulation."""
+        self.obstacles.append(obstacle)
+
+    def remove_obstacle(self, obstacle):
+        """Remove a specific obstacle from the simulation."""
+        self.obstacles.remove(obstacle)
+
+    def clear_obstacles(self):
+        """Remove all obstacles."""
+        self.obstacles.clear()
 
     # ---------- inner tools ----------
 
@@ -579,7 +604,8 @@ class SimulatorEnv_2D:
             deltaL=self.deltaL,
             free_index=self.free_index,
             control_node=control_node,
-            use_inertia=use_inertia
+            use_inertia=use_inertia,
+            obstacles=self.obstacles
         )
 
         # 更新速度、时间
@@ -619,7 +645,8 @@ class SimulatorEnv_2D:
 
         return obs, done, info
 
-    def render(self, saveimg = False, show_target=True, show=True, ax=None):
+    def render(self, saveimg=False, show_target=True, show=True, ax=None,
+               xlim=None, ylim=None):
         """
         可视化当前杆的形状。
         """
@@ -644,9 +671,14 @@ class SimulatorEnv_2D:
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.axis('equal')
-        ax.set_xlim(-0.2, self.rod_length + 0.3)
-        ax.set_ylim(-1.0, 1.0)
+        ax.set_xlim(*(xlim if xlim else (-0.2, self.rod_length + 0.3)))
+        ax.set_ylim(*(ylim if ylim else (-1.0, 1.0)))
         ax.legend()
+
+        for obs in self.obstacles:
+            patch = Circle((obs.cx, obs.cy), obs.radius,
+                           color='steelblue', alpha=0.55, zorder=5)
+            ax.add_patch(patch)
 
         if saveimg:
             plt.savefig(f'imgs/render_{self.ctime:.3f}.png')
@@ -656,54 +688,81 @@ class SimulatorEnv_2D:
             plt.pause(0.01)
 
 if __name__ == "__main__":
-    # =========================================================
-    # 用户配置区
-    # =========================================================
-    L = 1.0          # 杆长（m），与 rod_length 保持一致
-    T = 10.0         # 总仿真时长（s）
-
-    # --- 初始位形 [x_l, y_l, th_l, x_r, y_r, th_r] ---
-    start_pos = [0.0, 0.0, np.pi/2,   # 左端：位置(0,0)，角度0
-                 0.7*L, 0.6*L, 0.0]   # 右端：位置(L,0)，角度0
-
-    # --- 控制轨迹：关于时间 t 的函数，返回 6D 向量 ---
-    def control_traj(t):
-        """
-        在整个仿真时间 [0, T] 内定义控制输入。
-        返回 [x_l, y_l, th_l, x_r, y_r, th_r]。
-        左端固定，右端沿正弦轨迹运动。
-        """
-        x_l  = start_pos[0]
-        y_l  = start_pos[1]
-        th_l = start_pos[2]
-
-        x_r  = start_pos[3] - 1.2 * L * (t / T)  # 从0.7L线性移动到-0.9L
-        y_r  = start_pos[4]
-        th_r = 0.0
-
-        return np.array([x_l, y_l, th_l, x_r, y_r, th_r])
+    from contact import CircleObstacle
 
     # =========================================================
-    # 仿真主循环（一般不需要修改以下部分）
+    # Contact demo: rigid ball moves downward and deforms a
+    # horizontally pinned elastic rod.
     # =========================================================
+    L = 1.0   # rod length (m)
+    T = 6.0   # total simulation time (s)
+
+    r_ball    = 0.07 * L   # ball radius
+    k_contact = 5e3        # penalty stiffness – tune relative to rod EI/L^2
+
     env = SimulatorEnv_2D(nv=31, dt=0.01, rod_length=L,
                           R_outer=0.003, r_inner=0.0,
                           E_al=2e9, rho_al=1200,
                           total_time=T, save_history=True)
 
-    obs = env.reset(init_x=start_pos[3],
-                    init_y=start_pos[4],
-                    init_theta=start_pos[5])
+    # Ball starts above the rod center and descends until it contacts and
+    # deforms the rod downward.
+    ball = CircleObstacle(cx=L / 2, cy=0.25, radius=r_ball,
+                          k_contact=k_contact)
+    env.add_obstacle(ball)
+
+    obs = env.reset()
+
+    x_r_start  = L          # natural (undeformed) right-end position
+    x_r_target = 0.9 * L   # compressed target position
+    t_ramp     = 0.3 * T   # ramp duration: reach target in first 30% of T
+
+    save_video = True          # set False to skip saving
+    video_path = "contact_simulation.gif"   # change to .mp4 after: pip install imageio[ffmpeg]
+    fps        = min(25, int(1.0 / env.dt))  # match simulation timestep
+    frames     = []
 
     done = False
     while not done:
         t = obs["time"]
-        control = control_traj(t)
+
+        # Gradually move right end from L → 0.9L during the ramp phase,
+        # then hold at target.  This avoids a cold-start discontinuity.
+        alpha = min(t / t_ramp, 1.0)
+        x_r = x_r_start + alpha * (x_r_target - x_r_start)
+
+        control = np.array([0.0, 0.0, 0.0,   # left:  pos (0, 0), angle 0
+                             x_r, 0.0, 0.0])  # right: ramped to 0.9L
+
+        # Ball rises from y = -0.25 to y = 0.20 over the simulation
+        cy_new = -0.25 + 0.25 * (t / T)
+        ball.move_to(L / 2, cy_new)
 
         obs, done, info = env.step(control)
-        render_dlo_neurips(env, control=control, show=True,
-                           xlim=(-0.9 * L, 0.9 * L),
-                           ylim=(-0.15 * L,  0.75 * L))
+        env.render(show=True,
+                   xlim=(-0.1 * L, 1.1 * L),
+                   ylim=(-0.35, 0.35))
 
-    print("Simulation finished.")
+        if save_video:
+            env.fig.canvas.draw()
+            frame = np.asarray(env.fig.canvas.buffer_rgba())[:, :, :3].copy()
+            frames.append(frame)
+
+    print("Contact simulation finished.")
+
+    if save_video and frames:
+        print(f"Saving animation ({len(frames)} frames @ {fps} fps)...")
+        try:
+            import imageio
+            imageio.mimsave(video_path, frames, fps=fps)
+            print(f"Saved MP4: {video_path}")
+        except ImportError:
+            # Fallback: save as GIF using Pillow
+            from PIL import Image
+            gif_path = video_path.replace(".mp4", ".gif")
+            imgs = [Image.fromarray(f) for f in frames]
+            imgs[0].save(gif_path, save_all=True, append_images=imgs[1:],
+                         loop=0, duration=int(1000 / fps))
+            print(f"Saved GIF: {gif_path}  (install imageio for MP4)")
+        plt.close("all")
 
