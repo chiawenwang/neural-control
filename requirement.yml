@@ -1,0 +1,15 @@
+name: neural-control
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.9
+  - numpy
+  - matplotlib
+  - tqdm
+  - pytorch
+  - pip
+  - pip:
+      - tensorboard
+      - cma
