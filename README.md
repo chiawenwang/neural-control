@@ -5,14 +5,10 @@ controlling deformable linear objects (DLOs, e.g. elastic rods/strips) whose
 state is defined *implicitly* by an equilibrium condition (`G(x, z) = 0`)
 rather than an explicit forward dynamics model.
 
-Paper: **"Neural Control: Adjoint Learning Through Equilibrium Constraints"**
-(<https://arxiv.org/abs/2605.03288>)
-
 This branch (`neural-control-core`) contains only the core method: the
 equilibrium simulator, the adjoint gradient tools, and the training scripts
 needed to reproduce the paper's point-to-point and trajectory-tracking
-tasks. Other approaches (RL baseline, STO acceleration variant, real-robot
-data preprocessing) live on other branches.
+tasks.
 
 ## How it works
 
