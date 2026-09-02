@@ -2,97 +2,54 @@
 
 A minimal, self-contained implementation of **Neural Control**, a method for
 controlling deformable linear objects (DLOs, e.g. elastic rods/strips) whose
-state is defined *implicitly* by an equilibrium condition rather than an
-explicit forward dynamics model.
+state is defined *implicitly* by an equilibrium condition (`G(x, z) = 0`)
+rather than an explicit forward dynamics model.
 
 Paper: **"Neural Control: Adjoint Learning Through Equilibrium Constraints"**
 (<https://arxiv.org/abs/2605.03288>)
 
-This branch (`neural-control-core`) intentionally strips out everything that
-is not the core method — no RL baselines, no STO acceleration variant, no
-robot-data preprocessing, no exploratory toy-case scripts. Those live on
-other branches. What remains here is the equilibrium simulator, the adjoint
-gradient tools, and the training/control scripts needed to reproduce the
-paper's point-to-point and trajectory-tracking tasks.
+This branch (`neural-control-core`) contains only the core method: the
+equilibrium simulator, the adjoint gradient tools, and the training scripts
+needed to reproduce the paper's point-to-point and trajectory-tracking
+tasks. Other approaches (RL baseline, STO acceleration variant, real-robot
+data preprocessing) live on other branches.
 
-## The problem
+## How it works
 
-Many physical systems (elastic rods, cloth, cables, contact-rich
-manipulation) don't have a convenient explicit dynamics update `x_{t+1} =
-f(x_t, u_t)`. Instead, given a boundary/control input `z` (e.g. the pose of
-the two ends of a rod), the internal configuration `x` is whatever satisfies
-a force/energy balance:
+Instead of unrolling the Newton-Raphson equilibrium solver to get gradients
+(expensive), Neural Control differentiates the equilibrium condition itself
+at the converged solution ("implicit adjoint" gradients), then trains a
+boundary-actuation controller with those gradients:
 
-```
-G(x, z) = 0
-```
-
-This is a root-finding (equilibrium) problem, not a one-step function
-evaluation. Two complications follow:
-
-1. **The system can be multistable.** The same boundary condition `z` can
-   correspond to several valid equilibria `x`; which one you end up in
-   depends on the actuation *history*, not just the current `z`.
-2. **Differentiating through the solver is expensive.** Backpropagating
-   through an iterative equilibrium solve (Newton-Raphson, in this case)
-   means unrolling every solver iteration.
-
-## The method
-
-**Neural Control** trains a boundary-actuation controller by differentiating
-the equilibrium condition directly (implicit/adjoint differentiation)
-instead of unrolling the solver, and uses receding-horizon continuation to
-keep training anchored to the equilibrium branch actually realized by the
-simulator.
-
-1. **Equilibrium-governed simulation** (`src/SimulatorEnv_2D.py`)
-   At every timestep, the elastic-rod configuration `x` (free/internal
-   nodes) is solved via Newton-Raphson given the current boundary condition
-   `z` (controlled end poses), warm-started from the previous equilibrium so
-   the solver tracks a *specific* branch rather than jumping between them.
-
-2. **Implicit adjoint gradients** (`src/implicit_grad_tools.py`)
-   Rather than backpropagating through the Newton-Raphson iterations, the
-   loss gradient w.r.t. the controls is obtained by differentiating the
-   equilibrium residual `G(x, z) = 0` at the converged solution:
-
-   ```
-   J_ff^T v = a_free          # adjoint solve at the converged equilibrium
-   g_qb     = -J_fb^T v       # gradient w.r.t. boundary DOFs
-   g_u      = (dq_b/du)^T g_qb  # chain rule to the actual control parameters
-   ```
-
-   where `J = dG/dx` is the equilibrium Jacobian, `a_free = dLoss/dx_free`,
-   and `q_b`/`u` are the boundary DOFs and control parameters respectively.
-   This avoids storing/unrolling the solver's inner iterations — only the
-   final converged Jacobian is needed ("frozen-tangent" adjoint).
-
-3. **Neural / parametric controller**
-   The controller `u(λ) = u_Θ(λ)` maps a continuation parameter `λ ∈ [0, 1]`
-   (progress through the current control horizon) to boundary actuation
-   rates. Two parameterizations are provided:
-   - an MLP (`scripts/train_adjoint.py`, `scripts/train_tracking.py`),
-     trained with the adjoint gradients above via gradient descent;
-   - a low-order polynomial (`scripts/train_cmaes.py`), trained
-     gradient-free with CMA-ES — simpler, more robust, no gradient
-     derivation needed per task, and the recommended starting point.
-
-4. **Receding-horizon control (RHC)**
-   A long control horizon is split into `M` shorter segments. Each segment
-   is optimized independently and warm-started from the end state of the
-   previous one, then executed before moving to the next. This bounds error
-   accumulation and prevents the optimizer from exploiting equilibrium
-   branches that the warm-started simulator wouldn't actually follow at
-   execution time.
+1. **`src/SimulatorEnv_2D.py`** — simulates the rod by solving for its
+   equilibrium at each timestep, warm-started from the previous step so the
+   solver stays on one equilibrium branch instead of jumping between them.
+2. **`src/implicit_grad_tools.py`** — computes the adjoint gradient of the
+   loss w.r.t. the controls, and chains per-step sensitivities across the
+   whole horizon (`multistep_adjoint_gradient()`) so every control step gets
+   credit/blame proportional to its own equilibrium Jacobian.
+3. **Controller** — maps a continuation parameter `λ ∈ [0, 1]` (progress
+   through the control horizon) to boundary actuation rates. Two options:
+   - MLP, trained with adjoint gradients (`train_adjoint.py`, `train_tracking.py`)
+   - low-order polynomial, trained gradient-free with CMA-ES
+     (`train_cmaes.py`) — simpler and the recommended starting point.
+4. **Receding-horizon control (RHC)** — optional (`rhc.enabled` in
+   `configs/default.yaml`). Splits the horizon into shorter segments,
+   optimized and committed one at a time, warm-started from the previous
+   segment's end state. Bounds error accumulation over long horizons.
+   `train_cmaes.py` always uses this scheme.
 
 ## Repository layout
 
 ```
 neural-control/
+├── configs/
+│   └── default.yaml            # Global config: rod/task/start pose/RHC/training params
 ├── src/
 │   ├── SimulatorEnv_2D.py      # Equilibrium (Newton-Raphson) rod simulator
 │   ├── contact.py              # Penalty-based obstacle contact forces (used by the simulator)
 │   ├── implicit_grad_tools.py  # Adjoint / implicit-gradient computation
+│   ├── config.py               # YAML config loader (deep-merges onto configs/default.yaml)
 │   ├── render_neurips.py       # DLO rendering utilities
 │   └── utils.py                # Result visualization
 ├── scripts/
@@ -113,7 +70,20 @@ conda activate neural-control
 ```
 
 or install directly with pip: `numpy`, `matplotlib`, `tqdm`, `torch`,
-`tensorboard`, `cma`.
+`tensorboard`, `cma`, `pyyaml`.
+
+## Configuration
+
+All three training scripts are driven by a single YAML config,
+[`configs/default.yaml`](configs/default.yaml). Edit it directly, or pass
+`--config path/to/your.yaml` with a file that only overrides the fields you
+care about (deep-merged onto the defaults). Key sections:
+
+- `rod` — physical/geometric parameters (node count, timestep, horizon, material)
+- `start` — initial boundary pose for both rod ends
+- `task` — task type (`point_to_point` / `tracking`) and target/trajectory
+- `rhc` — whether to use receding-horizon control, segment count, re-init policy
+- `train` — epochs, learning rate, network width, seed, device
 
 ## Usage
 
@@ -124,10 +94,13 @@ Run everything from the `neural-control/` directory.
 python scripts/train_cmaes.py
 
 # Task 1: point-to-point, full adjoint-gradient training
-python scripts/train_adjoint.py --epochs 200
+python scripts/train_adjoint.py
 
-# Task 2: trajectory tracking (circle by default)
-python scripts/train_tracking.py --epochs 300 --traj circle
+# Task 2: trajectory tracking (circle/figure8/line, set in configs/default.yaml)
+python scripts/train_tracking.py
+
+# Any of the above with a custom config
+python scripts/train_adjoint.py --config configs/my_experiment.yaml
 
 # Visualize a resulting trajectory as overlaid snapshots
 python scripts/snapshot_overlay.py --traj circle
@@ -160,15 +133,11 @@ iterations, final tracking error ≈ 0.0227 m.
 
 ![Neural Control result](img/neural_control_result.png)
 
-## Notes on this implementation vs. the paper
+## Notes vs. the paper
 
 - `train_cmaes.py` uses CMA-ES rather than the paper's analytical adjoint —
-  it's the simplest, most robust way to reproduce the qualitative result and
-  needs no per-task gradient derivation. `train_adjoint.py` and
-  `train_tracking.py` use the actual adjoint gradients described above.
-- The demo simulator uses 15 nodes rather than the paper's 101, for faster
-  iteration; `SimulatorEnv_2D`'s `nv` argument controls this.
-- Other approaches explored for this problem (an RL baseline, an accelerated
-  "Stateful Tangent Operator" variant, real-robot data preprocessing) are
-  kept out of this branch to keep the core method easy to read and run; see
-  other branches of this repository for those.
+  simplest way to reproduce the qualitative result with no per-task gradient
+  derivation. `train_adjoint.py` and `train_tracking.py` use the actual
+  adjoint gradients.
+- The demo simulator uses `nv` nodes (`configs/default.yaml`, `rod.nv`)
+  rather than the paper's 101, for faster iteration.

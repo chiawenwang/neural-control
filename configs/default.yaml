@@ -1,0 +1,60 @@
+# =============================================================================
+# Neural Control — global experiment configuration
+#
+# Edit this file (or pass --config path/to/your.yaml to any script in
+# scripts/) to change rod/task/RHC/training parameters without touching the
+# training code. A custom config file only needs to list the fields you want
+# to override — everything else falls back to the defaults below.
+# =============================================================================
+
+# Physical / geometric parameters of the manipulated object (elastic rod).
+rod:
+  nv: 51                 # number of discretization nodes along the rod
+  dt: 0.01                # simulation timestep [s]
+  total_time: 2.0          # horizon length [s] -> N = total_time / dt control steps
+  rod_length: 1.0          # undeformed rod length [m]
+  R_outer: 0.013           # outer radius of the (tube) cross-section [m]
+  r_inner: 0.011           # inner radius of the (tube) cross-section [m]
+  E_al: 70.0e+9             # Young's modulus [Pa]
+  rho_al: 2700              # material density [kg/m^3]
+  max_newton_iter: 1000    # max Newton-Raphson iterations per equilibrium solve
+
+# Initial boundary configuration (both rod ends).
+start:
+  init_x: null            # left end / rod initial x offset; null -> 0.0
+  init_y: 0.0
+  init_theta: 0.0
+  u_left: [0.0, 0.0, 0.0]     # left-end pose (x, y, theta) — held fixed throughout
+  u_right: [1.0, 0.0, 0.0]    # right-end initial pose (x, y, theta), i.e. u0[3:]
+
+# Control task definition.
+task:
+  type: point_to_point       # point_to_point (train_adjoint.py) | tracking (train_tracking.py)
+  target_xy: [0.2, 0.4]       # point_to_point: target position for the mid node
+  trajectory_type: circle     # tracking: circle | figure8 | line
+  track_w: 1.0                 # tracking: per-step loss weight
+
+# Receding-horizon control (RHC). When disabled, the whole horizon is
+# optimized as a single continuation segment (lambda in [0,1] over all N
+# steps) — this is Task 1 "point-to-point"/"tracking" without segmentation.
+# When enabled, the horizon is split into `num_segments` shorter chunks,
+# each solved to completion and warm-started from the previous segment's
+# end state, matching the paper's receding-horizon continuation control.
+rhc:
+  enabled: false
+  num_segments: 5
+  reinit_policy_each_segment: true   # fresh policy weights + optimizer per segment (as in the original submission)
+
+# Optimization / training.
+train:
+  epochs: 200                  # non-RHC mode: number of full-horizon training epochs
+  iterations_per_segment: 200  # RHC mode: gradient steps per segment
+  lr: 0.001
+  hidden: 64
+  seed: 42
+  device: auto                 # auto | cpu | cuda | mps
+  jac_reg: 1.0e-6               # equilibrium-Jacobian regularization for numerical stability
+
+# Output / logging.
+output:
+  experiment_name: dlo_final_shape

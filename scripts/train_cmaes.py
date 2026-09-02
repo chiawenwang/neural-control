@@ -11,6 +11,7 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / 'src'))
 
+import argparse
 import numpy as np
 from typing import Dict, List
 import matplotlib.pyplot as plt
@@ -18,6 +19,7 @@ import time
 
 from SimulatorEnv_2D import SimulatorEnv_2D
 from utils import visualize_results
+from config import load_config
 
 
 class SimpleController:
@@ -304,51 +306,65 @@ class NeuralControlAgent:
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default=None,
+                        help="Path to a YAML config overriding configs/default.yaml")
+    args = parser.parse_args()
+    cfg = load_config(args.config)
+
     print("="*60)
     print("Neural Control: Task 1 - Point-to-Point Manipulation")
     print("Simplified Implementation (CMA-ES)")
     print("="*60)
-    
+
     # Create environment
     print("\nInitializing environment...")
     env = SimulatorEnv_2D(
-        nv=15,  # Fewer nodes for speed
-        dt=0.01,
-        rod_length=1.0,
-        total_time=1.0,
-        save_history=False
+        nv=cfg.rod.nv,
+        dt=cfg.rod.dt,
+        rod_length=cfg.rod.rod_length,
+        total_time=cfg.rod.total_time,
+        R_outer=cfg.rod.R_outer,
+        r_inner=cfg.rod.r_inner,
+        E_al=cfg.rod.E_al,
+        rho_al=cfg.rod.rho_al,
+        max_newton_iter=cfg.rod.max_newton_iter,
+        save_history=False,
     )
-    
+    env.reset(init_x=cfg.start.init_x, init_y=cfg.start.init_y, init_theta=cfg.start.init_theta)
+
     # Target
-    target_x = 0.4
-    target_y = 0.25
-    target_pos = np.array([target_x, target_y])
-    
-    print(f"\nTarget: ({target_x:.2f}, {target_y:.2f})")
+    target_pos = np.array(cfg.task.target_xy, dtype=float)
+
+    print(f"\nTarget: ({target_pos[0]:.2f}, {target_pos[1]:.2f})")
     print(f"Initial midpoint: ({env.nodes[env.mid_node, 0]:.2f}, {env.nodes[env.mid_node, 1]:.2f})")
-    
+
+    # RHC toggle: disabled -> a single "segment" spanning the whole horizon.
+    n_segments = cfg.rhc.num_segments if cfg.rhc.enabled else 1
+    print(f"RHC: {'enabled (' + str(n_segments) + ' segments)' if cfg.rhc.enabled else 'disabled (single horizon)'}")
+
     # Create agent
     agent = NeuralControlAgent(
         env=env,
-        segment_horizon=6,
+        segment_horizon=max(1, env.Nsteps // n_segments),
         degree=3,
         u_max=0.15,
         pop_size=12
     )
-    
+
     # Run
-    print("\nStarting Neural Control with RHC...")
+    print("\nStarting Neural Control...")
     start_time = time.time()
-    
+
     results = agent.run_rhc(
         target_pos=target_pos,
-        n_segments=4,
-        n_iterations_per_segment=25,
+        n_segments=n_segments,
+        n_iterations_per_segment=cfg.train.iterations_per_segment,
         verbose=True
     )
-    
+
     elapsed = time.time() - start_time
-    
+
     # Results
     print(f"\n{'='*60}")
     print("Completed!")
@@ -356,10 +372,10 @@ def main():
     print(f"Time: {elapsed:.2f}s")
     print(f"Final error: {results['final_error']:.6f}")
     print(f"Segment losses: {[f'{l:.4f}' for l in results['segment_losses']]}")
-    
+
     # Visualize
     visualize_results(results, env, target_pos, save_path=str(_ROOT / 'outputs'))
-    
+
     return results
 
 

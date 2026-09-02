@@ -9,6 +9,7 @@ dependencies:
   - matplotlib
   - tqdm
   - pytorch
+  - pyyaml
   - pip
   - pip:
       - tensorboard

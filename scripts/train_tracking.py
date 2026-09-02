@@ -14,11 +14,12 @@ import matplotlib.pyplot as plt
 import argparse
 
 from SimulatorEnv_2D import SimulatorEnv_2D
-from implicit_grad_tools import implicit_final_control_grad
+from implicit_grad_tools import multistep_adjoint_gradient
+from config import load_config
 
 
 # ─────────────────────────────────────────────
-# 网络结构（与原始相同）
+# Network architecture
 # ─────────────────────────────────────────────
 class BoundaryVelocityNet(nn.Module):
     def __init__(self, hidden=64):
@@ -28,25 +29,41 @@ class BoundaryVelocityNet(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden, hidden),
             nn.Tanh(),
-            nn.Linear(hidden, 3),   # 控制右端 3 DOF
+            nn.Linear(hidden, 3),   # controls the right end's 3 DOFs
         )
 
     def forward(self, lam):
         return self.mlp(lam)
 
 
+def reinit_net_(net: nn.Module):
+    def _init(m):
+        if isinstance(m, nn.Linear):
+            nn.init.kaiming_uniform_(m.weight, a=5 ** 0.5)
+            nn.init.zeros_(m.bias)
+    net.apply(_init)
+
+
+def resolve_device(name: str) -> torch.device:
+    if name == "auto":
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        return torch.device("cpu")
+    return torch.device(name)
+
+
+def segment_lengths(N: int, num_segments: int):
+    base, rem = divmod(N, num_segments)
+    return [base + 1 if i < rem else base for i in range(num_segments)]
+
+
 # ─────────────────────────────────────────────
-# 目标轨迹生成（可自定义）
+# Target trajectory generation
 # ─────────────────────────────────────────────
 def make_target_trajectory(N, rod_length, traj_type="circle"):
-    """
-    生成 N 步的目标中点轨迹，返回 shape (N, 2) 的数组。
-
-    traj_type:
-      "circle"  : 圆形
-      "figure8" : 8 字形
-      "line"    : 直线平移
-    """
+    """Generates the N-step target midpoint trajectory, returning a (N, 2) array."""
     lams = np.linspace(0, 1, N)
     targets = np.zeros((N, 2))
 
@@ -55,28 +72,21 @@ def make_target_trajectory(N, rod_length, traj_type="circle"):
         for i, lam in enumerate(lams):
             theta = 2 * np.pi * lam
             targets[i] = [cx + r * np.cos(theta), cy + r * np.sin(theta)]
-
     elif traj_type == "figure8":
         cx, cy, r = rod_length / 2, 0.0, 0.20
         for i, lam in enumerate(lams):
             theta = 2 * np.pi * lam
             targets[i] = [cx + r * np.sin(theta), cy + r * np.sin(2 * theta) / 2]
-
     elif traj_type == "line":
         for i, lam in enumerate(lams):
             targets[i] = [rod_length / 2, -0.20 + 0.40 * lam]
-
     else:
         raise ValueError(f"Unknown traj_type: {traj_type}")
 
-    return targets  # (N, 2)
+    return targets
 
 
-# ─────────────────────────────────────────────
-# 每步的 loss 与 dL/dq_free
-# ─────────────────────────────────────────────
 def step_midpoint_loss(q, mid_node, target_xy):
-    """L_k = ||midpoint - target||^2"""
     mx = q[2 * mid_node]
     my = q[2 * mid_node + 1]
     dx = mx - target_xy[0]
@@ -85,7 +95,6 @@ def step_midpoint_loss(q, mid_node, target_xy):
 
 
 def dloss_dq_free_midpoint(q, free_index, mid_node, target_xy):
-    """dL_k / dq_free  (稀疏，只有中点两个分量非零)"""
     ix = 2 * mid_node
     iy = 2 * mid_node + 1
     mx, my = q[ix], q[iy]
@@ -100,227 +109,246 @@ def dloss_dq_free_midpoint(q, free_index, mid_node, target_xy):
     return a_free
 
 
-# ─────────────────────────────────────────────
-# 主程序
-# ─────────────────────────────────────────────
+def rollout_segment(env, net, u_start, targets_seg, dlam, device, track_w):
+    """Roll out len(targets_seg) steps, lambda reset to [0,1] over this segment.
+    Returns per-step data needed for the exact multi-step adjoint gradient."""
+    T = len(targets_seg)
+    u_list, q_list, J_list = [], [], []
+    converged_mask = np.zeros(T, dtype=bool)
+
+    u = u_start.clone()
+    for k in range(T):
+        lam = torch.tensor([[k / T]], dtype=torch.float32, device=device)
+        u_dot_full = torch.cat([torch.zeros(3, device=device), net(lam).squeeze(0)])
+        u = u + dlam * u_dot_full
+        u_list.append(u)
+
+        u_np = u.detach().cpu().numpy()
+        obs, done, info = env.step(u_np, use_inertia=False)
+        q_list.append(info["q"])
+        J_list.append(info["J"])
+        converged_mask[k] = info["converged"]
+
+    return u_list, q_list, J_list, converged_mask
+
+
+def compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets_seg, track_w, jac_reg):
+    free_index, fixed_index = env.free_index, env.fixed_index
+    T = len(q_list)
+
+    total_loss = 0.0
+    a_free_per_step = np.zeros((T, len(free_index)), dtype=float)
+    for k in range(T):
+        if not converged_mask[k]:
+            continue
+        L_k, _ = step_midpoint_loss(q_list[k], env.mid_node, targets_seg[k])
+        total_loss += track_w * L_k
+        a_free_per_step[k] = track_w * dloss_dq_free_midpoint(q_list[k], free_index, env.mid_node, targets_seg[k])
+
+    if not converged_mask.any():
+        return None, total_loss
+
+    u_seq_np = np.stack([u.detach().cpu().numpy() for u in u_list], axis=0)
+    g_u_seq = multistep_adjoint_gradient(
+        u_seq_np, J_list, free_index, fixed_index, env.deltaL, a_free_per_step, jac_reg=jac_reg,
+    )
+    return g_u_seq, total_loss
+
+
+def optimize_segment(env, net, opt, u_start, targets_seg, dlam, device, cfg, n_iterations, checkpoint):
+    best_loss = float("inf")
+    q_list = None
+
+    for it in range(n_iterations):
+        env.set_state(checkpoint)
+        opt.zero_grad(set_to_none=True)
+
+        u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u_start, targets_seg, dlam, device, cfg.task.track_w)
+        g_u_seq, total_loss = compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets_seg, cfg.task.track_w, cfg.train.jac_reg)
+        if g_u_seq is None:
+            continue
+
+        surrogate = torch.zeros((), device=device)
+        for k, u_k in enumerate(u_list):
+            g_k = torch.tensor(g_u_seq[k], dtype=u_k.dtype, device=device)
+            surrogate = surrogate + torch.dot(u_k, g_k)
+
+        surrogate.backward()
+        torch.nn.utils.clip_grad_norm_([p for p in net.parameters() if p.requires_grad], 1.0)
+        opt.step()
+
+        best_loss = min(best_loss, total_loss)
+
+    env.set_state(checkpoint)
+    with torch.no_grad():
+        u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u_start, targets_seg, dlam, device, cfg.task.track_w)
+
+    return {"best_loss": best_loss, "q_list": q_list, "u_final": u_list[-1], "converged_mask": converged_mask}
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs",    type=int,   default=300)
-    parser.add_argument("--traj",      type=str,   default="circle",
-                        choices=["circle", "figure8", "line"],
-                        help="目标轨迹类型")
-    parser.add_argument("--track_w",   type=float, default=1.0,
-                        help="tracking loss 权重（每步均匀）")
+    parser.add_argument("--config", type=str, default=None,
+                        help="Path to a YAML config overriding configs/default.yaml")
     args = parser.parse_args()
+    cfg = load_config(args.config)
 
-    # ── 1) 环境 ──────────────────────────────
-    env = SimulatorEnv_2D(nv=51, dt=0.01, total_time=2.0, save_history=False)
-    env.reset()
+    torch.manual_seed(cfg.train.seed)
+    np.random.seed(cfg.train.seed)
 
-    N    = env.Nsteps
-    dlam = 1.0 / N
-
-    # ── 2) 目标轨迹 ───────────────────────────
-    targets = make_target_trajectory(N, env.rod_length, traj_type=args.traj)
-    # targets[k] = (x_target, y_target) at step k,  shape (N, 2)
-
-    # ── 3) 网络与优化器 ──────────────────────
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-
-    u0 = torch.tensor(
-        [0.0, 0.0, 0.0, env.rod_length, 0.0, 0.0],
-        dtype=torch.float32, device=device
+    env = SimulatorEnv_2D(
+        nv=cfg.rod.nv,
+        dt=cfg.rod.dt,
+        rod_length=cfg.rod.rod_length,
+        total_time=cfg.rod.total_time,
+        R_outer=cfg.rod.R_outer,
+        r_inner=cfg.rod.r_inner,
+        E_al=cfg.rod.E_al,
+        rho_al=cfg.rod.rho_al,
+        max_newton_iter=cfg.rod.max_newton_iter,
+        save_history=False,
     )
+    env.reset(init_x=cfg.start.init_x, init_y=cfg.start.init_y, init_theta=cfg.start.init_theta)
 
-    net = BoundaryVelocityNet(hidden=64).to(device)
-    opt = optim.Adam(net.parameters(), lr=1e-3)
+    N = env.Nsteps
+    targets = make_target_trajectory(N, env.rod_length, traj_type=cfg.task.trajectory_type)
 
-    _log_dir = str(_ROOT / 'experiments' / 'dlo_tracking')
+    device = resolve_device(cfg.train.device)
+    u0 = torch.tensor(list(cfg.start.u_left) + list(cfg.start.u_right), dtype=torch.float32, device=device)
+
+    net = BoundaryVelocityNet(hidden=cfg.train.hidden).to(device)
+    opt = optim.Adam(net.parameters(), lr=cfg.train.lr)
+
+    _log_dir = str(_ROOT / 'experiments' / cfg.output.experiment_name)
     os.makedirs(_log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir=_log_dir)
 
     print("Network structure:")
     print(net)
     print(f"Device: {device}")
-    print(f"Trajectory type: {args.traj}")
-    print("Starting tracking training...\n")
+    print(f"Trajectory type: {cfg.task.trajectory_type}")
+    print(f"RHC: {'enabled (' + str(cfg.rhc.num_segments) + ' segments)' if cfg.rhc.enabled else 'disabled (single horizon)'}")
 
     loss_history = []
-    pbar = tqdm(range(args.epochs), desc="Training", dynamic_ncols=True)
 
-    for ep in pbar:
-        env.reset()
-        u = u0.clone()
+    if not cfg.rhc.enabled:
+        dlam = 1.0 / N
+        checkpoint = env.get_state()
 
-        # 储存每一步的数据，用于事后反向传播
-        u_list    = []          # list of torch tensors (6D)
-        q_list    = []          # list of numpy arrays  (2*nv)
-        J_list    = []          # list of numpy matrices
-        info_list = []          # list of info dicts
-        converged_steps = []    # 成功收敛的步索引
+        pbar = tqdm(range(cfg.train.epochs), desc="Training", dynamic_ncols=True)
+        for ep in pbar:
+            env.set_state(checkpoint)
+            opt.zero_grad(set_to_none=True)
 
-        # ── 前向仿真 ──────────────────────────
-        for k in range(N):
-            lam = torch.tensor([[k / N]], dtype=torch.float32, device=device)
+            u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u0, targets, dlam, device, cfg.task.track_w)
+            g_u_seq, total_loss = compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets, cfg.task.track_w, cfg.train.jac_reg)
 
-            u_dot_full = torch.cat([
-                torch.zeros(3, device=device),
-                net(lam).squeeze(0)
-            ])
-            u = u + dlam * u_dot_full
-            u_list.append(u)
+            converged_ratio = converged_mask.mean()
+            writer.add_scalar("physics/converged_ratio", converged_ratio, ep)
 
-            u_np = u.detach().cpu().numpy()
-            obs, done, info = env.step(u_np, use_inertia=False)
+            if g_u_seq is None:
+                pbar.set_postfix({"status": "Newton failed all steps"})
+                continue
 
-            q_list.append(info["q"])
-            J_list.append(info["J"])
-            info_list.append(info)
+            surrogate = torch.zeros((), device=device)
+            for k, u_k in enumerate(u_list):
+                g_k = torch.tensor(g_u_seq[k], dtype=u_k.dtype, device=device)
+                surrogate = surrogate + torch.dot(u_k, g_k)
 
-            if info["converged"]:
-                converged_steps.append(k)
+            surrogate.backward()
+            torch.nn.utils.clip_grad_norm_([p for p in net.parameters() if p.requires_grad], 1.0)
+            opt.step()
 
-            if done and (k < N - 1):
-                break
+            writer.add_scalar("loss/total", total_loss, ep)
+            loss_history.append((ep, total_loss))
 
-        if len(converged_steps) == 0:
-            pbar.set_postfix({"status": "Newton failed all steps"})
-            writer.add_scalar("physics/converged_ratio", 0.0, ep)
-            continue
+            pbar.set_postfix({"total_loss": f"{total_loss:.4f}", "conv%": f"{converged_ratio*100:.0f}"})
+            if ep % 20 == 0:
+                print(f"[ep {ep:04d}]  total_loss={total_loss:.6f}  converged={converged_ratio*100:.0f}%")
 
-        converged_ratio = len(converged_steps) / N
-        writer.add_scalar("physics/converged_ratio", converged_ratio, ep)
+    else:
+        seg_lens = segment_lengths(N, cfg.rhc.num_segments)
+        seg_bounds = np.cumsum([0] + seg_lens)
+        checkpoint = env.get_state()
+        u_current = u0.clone()
 
-        # ── 计算累积 tracking loss & 每步梯度 ──
-        # 
-        # 总 loss = sum_k  w * ||mid(q_k) - target_k||^2
-        #
-        # 对每个收敛步 k，用伴随法算 dL_k/du_k，
-        # 然后将梯度沿控制积分路径叠加（类似 adjoint rollout）。
-        #
-        # 简化处理：每步独立用 implicit_final_control_grad，
-        # 再对时间步加权求和，得到总的 g_u（以 u_k 作为"当前步控制"）。
+        for seg_idx, T_seg in enumerate(seg_lens):
+            if cfg.rhc.reinit_policy_each_segment:
+                reinit_net_(net)
+                opt = optim.Adam([p for p in net.parameters() if p.requires_grad], lr=cfg.train.lr)
 
-        total_loss_np = 0.0
-        # 每步对 u_k 的梯度累加到此向量（6D numpy）
-        # grad_sum[k] = dL/du_k  (从步 k 往后所有 loss 对 u_k 的梯度之和)
-        # 这里采用"当步即时梯度"近似（忽略未来步的 implicit 依赖，
-        # 若需严格递推可扩展为完整轨迹伴随法，见注释）
-        grad_per_step = []  # list of numpy 6D vectors
+            targets_seg = targets[seg_bounds[seg_idx]:seg_bounds[seg_idx + 1]]
+            dlam = 1.0 / T_seg
+            print(f"\n{'='*70}\nRHC segment {seg_idx + 1}/{len(seg_lens)}  (T={T_seg})\n{'='*70}")
 
-        for k in converged_steps:
-            q_k    = q_list[k]
-            J_k    = J_list[k]
-            info_k = info_list[k]
+            result = optimize_segment(env, net, opt, u_current, targets_seg, dlam, device, cfg,
+                                       n_iterations=cfg.train.iterations_per_segment, checkpoint=checkpoint)
 
-            L_k, _ = step_midpoint_loss(q_k, env.mid_node, targets[k])
-            total_loss_np += args.track_w * L_k
+            env.set_state(checkpoint)
+            with torch.no_grad():
+                u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u_current, targets_seg, dlam, device, cfg.task.track_w)
+            checkpoint = env.get_state()
+            u_current = u_list[-1].detach().clone()
 
-            a_free_k = dloss_dq_free_midpoint(
-                q_k, info_k["free_index"], env.mid_node, targets[k]
-            )
+            loss_history.append((seg_idx, result["best_loss"]))
+            writer.add_scalar("loss/segment_best", result["best_loss"], seg_idx)
+            print(f"[segment {seg_idx}] best_loss={result['best_loss']:.6e}")
 
-            g_uk = implicit_final_control_grad(
-                J=J_k,
-                free_index=info_k["free_index"],
-                fixed_index=info_k["fixed_index"],
-                a_free=a_free_k,
-                control_6d=u_list[k].detach().cpu().numpy(),
-                deltaL=env.deltaL
-            )
-            grad_per_step.append((k, g_uk))
-
-        # ── 反向传播 ──────────────────────────
-        # loss_torch = sum_k <u_k , g_uk>  （与原始 final 版本类似）
-        opt.zero_grad()
-
-        loss_torch = torch.tensor(0.0, device=device)
-        for (k, g_uk) in grad_per_step:
-            g = torch.tensor(g_uk * args.track_w, dtype=torch.float32, device=device)
-            # u_k 对网络参数的梯度通过 dot product 传播
-            loss_torch = loss_torch + dlam * torch.dot(u_list[k], g)
-
-        loss_torch.backward()
-        opt.step()
-
-        # ── 日志 ──────────────────────────────
-        avg_loss = total_loss_np / max(len(converged_steps), 1)
-        writer.add_scalar("loss/total",   total_loss_np, ep)
-        writer.add_scalar("loss/avg",     avg_loss,      ep)
-        loss_history.append((ep, total_loss_np))
-
-        # 记录最后一步中点位置
-        if len(q_list) > 0:
-            last_k = converged_steps[-1]
-            mx = q_list[last_k][2 * env.mid_node]
-            my = q_list[last_k][2 * env.mid_node + 1]
-            writer.add_scalar("midpoint/x_last", mx, ep)
-            writer.add_scalar("midpoint/y_last", my, ep)
-
-        pbar.set_postfix({
-            "total_loss": f"{total_loss_np:.4f}",
-            "conv%": f"{converged_ratio*100:.0f}"
-        })
-
-        if ep % 20 == 0:
-            print(f"[ep {ep:04d}]  total_loss={total_loss_np:.6f}"
-                  f"  converged={converged_ratio*100:.0f}%")
-
-    # ── 训练结束：绘图 ────────────────────────
     writer.close()
 
-    # Loss 曲线
     if loss_history:
         eps, losses = zip(*loss_history)
         fig, ax = plt.subplots(figsize=(8, 4))
         ax.plot(eps, losses, linewidth=1.5, color="steelblue")
-        ax.set_xlabel("Epoch")
+        ax.set_xlabel("Epoch" if not cfg.rhc.enabled else "RHC segment")
         ax.set_ylabel("Total Tracking Loss")
-        ax.set_title(f"Tracking Loss ({args.traj})")
+        ax.set_title(f"Tracking Loss ({cfg.task.trajectory_type})")
         ax.grid(True, linestyle="--", alpha=0.5)
         fig.tight_layout()
-        fig.savefig(str(_ROOT / 'experiments' / 'dlo_tracking' / 'loss_curve.png'), dpi=150)
+        fig.savefig(str(_ROOT / 'experiments' / cfg.output.experiment_name / 'loss_curve.png'), dpi=150)
         plt.close(fig)
-        print(f"Loss curve → {_ROOT / 'experiments' / 'dlo_tracking' / 'loss_curve.png'}")
+        print(f"Loss curve → {_ROOT / 'experiments' / cfg.output.experiment_name / 'loss_curve.png'}")
 
-    # 最终轨迹可视化
-    _visualize_tracking(env, net, u0, N, dlam, targets, device, args.traj)
+    _visualize_tracking(env, net, u0, N, targets, device, cfg)
 
 
-# ─────────────────────────────────────────────
-# 可视化：训练后跑一遍，画实际轨迹 vs 目标轨迹
-# ─────────────────────────────────────────────
-def _visualize_tracking(env, net, u0, N, dlam, targets, device, traj_type):
-    env.reset()
-    u = u0.clone()
+def _visualize_tracking(env, net, u0, N, targets, device, cfg):
+    env.reset(init_x=cfg.start.init_x, init_y=cfg.start.init_y, init_theta=cfg.start.init_theta)
     mid_xs, mid_ys = [], []
 
+    if cfg.rhc.enabled:
+        seg_lens = segment_lengths(N, cfg.rhc.num_segments)
+    else:
+        seg_lens = [N]
+
+    u = u0.clone()
     with torch.no_grad():
-        for k in range(N):
-            lam = torch.tensor([[k / N]], dtype=torch.float32, device=device)
-            u_dot_full = torch.cat([torch.zeros(3, device=device),
-                                    net(lam).squeeze(0)])
-            u = u + dlam * u_dot_full
-            u_np = u.cpu().numpy()
-            obs, done, info = env.step(u_np, use_inertia=False)
-            if info["converged"]:
-                mid_xs.append(info["q"][2 * env.mid_node])
-                mid_ys.append(info["q"][2 * env.mid_node + 1])
-            if done:
-                break
+        step0 = 0
+        for T_seg in seg_lens:
+            for k in range(T_seg):
+                lam = torch.tensor([[k / T_seg]], dtype=torch.float32, device=device)
+                u_dot_full = torch.cat([torch.zeros(3, device=device), net(lam).squeeze(0)])
+                u = u + (1.0 / T_seg) * u_dot_full
+                u_np = u.cpu().numpy()
+                obs, done, info = env.step(u_np, use_inertia=False)
+                if info["converged"]:
+                    mid_xs.append(info["q"][2 * env.mid_node])
+                    mid_ys.append(info["q"][2 * env.mid_node + 1])
+            step0 += T_seg
 
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.plot(targets[:, 0], targets[:, 1], 'b--', linewidth=2, label="Target trajectory")
     ax.plot(mid_xs, mid_ys, 'r-o', markersize=3, linewidth=1.5, label="Actual midpoint")
     ax.set_aspect('equal')
-    ax.set_xlabel("x");  ax.set_ylabel("y")
-    ax.set_title(f"Midpoint Tracking ({traj_type})")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_title(f"Midpoint Tracking ({cfg.task.trajectory_type})")
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.4)
     fig.tight_layout()
-    fig.savefig(str(_ROOT / 'experiments' / 'dlo_tracking' / 'tracking_result.png'), dpi=150)
+    fig.savefig(str(_ROOT / 'experiments' / cfg.output.experiment_name / 'tracking_result.png'), dpi=150)
     plt.close(fig)
-    print(f"Tracking result → {_ROOT / 'experiments' / 'dlo_tracking' / 'tracking_result.png'}")
+    print(f"Tracking result → {_ROOT / 'experiments' / cfg.output.experiment_name / 'tracking_result.png'}")
 
 
 if __name__ == "__main__":

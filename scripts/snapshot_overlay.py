@@ -7,15 +7,16 @@ _OUT = _ROOT / 'outputs'
 _OUT.mkdir(exist_ok=True)
 
 """
-DLO 实时仿真 + 快照叠加
+DLO live simulation + snapshot overlay
 
-每当仿真进度达到 0%, 10%, ..., 100% 时将当前杆形状冻结叠加在图面上。
+Whenever the simulation progress reaches 0%, 10%, ..., 100%, the current rod
+shape is frozen and overlaid on the figure.
 
-用法：
-    python snapshot_overlay.py                         # 默认：angle_oscillation
+Usage:
+    python snapshot_overlay.py                         # default: angle_oscillation
     python snapshot_overlay.py --traj moving_forward
     python snapshot_overlay.py --traj angle_oscillation
-    python snapshot_overlay.py -h                      # 查看所有选项
+    python snapshot_overlay.py -h                      # see all options
 """
 
 import argparse
@@ -50,22 +51,22 @@ mpl.rcParams['savefig.dpi'] = 300
 
 
 # =========================================================
-# 全局物理参数
+# Global physical parameters
 # =========================================================
-L = 1.0    # 杆长 (m)
-T = 10.0   # 正式仿真时长 (s)
+L = 1.0    # rod length (m)
+T = 10.0   # main simulation duration (s)
 
-# 材料 & 网格
+# Material & mesh
 ROD_NV      = 31
 ROD_DT      = 0.01
 ROD_R_OUTER = 0.006
 ROD_E       = 2e9
 ROD_RHO     = 1200
 
-# 快照 & 渲染配置
-PAPER_MODE            = True   # True → 输出论文尺寸 (2.75"); False → 屏幕预览尺寸
-_PAPER_FIG_W          = 2.75   # 论文输出宽度 (inch)
-_ORIG_FIG_W           = 7.0    # render_neurips.py 中原始宽度
+# Snapshot & render config
+PAPER_MODE            = True   # True -> output paper size (2.75"); False -> screen preview size
+_PAPER_FIG_W          = 2.75   # paper output width (inch)
+_ORIG_FIG_W           = 7.0    # original width in render_neurips.py
 _PAPER_S              = (_PAPER_FIG_W / _ORIG_FIG_W) if PAPER_MODE else 1.0
 
 SNAP_PERCENTS         = list(range(0, 101, 25)) + [93,94]# 0%, 20%, 40%, 60%, 80%, 100%
@@ -76,37 +77,38 @@ ARROW_MIDPOINT_COLOR  = '#d62728'
 ARROW_QUARTER_COLOR_1 = '#0088dd'
 ARROW_QUARTER_COLOR_3 = '#9b2dca'
 SHOW_QUARTER_ARROWS   = True
-SHOW_TRAILS           = True       # 是否显示中间三点（中点、1/4、3/4）的轨迹
-HIGHLIGHT_SNAP        = [93,94]   # 单个百分比、百分比列表 或 None（不高亮）
+SHOW_TRAILS           = True       # whether to show trails of the three middle points (mid, 1/4, 3/4)
+HIGHLIGHT_SNAP        = [93,94]   # a single percent, a list of percents, or None (no highlight)
 DIMMED_ALPHA          = 0.1
 
 
 # =========================================================
-# 轨迹基类
+# Trajectory base class
 # =========================================================
 
 class Trajectory:
     """
-    子类须实现：
-      - name  : str，轨迹标识符（用于文件名、参数选项）
-      - xlim / ylim : 显示范围
-      - control(t)  : 返回 t 时刻的 6D 控制向量
-    可选重写：
-      - warmup(env) : 预热阶段（不计入正式仿真时长/快照）
+    Subclasses must implement:
+      - name  : str, trajectory identifier (used for filenames, CLI choices)
+      - xlim / ylim : display range
+      - control(t)  : returns the 6D control vector at time t
+    Optional overrides:
+      - warmup(env) : warmup phase (not counted toward the main simulation
+        duration/snapshots)
     """
     name: str = ""
     xlim = (-0.5 * L, 1.5 * L)
     ylim = (-0.5 * L, 0.5 * L)
 
     def warmup(self, env) -> dict:
-        """默认无预热，直接返回当前观测。"""
+        """No warmup by default; just returns the current observation."""
         return env._get_observation()
 
     def control(self, t: float) -> np.ndarray:  # noqa: ARG002
         raise NotImplementedError
 
     def _reset_env_counters(self, env):
-        """预热结束后重置时间计数器和历史轨迹。"""
+        """Resets the time counters and history log after warmup ends."""
         env.current_step = 0
         env.ctime        = 0.0
         env.Nsteps       = int(round(T / env.dt))
@@ -120,13 +122,15 @@ class Trajectory:
 
 
 # =========================================================
-# 轨迹一：水平移动（两端平行前进，角度固定）
+# Trajectory 1: horizontal translation (both ends move in parallel, fixed angle)
 # =========================================================
 
 class MovingForward(Trajectory):
     """
-    左端向左移动 0.35L，右端向左移动 1.3L，角度全程保持 π/2。
-    预热：从默认直杆平滑过渡到起始位形。
+    Left end moves left by 0.35L, right end moves left by 1.3L, angle stays
+    at pi/2 throughout.
+    Warmup: smoothly transitions from the default straight rod to the start
+    configuration.
     """
     name = "moving_forward"
     xlim = (-1.13 * L, 0.7 * L)
@@ -137,11 +141,11 @@ class MovingForward(Trajectory):
                        0.3*L, 0.65*L, np.pi/2])
 
     def warmup(self, env) -> dict:
-        """2 秒内将右端从 (L, 0, 0) 平滑移动到起始位形。"""
+        """Smoothly moves the right end from (L, 0, 0) to the start configuration over 2 seconds."""
         print("Warmup: transitioning to start position ...")
         T_warmup = 2.0
         N = int(round(T_warmup / env.dt))
-        init = np.array([0.0, 0.0, 0.0, L, 0.0, 0.0])   # reset 后的直杆状态
+        init = np.array([0.0, 0.0, 0.0, L, 0.0, 0.0])   # straight-rod state after reset()
         obs = None
         for i in range(N):
             s    = self._smoothstep((i + 1) * env.dt, T_warmup)
@@ -160,31 +164,31 @@ class MovingForward(Trajectory):
 
 
 # =========================================================
-# 轨迹二：角度振荡（端点固定，角度下→上→下→上）
+# Trajectory 2: angle oscillation (endpoints fixed, angle down->up->down->up)
 # =========================================================
 
 class AngleOscillation(Trajectory):
     """
-    预热：右端从 x=L 水平压缩到 x=0.6L（角度固定 ±π/3）。
-    正式：两端 xy 固定，角度以余弦振荡 下→上→下→上（1.5 周期）。
+    Warmup: right end horizontally compresses from x=L to x=0.6L (angle held at +/- pi/3).
+    Main phase: both ends' xy fixed, angle oscillates cosine-wise down->up->down->up (1.5 cycles).
     """
     name = "angle_oscillation"
     xlim = (-0.2 * L, 0.8 * L)
     ylim = (-0.5 * L, 0.5 * L)
 
     _X_END    = 0.6 * L
-    _TH_INIT  = 5.5 * np.pi / 12  # 预热阶段固定角度幅值
-    _TH_AMP   = 5.5 * np.pi / 12  # 振荡角度幅值
+    _TH_INIT  = 5.5 * np.pi / 12  # fixed angle amplitude during warmup
+    _TH_AMP   = 5.5 * np.pi / 12  # oscillation angle amplitude
     _T_WARMUP = 2.0
 
     def warmup(self, env) -> dict:
-        """将右端从 x=L 平滑压缩到 x=0.6L，角度保持 ±π/3。"""
+        """Smoothly compresses the right end from x=L to x=0.6L, keeping the angle at +/- pi/3."""
         print("Warmup: compressing rod ...")
         N = int(round(self._T_WARMUP / env.dt))
         obs = None
         for i in range(N):
             s   = self._smoothstep((i + 1) * env.dt, self._T_WARMUP)
-            x_r = L + s * (self._X_END - L)      # L → 0.6L
+            x_r = L + s * (self._X_END - L)      # L -> 0.6L
             ctrl = np.array([0.0, 0.0,  self._TH_INIT,
                              x_r, 0.0, -self._TH_INIT])
             obs, _, _ = env.step(ctrl)
@@ -198,29 +202,31 @@ class AngleOscillation(Trajectory):
 
 
 # =========================================================
-# 轨迹三：角度振荡 + 两端匀速向右漂移
+# Trajectory 3: angle oscillation + both ends drifting right at constant speed
 # =========================================================
 
 class AngleOscillationDrift(AngleOscillation):
     """
-    继承 AngleOscillation 的预热（压缩到 0.6L）。
-    正式阶段：角度振荡的同时两端以 _DRIFT (L/s) 匀速向右移动。
+    Inherits AngleOscillation's warmup (compress to 0.6L).
+    Main phase: while oscillating the angle, both ends also drift right at a
+    constant speed _DRIFT (L/s).
     """
     name  = "angle_oscillation_drift"
-    xlim  = (-0.2 * L, 1.2 * L)   # 右边扩宽以容纳漂移
+    xlim  = (-0.2 * L, 1.2 * L)   # widened on the right to accommodate the drift
     ylim  = (-0.5 * L, 0.5 * L)
 
-    _DRIFT = 0.0 * L   # 漂移速度 (m/s)，10s 内两端各向右移动 0.5L
+    _DRIFT = 0.0 * L   # drift speed (m/s); over 10s each end moves right by 0.5L
 
     def control(self, t: float) -> np.ndarray:
         th  = -self._TH_AMP * np.cos(3 * np.pi * t / T)
-        x_l = 0.0          + self._DRIFT * t   # 左端向右漂移
-        x_r = self._X_END  + self._DRIFT * t   # 右端向右漂移（间距保持 0.6L）
+        x_l = 0.0          + self._DRIFT * t   # left end drifts right
+        x_r = self._X_END  + self._DRIFT * t   # right end drifts right (spacing stays 0.6L)
         return np.array([x_l, 0.0, -th, x_r, 0.0, th])
 
 
 # =========================================================
-# 轨迹注册表（新增轨迹：继承 Trajectory，在此登记即可）
+# Trajectory registry (to add a new trajectory: subclass Trajectory and
+# register it here)
 # =========================================================
 
 TRAJ_REGISTRY: dict[str, type[Trajectory]] = {
@@ -231,7 +237,7 @@ TRAJ_REGISTRY: dict[str, type[Trajectory]] = {
 
 
 # =========================================================
-# 渲染辅助函数
+# Rendering helper functions
 # =========================================================
 
 def _get_key_velocities(env):
@@ -269,7 +275,8 @@ def _draw_frozen_snaps(ax, frozen_snaps, xlim, ylim):
     # choose a perceptually-uniform colormap for curvature
     cmap_name = 'viridis'
 
-    # 支持单值或列表：找每个目标百分比对应的最近帧（≥目标且非100%）
+    # supports a single value or a list: find, for each target percent, the
+    # nearest frame (>= target and not 100%)
     highlight_fracs: set[float] = set()
     if HIGHLIGHT_SNAP is not None and frozen_snaps:
         targets = HIGHLIGHT_SNAP if isinstance(HIGHLIGHT_SNAP, (list, tuple)) else [HIGHLIGHT_SNAP]
@@ -321,7 +328,7 @@ def _draw_frozen_snaps(ax, frozen_snaps, xlim, ylim):
 
 
 # =========================================================
-# θ-H 相平面图
+# theta-H phase plot
 # =========================================================
 
 def _plot_theta_H_curve(theta_hist, H_hist, traj_name):
@@ -331,7 +338,7 @@ def _plot_theta_H_curve(theta_hist, H_hist, traj_name):
     font_name = 'Times New Roman'
 
     # Scale factor relative to original 6" wide figure
-    _S = 1.375 / 6.0   # ≈ 0.229
+    _S = 1.375 / 6.0   # ~= 0.229
 
     # use a compact figure size suitable for two-column layout
     fig, ax = plt.subplots(figsize=(2.75 * _PAPER_S, 2.2 * _PAPER_S))
@@ -415,7 +422,7 @@ def _plot_theta_H_curve(theta_hist, H_hist, traj_name):
 
 
 # =========================================================
-# 主仿真流程
+# Main simulation loop
 # =========================================================
 
 def run_simulation(traj: Trajectory, show_snaps: bool = True, show_trails: bool = True):
@@ -424,15 +431,15 @@ def run_simulation(traj: Trajectory, show_snaps: bool = True, show_trails: bool 
                           E_al=ROD_E, rho_al=ROD_RHO,
                           total_time=T, save_history=True)
 
-    # reset() 始终将杆初始化为 x=0→L 的水平直杆
+    # reset() always initializes the rod as a straight horizontal segment x=0->L
     obs = env.reset()
 
-    # 预热阶段（不计入进度，不记录快照）
+    # Warmup phase (not counted toward progress, no snapshots recorded)
     obs = traj.warmup(env)
 
     frozen_snaps = []
     snap_targets = sorted(SNAP_PERCENTS) if show_snaps else []
-    theta_hist, H_hist = [], []   # 用于 θ-H 相平面图
+    theta_hist, H_hist = [], []   # for the theta-H phase plot
 
     _fig_resized = False
     done = False
@@ -441,14 +448,15 @@ def run_simulation(traj: Trajectory, show_snaps: bool = True, show_trails: bool 
         control = traj.control(t_osc)
         obs, done, _ = env.step(control)
 
-        # 记录右端角度 θ_r 和中点高度 H（跳过第一帧，避免预热→正式阶段的突变）
+        # Record the right-end angle theta_r and midpoint height H (skip the
+        # first frame to avoid the warmup->main-phase jump)
         if env.current_step > 1:
             theta_hist.append(control[5])
             H_hist.append(env.q[2 * env.mid_node + 1])
 
         pct = env.current_step / env.Nsteps * 100.0
 
-        # 命中快照节点时冻结当前形状（仅 show_snaps 时）
+        # Freeze the current shape when a snapshot target is hit (only if show_snaps)
         if snap_targets and pct >= snap_targets[0] and \
                 (snap_targets[0] > 0 or env.current_step >= 2):
             frac      = snap_targets[0] / 100.0
@@ -462,7 +470,7 @@ def run_simulation(traj: Trajectory, show_snaps: bool = True, show_trails: bool 
             )
             snap_targets.pop(0)
 
-        # 绘制当前帧
+        # Draw the current frame
         render_dlo_neurips(env, control=control, show=False,
                            xlim=traj.xlim, ylim=traj.ylim,
                            show_gradient=True, show_trail=show_trails,
@@ -525,12 +533,12 @@ def run_simulation(traj: Trajectory, show_snaps: bool = True, show_trails: bool 
     print(f'Saved: {out_base}.png / .pdf')
     plt.show()
 
-    # θ-H 相平面图
+    # theta-H phase plot
     _plot_theta_H_curve(theta_hist, H_hist, traj.name)
 
 
 # =========================================================
-# 命令行入口
+# CLI entry point
 # =========================================================
 
 def parse_args():

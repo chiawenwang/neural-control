@@ -337,7 +337,7 @@ def objfun(q_old, u_old, dt, tol, maximum_iter,
            use_inertia=False,
            obstacles=None):
     """
-    单步隐式时间积分（Newton-Raphson）
+    Single-step implicit time integration (Newton-Raphson).
     """
     if control_node is None:
         raise ValueError("Control node position must be provided.")
@@ -391,10 +391,11 @@ def objfun(q_old, u_old, dt, tol, maximum_iter,
 
 class SimulatorEnv_2D:
     """
-    一个规范化的弹性杆仿真环境：
-      - 控制量: (x, y, theta) 由外部给定，对应右端末端的位置与方向
-      - 状态: 内部杆节点位置 q, 速度 u, 当前时间 ctime 等
-      - 接口: reset(), step(control), render()
+    A standardized elastic-rod simulation environment:
+      - Control input: (x, y, theta) given externally, corresponding to the
+        position and orientation of the right end.
+      - State: internal rod node positions q, velocity u, current time ctime, etc.
+      - Interface: reset(), step(control), render()
     """
 
     def __init__(self,
@@ -420,22 +421,22 @@ class SimulatorEnv_2D:
         self.max_newton_iter = max_newton_iter
         self.save_history = save_history
 
-        # 截面与材料参数
+        # Cross-section and material parameters
         self.I_sec = np.pi * (R_outer ** 4 - r_inner ** 4) / 4
         self.A_sec = np.pi * (R_outer ** 2 - r_inner ** 2)
         self.EI = E_al * self.I_sec
         self.EA = E_al * self.A_sec
 
-        # 空间离散
+        # Spatial discretization
         self.deltaL = rod_length / (nv - 1)
 
-        # 节点坐标（初始直杆）
+        # Node coordinates (initially a straight rod)
         self.nodes = np.zeros((nv, 2))
         for c in range(nv):
             self.nodes[c, 0] = c * self.deltaL
             self.nodes[c, 1] = 0.0
 
-        # 质量
+        # Mass
         m_node = np.pi * (R_outer ** 2 - r_inner ** 2) * rod_length * rho_al / (nv - 1)
         self.m = np.zeros(2 * nv)
         for k in range(nv):
@@ -443,37 +444,37 @@ class SimulatorEnv_2D:
             self.m[2 * k + 1] = m_node
         self.mMat = np.diag(self.m)
 
-        # 重力
+        # Gravity
         self.W = np.zeros(2 * nv)
         self.W[1::2] = -9.81 * m_node
 
-        # 牛顿迭代容差
+        # Newton iteration tolerance
         self.tol = self.EI / rod_length ** 2 * 1e-3
 
-        # 约束 DOF
+        # Constrained DOFs
         all_DOFs = np.arange(2 * nv)
         self.fixed_index = np.array([0, 1, 2, 3, 2 * nv - 4, 2 * nv - 3, 2 * nv - 2, 2 * nv - 1])
         self.free_index = np.setdiff1d(all_DOFs, self.fixed_index)
 
-        # 中间节点索引
-        # self.mid_node = nv // 2 + 1  # 与原脚本保持一致
-        self.mid_node = nv // 2  # 与原脚本保持一致
+        # Mid-node index
+        # self.mid_node = nv // 2 + 1  # kept consistent with the original script
+        self.mid_node = nv // 2  # kept consistent with the original script
 
-        # 总步数
+        # Total number of steps
         self.Nsteps = int(round(total_time / dt))
 
         self.dlamda = 1 / self.Nsteps
 
         self.obstacles = []
 
-        # 状态变量（在 reset 中初始化）
+        # State variables (initialized in reset())
         self.q = None
         self.u = None
         self.ctime = None
         self.current_step = None
         self.lamda = None
 
-        # 历史记录（可选）
+        # History log (optional)
         self.history = {
             "error": [],
             "control": [],
@@ -524,7 +525,7 @@ class SimulatorEnv_2D:
         return np.array([X_0, Y_0, X_1, Y_1, Xn_2, Yn_2, Xn_1, Yn_1], dtype=float)
 
     def _get_midpoint(self):
-        """返回当前中点的坐标 (midx, midy)。"""
+        """Returns the current midpoint coordinates (midx, midy)."""
         x_arr = self.q[::2]
         y_arr = self.q[1::2]
         midx = x_arr[self.mid_node]
@@ -532,7 +533,7 @@ class SimulatorEnv_2D:
         return midx, midy
 
     def _get_observation(self):
-        """观测量仅包含中点坐标。"""
+        """The observation contains only the midpoint coordinates."""
         midx, midy = self._get_midpoint()
         return {
             "time": self.ctime,
@@ -547,8 +548,9 @@ class SimulatorEnv_2D:
               init_y=None,
               init_theta=None):
         """
-        重置环境，返回初始观测。
-        控制量初值只影响你第一步时施加的控制，这里默认末端在 (rod_length, 0, 0)。
+        Resets the environment and returns the initial observation.
+        The initial control value only affects the control applied on the
+        first step; by default the end is at (rod_length, 0, 0).
         """
         if init_x is None:
             init_x = self.rod_length
@@ -567,19 +569,19 @@ class SimulatorEnv_2D:
         self.current_step = 0
         self.lamda = 0.0
 
-        # 清空历史
+        # Clear history
         if self.save_history:
             for k in self.history:
                 self.history[k] = []
 
-        # 不在 reset 里做一步积分，只返回当前观测
+        # No integration step is taken in reset(); just return the current observation.
         return self._get_observation()
 
     def step(self, control, use_inertia=False):
         """
-        单步仿真：
-          control: (x, y, theta)，numpy 数组或可迭代
-        返回:
+        Single simulation step.
+          control: (x, y, theta), a numpy array or iterable
+        Returns:
           obs, reward, done, info
         """
         control = np.asarray(control, dtype=float).flatten()
@@ -589,7 +591,7 @@ class SimulatorEnv_2D:
         # x, y, theta = control
         control_node = self._control_node_from_xytheta(control)
 
-        # 调用隐式积分器
+        # Call the implicit integrator
         q_new, flag, J = objfun(
             q_old=self.q,
             u_old=self.u,
@@ -608,7 +610,7 @@ class SimulatorEnv_2D:
             obstacles=self.obstacles
         )
 
-        # 更新速度、时间
+        # Update velocity and time
         u_new = (q_new - self.q) / self.dt
         self.q = q_new
         self.u = u_new
@@ -616,7 +618,7 @@ class SimulatorEnv_2D:
         self.current_step += 1
         self.lamda = self.current_step * self.dlamda
 
-        # 观测与误差
+        # Observation and status
         obs = self._get_observation()
         done = (self.current_step >= self.Nsteps) or (flag < 0)
 
@@ -628,10 +630,10 @@ class SimulatorEnv_2D:
             "J": J,
             "free_index": self.free_index.copy(),
             "fixed_index": self.fixed_index.copy(),
-            "control_node": control_node.copy(),  # 8D 边界DOF
+            "control_node": control_node.copy(),  # 8D boundary DOFs
         }
 
-        # 保存历史
+        # Save history
         if self.save_history:
             self.history["control"].append(control.copy())
             self.history["midx"].append(obs["midx"])
@@ -645,20 +647,40 @@ class SimulatorEnv_2D:
 
         return obs, done, info
 
+    # ---------- RHC state checkpointing ----------
+
+    def get_state(self):
+        """Snapshot the current simulator state (used to warm-start RHC segments)."""
+        return {
+            "q": self.q.copy(),
+            "u": self.u.copy(),
+            "ctime": self.ctime,
+            "current_step": self.current_step,
+            "lamda": self.lamda,
+        }
+
+    def set_state(self, state):
+        """Restore a state previously returned by get_state()."""
+        self.q = state["q"].copy()
+        self.u = state["u"].copy()
+        self.ctime = state["ctime"]
+        self.current_step = state["current_step"]
+        self.lamda = state["lamda"]
+
     def render(self, saveimg=False, show_target=True, show=True, ax=None,
                xlim=None, ylim=None):
         """
-        可视化当前杆的形状。
+        Visualizes the current rod shape.
         """
         x_arr = self.q[::2]
         y_arr = self.q[1::2]
         midx, midy = self._get_midpoint()
 
-        # 第一次调用时初始化 figure 和 axis
+        # Initialize the figure and axis on the first call
         if not hasattr(self, "_render_initialized") or not self._render_initialized:
             self.fig, self.ax = plt.subplots()
             self._render_initialized = True
-            plt.ion()  # 开启交互模式
+            plt.ion()  # enable interactive mode
 
         ax = self.ax
         ax.cla()

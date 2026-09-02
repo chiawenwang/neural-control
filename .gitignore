@@ -32,3 +32,6 @@ outputs/*.pdf
 .vscode/
 .idea/
 *.swp
+
+# Previous submission code (kept locally, not tracked)
+submissionCode/
