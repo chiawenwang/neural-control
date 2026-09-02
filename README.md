@@ -137,3 +137,21 @@ iterations, final tracking error ≈ 0.0227 m.
   adjoint gradients.
 - The demo simulator uses `nv` nodes (`configs/default.yaml`, `rod.nv`)
   rather than the paper's 101, for faster iteration.
+
+## Extending to 3D
+
+A 3D rod has an extra **twist** DOF with
+no 2D analogue. Needed:
+
+- `getFs`/`getFb` → Discrete Elastic Rods (Bergou et al.) formulation: 3D
+  bending, per-edge material frame with parallel transport, new twisting
+  energy/force (`getFt`).
+- State: `3*nv` positions **+** `nv-1` twist angles; update
+  `free_index`/`fixed_index` accordingly.
+- `_control_node_from_xytheta` / `boundary_node_jacobian`: rewrite for 3D
+  pose (`u`: 6D → 12D); pick a rotation parameterization (axis-angle/quaternion,
+  not Euler — gimbal lock).
+- `contact.py`: `CircleObstacle` → `SphereObstacle`.
+- `render_neurips.py` / `utils.visualize_results`: 3D rendering.
+- `implicit_grad_tools.py`: **no change needed** — the adjoint solve is
+  dimension-agnostic linear algebra.
