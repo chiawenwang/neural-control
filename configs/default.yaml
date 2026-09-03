@@ -47,7 +47,7 @@ rhc:
 
 # Optimization / training.
 train:
-  epochs: 200                  # non-RHC mode: number of full-horizon training epochs
+  epochs: 50                #200 is default. non-RHC mode: number of full-horizon training epochs
   iterations_per_segment: 200  # RHC mode: gradient steps per segment
   lr: 0.001
   hidden: 64
