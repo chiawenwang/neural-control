@@ -1,0 +1,44 @@
+# =============================================================================
+# Example 3D experiment.
+#
+#   python scripts/train_adjoint.py  --config configs/example_3d.yaml
+#   python scripts/train_tracking.py --config configs/example_3d.yaml
+#   python scripts/train_cmaes.py    --config configs/example_3d.yaml
+#
+# Only the fields that differ from configs/default.yaml are listed; everything
+# else is deep-merged from there.
+# =============================================================================
+
+env:
+  dim: 3                     # -> src/SimulatorEnv_3D.py, 10D control
+
+rod:
+  nv: 21                     # fewer nodes: 3D solves are ~2x the DOFs of 2D
+  total_time: 1.0
+  R_outer: 0.003             # a soft, thin strip, so the rod actually deforms
+  r_inner: 0.0
+  E_al: 2.0e+9
+  rho_al: 1200
+  gravity: [0.0, -9.81, 0.0] # y is "down", matching the 2D environment.
+                             # Use [0.0, 0.0, -9.81] for the usual z-up setup.
+
+start:
+  # Both ends start on the x-axis with their tangents along +x (theta = phi = 0).
+  # The left end is held at this pose for the whole horizon; the policy drives
+  # the right end.
+  u_left_3d:  [0.0, 0.0, 0.0, 0.0, 0.0]   # (x, y, z, theta, phi)
+  u_right_3d: [1.0, 0.0, 0.0, 0.0, 0.0]
+
+task:
+  type: point_to_point
+  target_xyz: [0.45, 0.05, 0.15]   # off-plane target for the mid node
+  trajectory_type: helix           # tracking only: helix | figure8_3d | circle | figure8 | line
+  track_w: 1.0
+
+train:
+  epochs: 50
+  iterations_per_segment: 100
+  lr: 0.005
+
+output:
+  experiment_name: dlo_3d

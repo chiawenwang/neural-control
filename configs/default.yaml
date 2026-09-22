@@ -7,6 +7,23 @@
 # to override — everything else falls back to the defaults below.
 # =============================================================================
 
+# Which simulator to use.
+#
+# dim: 2 -> src/SimulatorEnv_2D.py
+#           DOFs are (x, y) per node; each end is controlled by
+#           (x, y, theta)         -> 6D control vector.
+# dim: 3 -> src/SimulatorEnv_3D.py
+#           DOFs are (x, y, z) per node; each end is controlled by
+#           (x, y, z, theta, phi) -> 10D control vector, where theta is the
+#           tangent azimuth in the x-y plane and phi its elevation out of it
+#           (phi = 0 reproduces the 2D convention exactly).
+#
+# Switching dim also switches which keys below are read: the `*_3d` variants
+# of start.u_left/u_right and task.target_xyz are used in 3D, the plain ones
+# in 2D. Everything else (rod, energy, rhc, train, output) is shared.
+env:
+  dim: 3                   # 2: 2D environment | 3: 3D environment
+
 # Physical / geometric parameters of the manipulated object (elastic rod).
 rod:
   nv: 51                 # number of discretization nodes along the rod
@@ -18,20 +35,52 @@ rod:
   E_al: 70.0e+9             # Young's modulus [Pa]
   rho_al: 2700              # material density [kg/m^3]
   max_newton_iter: 1000    # max Newton-Raphson iterations per equilibrium solve
+  gravity: [0.0, -9.81, 0.0]  # 3D only: gravity vector [gx, gy, gz].
+                              # The default keeps y as "down", matching the 2D
+                              # environment, so a 3D run confined to z = 0
+                              # reproduces the 2D run node for node. Use
+                              # [0.0, 0.0, -9.81] for the usual z-up convention.
+
+# Elastic energy model of the rod.
+#
+# custom: false  -> use the built-in Discrete Elastic Rod (stretching + bending).
+#                   This is the default and reproduces the original behaviour
+#                   exactly; `type` and `params` below are ignored.
+# custom: true   -> use the energy registered under `type` in src/energy.py
+#                   (register your own subclass with @register_energy("name")).
+#
+# The built-in default follows env.dim: `der` in 2D, `der3d` in 3D (3D DER —
+# stretching + isotropic bending of a naturally straight, twist-free rod).
+# A custom `type` must match env.dim or loading fails with a clear error.
+energy:
+  custom: false
+  type: der                # 2D: der | linear_spring ;  3D: der3d | linear_spring
+  params: {}               # extra keyword arguments forwarded to the subclass
 
 # Initial boundary configuration (both rod ends).
 start:
   init_x: null            # left end / rod initial x offset; null -> 0.0
   init_y: 0.0
+  init_z: 0.0             # 3D only
   init_theta: 0.0
+  init_phi: 0.0           # 3D only
+
+  # --- used when env.dim == 2 ---
   u_left: [0.0, 0.0, 0.0]     # left-end pose (x, y, theta) — held fixed throughout
   u_right: [1.0, 0.0, 0.0]    # right-end initial pose (x, y, theta), i.e. u0[3:]
+
+  # --- used when env.dim == 3 ---
+  u_left_3d: [0.0, 0.0, 0.0, 0.0, 0.0]   # left-end pose (x, y, z, theta, phi) — held fixed
+  u_right_3d: [1.0, 0.0, 0.0, 0.0, 0.0]  # right-end initial pose (x, y, z, theta, phi)
 
 # Control task definition.
 task:
   type: point_to_point       # point_to_point (train_adjoint.py) | tracking (train_tracking.py)
-  target_xy: [0.2, 0.4]       # point_to_point: target position for the mid node
-  trajectory_type: circle     # tracking: circle | figure8 | line
+  target_xy: [0.2, 0.4]          # 2D point_to_point: target position for the mid node
+  target_xyz: [0.35, 0.1, 0.1]    # 3D point_to_point: target position for the mid node
+  # tracking: circle | figure8 | line  (both dims; the planar curves sit at z=0 in 3D)
+  #           helix | figure8_3d       (3D only)
+  trajectory_type: circle
   track_w: 1.0                 # tracking: per-step loss weight
 
 # Receding-horizon control (RHC). When disabled, the whole horizon is
@@ -45,9 +94,35 @@ rhc:
   num_segments: 5
   reinit_policy_each_segment: true   # fresh policy weights + optimizer per segment (as in the original submission)
 
+# Equilibrium (Newton-Raphson) solver.
+#
+# A compressed rod is post-buckled: the equilibrium Jacobian picks up negative
+# eigenvalues (one pair per buckling mode, and 3D has twice as many as 2D
+# because each mode exists in both the y and the z direction). An undamped
+# full Newton step on such an indefinite system can diverge — the residual
+# blows up, every iteration is burned, and you get a stream of
+# "Maximum number of iterations reached."
+#
+# line_search + reg are the two standard safeguards against that. Neither
+# changes the answer when plain Newton was already converging: the full step
+# is always taken first and only shortened if it does NOT reduce the residual.
+newton:
+  line_search: true        # backtracking line search on ||residual||
+  max_backtrack: 12        # halvings before falling back to regularization
+  nonmonotone_memory: 8    # a step is accepted if it does not exceed the worst
+                           # residual of the last N iterations. Newton's residual
+                           # is legitimately non-monotone here (it can jump 40x
+                           # upward on the way down), so demanding a decrease
+                           # every iteration would cripple the solver. 1 = strict
+                           # monotone decrease.
+  reg: 0.0                 # base Tikhonov shift on J_ff, relative to its diagonal.
+                           # 0 -> regularize only when the line search stalls.
+                           # Raise to ~1.0e-8 for a persistently stiff/unstable setup.
+  verbose: false           # print a one-line diagnosis for each failed step
+
 # Optimization / training.
 train:
-  epochs: 50                #200 is default. non-RHC mode: number of full-horizon training epochs
+  epochs: 100                #200 is default. non-RHC mode: number of full-horizon training epochs
   iterations_per_segment: 200  # RHC mode: gradient steps per segment
   lr: 0.001
   hidden: 64

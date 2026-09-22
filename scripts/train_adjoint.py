@@ -3,6 +3,12 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / 'src'))
 
+# Must run before numpy is imported: OpenBLAS goes multithreaded at about
+# n = 100, and for the small dense solves here (94x94 in 2D, 141x141 in 3D)
+# the threading overhead costs ~2000x. See src/blas_threads.py.
+from blas_threads import limit_blas_threads
+limit_blas_threads()
+
 import numpy as np
 import os
 import torch
@@ -13,22 +19,38 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import argparse
 
-from SimulatorEnv_2D import SimulatorEnv_2D
 from implicit_grad_tools import multistep_adjoint_gradient
 from utils import visualize_results
 from config import load_config
+from env_factory import (
+    build_env,
+    reset_env,
+    env_dim,
+    end_control_dim,
+    initial_control,
+    task_target,
+    node_tracking_loss,
+    dloss_dq_free_node,
+)
 
 
 class BoundaryVelocityNet(nn.Module):
-    def __init__(self, hidden=64):
+    """Maps the continuation parameter lambda to the right end's control rate.
+
+    ``out_dim`` is 3 in 2D ((x, y, theta) rate) and 5 in 3D
+    ((x, y, z, theta, phi) rate); the left end is held fixed.
+    """
+
+    def __init__(self, hidden=64, out_dim=3):
         super().__init__()
+        self.out_dim = out_dim
         self.mlp = nn.Sequential(
             nn.Linear(1, hidden),
             nn.Tanh(),
             nn.Linear(hidden, hidden),
             nn.Tanh(),
             # for right end
-            nn.Linear(hidden, 3),
+            nn.Linear(hidden, out_dim),
         )
 
     def forward(self, lam):
@@ -44,27 +66,9 @@ def reinit_net_(net: nn.Module):
     net.apply(_init)
 
 
-def final_midpoint_loss(q, mid_node, target_xy):
-    mx = q[2 * mid_node]
-    my = q[2 * mid_node + 1]
-    dx = mx - target_xy[0]
-    dy = my - target_xy[1]
-    return dx * dx + dy * dy, (mx, my)
-
-
-def dloss_dq_free_midpoint(q, free_index, mid_node, target_xy):
-    ix = 2 * mid_node
-    iy = 2 * mid_node + 1
-    mx, my = q[ix], q[iy]
-
-    a_free = np.zeros(len(free_index), dtype=float)
-    pos_x = np.where(free_index == ix)[0]
-    pos_y = np.where(free_index == iy)[0]
-    if len(pos_x) == 1:
-        a_free[pos_x[0]] = 2.0 * (mx - target_xy[0])
-    if len(pos_y) == 1:
-        a_free[pos_y[0]] = 2.0 * (my - target_xy[1])
-    return a_free
+def final_midpoint_loss(q, dim, mid_node, target):
+    """Squared distance of the mid node to the target. Returns (loss, position)."""
+    return node_tracking_loss(q, dim, mid_node, target)
 
 
 def resolve_device(name: str) -> torch.device:
@@ -97,9 +101,10 @@ def rollout_segment(env, net, u_start, T, dlam, device, jac_reg):
     converged = True
 
     u = u_start.clone()
+    n_left = net.out_dim          # left end is held fixed -> zero rate
     for k in range(T):
         lam = torch.tensor([[k / T]], dtype=torch.float32, device=device)
-        u_dot_full = torch.cat([torch.zeros(3, device=device), net(lam).squeeze(0)])
+        u_dot_full = torch.cat([torch.zeros(n_left, device=device), net(lam).squeeze(0)])
         u = u + dlam * u_dot_full
         u_list.append(u)
 
@@ -134,15 +139,16 @@ def optimize_segment(env, net, opt, u_start, T, dlam, device, target_xy, cfg,
         free_index = env.free_index
         fixed_index = env.fixed_index
 
-        L, (mx, my) = final_midpoint_loss(q_final, env.mid_node, target_xy)
+        dim = env.dim
+        L, _ = final_midpoint_loss(q_final, dim, env.mid_node, target_xy)
 
         a_free_per_step = np.zeros((len(q_list), len(free_index)), dtype=float)
-        a_free_per_step[-1] = dloss_dq_free_midpoint(q_final, free_index, env.mid_node, target_xy)
+        a_free_per_step[-1] = dloss_dq_free_node(q_final, free_index, dim, env.mid_node, target_xy)
 
         u_seq_np = np.stack([u.detach().cpu().numpy() for u in u_list], axis=0)
         g_u_seq = multistep_adjoint_gradient(
             u_seq_np, J_list, free_index, fixed_index, env.deltaL,
-            a_free_per_step, jac_reg=cfg.train.jac_reg,
+            a_free_per_step, jac_reg=cfg.train.jac_reg, dim=dim,
         )
 
         surrogate = torch.zeros((), device=device)
@@ -182,27 +188,17 @@ def main():
     # -----------------------------
     # 1) Environment
     # -----------------------------
-    env = SimulatorEnv_2D(
-        nv=cfg.rod.nv,
-        dt=cfg.rod.dt,
-        rod_length=cfg.rod.rod_length,
-        total_time=cfg.rod.total_time,
-        R_outer=cfg.rod.R_outer,
-        r_inner=cfg.rod.r_inner,
-        E_al=cfg.rod.E_al,
-        rho_al=cfg.rod.rho_al,
-        max_newton_iter=cfg.rod.max_newton_iter,
-        save_history=False,
-    )
-    env.reset(init_x=cfg.start.init_x, init_y=cfg.start.init_y, init_theta=cfg.start.init_theta)
+    dim = env_dim(cfg)
+    env = build_env(cfg)
+    reset_env(env, cfg)
 
     N = env.Nsteps
-    target_xy = np.array(cfg.task.target_xy, dtype=float)
+    target_xy = task_target(cfg)
 
     device = resolve_device(cfg.train.device)
-    u0 = torch.tensor(list(cfg.start.u_left) + list(cfg.start.u_right), dtype=torch.float32, device=device)
+    u0 = torch.tensor(initial_control(cfg), dtype=torch.float32, device=device)
 
-    net = BoundaryVelocityNet(hidden=cfg.train.hidden).to(device)
+    net = BoundaryVelocityNet(hidden=cfg.train.hidden, out_dim=end_control_dim(dim)).to(device)
     opt = optim.Adam(net.parameters(), lr=cfg.train.lr)
 
     _log_dir = str(_ROOT / 'experiments' / cfg.output.experiment_name)
@@ -211,6 +207,7 @@ def main():
 
     print("Network structure:")
     print(net)
+    print(f"Environment: {type(env).__name__}  (dim={dim}, control={2 * end_control_dim(dim)}D)")
     print(f"Training on device: {device}")
     print(f"RHC: {'enabled (' + str(cfg.rhc.num_segments) + ' segments)' if cfg.rhc.enabled else 'disabled (single horizon)'}")
 
@@ -240,15 +237,15 @@ def main():
 
             q_final = q_list[-1]
             free_index, fixed_index = env.free_index, env.fixed_index
-            L_np, (mx, my) = final_midpoint_loss(q_final, env.mid_node, target_xy)
+            L_np, mid_pos = final_midpoint_loss(q_final, dim, env.mid_node, target_xy)
 
             a_free_per_step = np.zeros((len(q_list), len(free_index)), dtype=float)
-            a_free_per_step[-1] = dloss_dq_free_midpoint(q_final, free_index, env.mid_node, target_xy)
+            a_free_per_step[-1] = dloss_dq_free_node(q_final, free_index, dim, env.mid_node, target_xy)
 
             u_seq_np = np.stack([u.detach().cpu().numpy() for u in u_list], axis=0)
             g_u_seq = multistep_adjoint_gradient(
                 u_seq_np, J_list, free_index, fixed_index, env.deltaL,
-                a_free_per_step, jac_reg=cfg.train.jac_reg,
+                a_free_per_step, jac_reg=cfg.train.jac_reg, dim=dim,
             )
 
             surrogate = torch.zeros((), device=device)
@@ -261,8 +258,8 @@ def main():
             opt.step()
 
             writer.add_scalar("loss/final", L_np, ep)
-            writer.add_scalar("midpoint/x", mx, ep)
-            writer.add_scalar("midpoint/y", my, ep)
+            for c, axis_name in enumerate("xyz"[:dim]):
+                writer.add_scalar(f"midpoint/{axis_name}", mid_pos[c], ep)
             writer.add_scalar("physics/newton_converged", 1.0, ep)
 
             pbar.set_postfix({"loss": f"{L_np:.6f}"})
@@ -271,7 +268,9 @@ def main():
             loss_history.append((ep, L_np))
 
             if ep % 10 == 0:
-                print(f"[ep {ep:04d}] L(final)={L_np:.6f}  midpoint=({mx:.3f},{my:.3f})  target=({target_xy[0]:.3f},{target_xy[1]:.3f})")
+                mid_s = ",".join(f"{v:.3f}" for v in mid_pos)
+                tgt_s = ",".join(f"{v:.3f}" for v in target_xy)
+                print(f"[ep {ep:04d}] L(final)={L_np:.6f}  midpoint=({mid_s})  target=({tgt_s})")
 
         if final_loss is not None:
             print(f"\nTraining finished. Final loss: {final_loss:.6f}")
@@ -322,10 +321,11 @@ def main():
 
             loss_history.append((seg_idx, result["best_loss"]))
             writer.add_scalar("loss/segment_best", result["best_loss"], seg_idx)
-            mx, my = q_last[2 * env.mid_node], q_last[2 * env.mid_node + 1]
-            writer.add_scalar("midpoint/x", mx, seg_idx)
-            writer.add_scalar("midpoint/y", my, seg_idx)
-            print(f"[segment {seg_idx}] best_loss={result['best_loss']:.6e}  midpoint=({mx:.3f},{my:.3f})")
+            mid_pos = q_last[dim * env.mid_node: dim * env.mid_node + dim]
+            for c, axis_name in enumerate("xyz"[:dim]):
+                writer.add_scalar(f"midpoint/{axis_name}", mid_pos[c], seg_idx)
+            mid_s = ",".join(f"{v:.3f}" for v in mid_pos)
+            print(f"[segment {seg_idx}] best_loss={result['best_loss']:.6e}  midpoint=({mid_s})")
             global_ep += 1
 
         final_loss = loss_history[-1][1] if loss_history else None

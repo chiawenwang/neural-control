@@ -8,6 +8,8 @@ except ImportError:
     render_dlo_neurips = None
 
 from contact import get_contact_forces
+from energy import build_energy
+from newton import solve_equilibrium
 from matplotlib.patches import Circle
 
 ############################
@@ -332,57 +334,48 @@ def getFb(q, EI, deltaL):
 
 
 def objfun(q_old, u_old, dt, tol, maximum_iter,
-           m, mMat, EI, EA, W, deltaL, free_index,
+           m, mMat, energy, W, deltaL, free_index,
            control_node=None,
            use_inertia=False,
-           obstacles=None):
-    """
-    Single-step implicit time integration (Newton-Raphson).
+           obstacles=None,
+           newton_cfg=None):
+    """Single-step implicit time integration.
+
+    Thin wrapper around :func:`newton.solve_equilibrium`: it only applies the
+    clamped boundary DOFs and hands the rest to the shared globalized Newton
+    solver (line search + adaptive regularization, see src/newton.py).
+    ``newton_cfg`` is the ``newton:`` block of the YAML config; with
+    ``line_search: false`` this reproduces the original undamped iteration.
     """
     if control_node is None:
         raise ValueError("Control node position must be provided.")
 
-    q_new = q_old.copy()
-    q_new[:4] = control_node[:4]  # left end nodes
-    q_new[-4:] = control_node[4:]  # right end nodes
+    q_start = q_old.copy()
+    q_start[:4] = control_node[:4]  # left end nodes
+    q_start[-4:] = control_node[4:]  # right end nodes
 
-    iter_count = 0
-    error = tol * 10
-    flag = 1
-
-    while error > tol:
-        # inertia term should be 0 for quasi-static assumption
-        if use_inertia:
-            F_inertia = m / dt * ((q_new - q_old) / dt - u_old)
-            J_inertia = mMat / (dt ** 2)
-        else:
-            F_inertia = np.zeros_like(q_new)
-            J_inertia = np.zeros((q_new.size, q_new.size))
-
-        Fs, Js = getFs(q_new, EA, deltaL)
-        Fb, Jb = getFb(q_new, EI, deltaL)
-        F_elastic = Fs + Fb
-        J_elastic = Js + Jb
-
-        Fc, Jc = get_contact_forces(q_new, obstacles or [])
-
-        f = F_inertia - F_elastic - Fc - W
-        J = J_inertia - J_elastic - Jc
-
-        f_free = f[free_index]
-        J_free = J[np.ix_(free_index, free_index)]
-
-        dq_free = np.linalg.solve(J_free, f_free)
-        q_new[free_index] = q_new[free_index] - dq_free
-
-        error = np.linalg.norm(f_free)
-        iter_count += 1
-        if iter_count > maximum_iter:
-            flag = -1
-            print("Maximum number of iterations reached.")
-            break
-
-    return q_new, flag, J
+    cfg = dict(newton_cfg or {})
+    q_new, flag, J, info = solve_equilibrium(
+        q_start,
+        energy=energy,
+        W=W,
+        free_index=free_index,
+        dim=2,
+        tol=tol,
+        obstacles=obstacles or [],
+        max_iter=maximum_iter,
+        q_old=q_old,
+        u_old=u_old,
+        dt=dt,
+        m=m,
+        mMat=mMat,
+        use_inertia=use_inertia,
+        line_search=cfg.get("line_search", True),
+        max_backtrack=cfg.get("max_backtrack", 12),
+        nonmonotone_memory=cfg.get("nonmonotone_memory", 8),
+        reg=cfg.get("reg", 0.0),
+    )
+    return q_new, flag, J, info
 
 
 ############################
@@ -396,7 +389,13 @@ class SimulatorEnv_2D:
         position and orientation of the right end.
       - State: internal rod node positions q, velocity u, current time ctime, etc.
       - Interface: reset(), step(control), render()
+
+    See SimulatorEnv_3D for the 3D counterpart; both expose the same API and
+    a ``dim`` attribute so generic code can branch on it.
     """
+
+    #: Spatial dimension — lets generic code branch without isinstance checks.
+    dim = 2
 
     def __init__(self,
                  nv=51,
@@ -409,7 +408,11 @@ class SimulatorEnv_2D:
                  E_al=70e9,
                  rho_al=2700,
                  max_newton_iter=1000,
-                 save_history=False):
+                 save_history=False,
+                 energy_cfg=None,
+                 energy=None,
+                 newton_cfg=None,
+                 warn_on_newton_failure=False):
         self.nv = nv
         self.dt = dt
         self.rod_length = rod_length
@@ -420,6 +423,11 @@ class SimulatorEnv_2D:
         self.rho_al = rho_al
         self.max_newton_iter = max_newton_iter
         self.save_history = save_history
+        # Newton solver options (the `newton:` block of the YAML config) and
+        # a running count of steps whose equilibrium solve did not converge.
+        self.newton_cfg = dict(newton_cfg or {})
+        self.warn_on_newton_failure = warn_on_newton_failure
+        self.n_newton_failures = 0
 
         # Cross-section and material parameters
         self.I_sec = np.pi * (R_outer ** 4 - r_inner ** 4) / 4
@@ -429,6 +437,12 @@ class SimulatorEnv_2D:
 
         # Spatial discretization
         self.deltaL = rod_length / (nv - 1)
+
+        # Elastic energy model. Defaults to the built-in DER; `energy_cfg` is
+        # the `energy:` block of the YAML config, and `energy` lets a caller
+        # inject a RodEnergy instance directly (overrides energy_cfg).
+        self.energy = energy if energy is not None else build_energy(
+            energy_cfg, EI=self.EI, EA=self.EA, deltaL=self.deltaL, nv=nv)
 
         # Node coordinates (initially a straight rod)
         self.nodes = np.zeros((nv, 2))
@@ -449,7 +463,7 @@ class SimulatorEnv_2D:
         self.W[1::2] = -9.81 * m_node
 
         # Newton iteration tolerance
-        self.tol = self.EI / rod_length ** 2 * 1e-3
+        self.tol = self.energy.stiffness_scale / rod_length ** 2 * 1e-3
 
         # Constrained DOFs
         all_DOFs = np.arange(2 * nv)
@@ -592,7 +606,7 @@ class SimulatorEnv_2D:
         control_node = self._control_node_from_xytheta(control)
 
         # Call the implicit integrator
-        q_new, flag, J = objfun(
+        q_new, flag, J, ninfo = objfun(
             q_old=self.q,
             u_old=self.u,
             dt=self.dt,
@@ -600,15 +614,22 @@ class SimulatorEnv_2D:
             maximum_iter=self.max_newton_iter,
             m=self.m,
             mMat=self.mMat,
-            EI=self.EI,
-            EA=self.EA,
+            energy=self.energy,
             W=self.W,
             deltaL=self.deltaL,
             free_index=self.free_index,
             control_node=control_node,
             use_inertia=use_inertia,
-            obstacles=self.obstacles
+            obstacles=self.obstacles,
+            newton_cfg=self.newton_cfg,
         )
+
+        if flag < 0:
+            self.n_newton_failures += 1
+            if self.warn_on_newton_failure:
+                print(f"[newton] step {self.current_step}: {ninfo['reason']} "
+                      f"(residual {ninfo['residual']:.3e} vs tol {self.tol:.3e}, "
+                      f"{ninfo['iterations']} iters)")
 
         # Update velocity and time
         u_new = (q_new - self.q) / self.dt
@@ -631,6 +652,7 @@ class SimulatorEnv_2D:
             "free_index": self.free_index.copy(),
             "fixed_index": self.fixed_index.copy(),
             "control_node": control_node.copy(),  # 8D boundary DOFs
+            "newton": ninfo,
         }
 
         # Save history

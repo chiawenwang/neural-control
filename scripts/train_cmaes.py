@@ -11,15 +11,29 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / 'src'))
 
+# Must run before numpy is imported: OpenBLAS goes multithreaded at about
+# n = 100, and for the small dense solves here (94x94 in 2D, 141x141 in 3D)
+# the threading overhead costs ~2000x. See src/blas_threads.py.
+from blas_threads import limit_blas_threads
+limit_blas_threads()
+
 import argparse
 import numpy as np
 from typing import Dict, List
 import matplotlib.pyplot as plt
 import time
 
-from SimulatorEnv_2D import SimulatorEnv_2D
 from utils import visualize_results
 from config import load_config
+from env_factory import (
+    build_env,
+    reset_env,
+    env_dim,
+    control_dim,
+    initial_control,
+    task_target,
+    node_position,
+)
 
 
 class SimpleController:
@@ -96,17 +110,23 @@ class CMAESOptimizer:
 
 
 class NeuralControlAgent:
-    """Agent using evolution strategy for optimization"""
+    """Agent using evolution strategy for optimization.
+
+    Works with either environment: ``env.dim`` selects the control width
+    (6D in 2D, 10D in 3D) and the rollout's boundary-pose bookkeeping.
+    """
     def __init__(self, env, segment_horizon: int = 8, degree: int = 3, 
                  u_max: float = 0.1, pop_size: int = 15):
         self.env = env
+        self.dim = getattr(env, "dim", 2)
+        self.n_u = control_dim(self.dim)
         self.segment_horizon = segment_horizon
         self.degree = degree
         self.u_max = u_max
         self.pop_size = pop_size
         
         # Controller
-        self.controller = SimpleController(output_dim=6, degree=degree, u_max=u_max)
+        self.controller = SimpleController(output_dim=self.n_u, degree=degree, u_max=u_max)
         
         # Optimizer
         n_params = self.controller.get_params().size
@@ -115,7 +135,10 @@ class NeuralControlAgent:
     def forward_rollout(self, initial_q: np.ndarray, lamda_start: float,
                        steps: int, safe: bool = True) -> Dict:
         """Execute forward rollout"""
-        from SimulatorEnv_2D import objfun
+        if self.dim == 2:
+            from SimulatorEnv_2D import objfun
+        else:
+            from SimulatorEnv_3D import objfun_3d as objfun
         
         q_traj = [initial_q.copy()]
         u_traj = []
@@ -129,28 +152,28 @@ class NeuralControlAgent:
             u = self.controller.forward(lamda)
             u_traj.append(u)
             
-            # Build control vector incrementally from current state
-            current_left_x = q_current[0]
-            current_left_y = q_current[1]
-            current_right_x = q_current[-2]
-            current_right_y = q_current[-1]
-            
+            # Build control vector incrementally from current state.
+            # Per end the layout is (position..., angles...):
+            #   2D -> (x, y, theta)            3D -> (x, y, z, theta, phi)
+            d = self.dim
+            n_ang = d - 1                       # 1 angle in 2D, 2 in 3D
+            per_end = d + n_ang
+            left_pos = q_current[:d]            # node_0
+            right_pos = q_current[-d:]          # node_{n-1}
+
             # Smooth incremental control
             delta_scale = 0.05  # Small steps
-            new_left_x = current_left_x + u[0] * delta_scale
-            new_left_y = current_left_y + u[1] * delta_scale
-            new_left_theta = u[2] * 0.1
-            new_right_x = current_right_x + u[3] * delta_scale
-            new_right_y = current_right_y + u[4] * delta_scale
-            new_right_theta = u[5] * 0.1
-            
-            control_vec = np.array([new_left_x, new_left_y, new_left_theta,
-                                   new_right_x, new_right_y, new_right_theta])
+            control_vec = np.empty(self.n_u)
+            control_vec[:d] = left_pos + u[:d] * delta_scale
+            control_vec[d:per_end] = u[d:per_end] * 0.1
+            control_vec[per_end:per_end + d] = right_pos + u[per_end:per_end + d] * delta_scale
+            control_vec[per_end + d:] = u[per_end + d:] * 0.1
+
             control_node = self.env._control_node_from_xytheta(control_vec)
             
             # Solve equilibrium
             try:
-                q_new, flag, J = objfun(
+                q_new, flag, J, _ninfo = objfun(
                     q_old=q_current,
                     u_old=np.zeros_like(q_current),
                     dt=self.env.dt,
@@ -158,8 +181,7 @@ class NeuralControlAgent:
                     maximum_iter=50,  # Fewer iterations
                     m=self.env.m,
                     mMat=self.env.mMat,
-                    EI=self.env.EI,
-                    EA=self.env.EA,
+                    energy=self.env.energy,
                     W=self.env.W,
                     deltaL=self.env.deltaL,
                     free_index=self.env.free_index,
@@ -186,8 +208,7 @@ class NeuralControlAgent:
             return 1e6
         
         q_final = rollout_data['q_traj'][-1]
-        mid_idx = self.env.mid_node
-        p_mid = np.array([q_final[2*mid_idx], q_final[2*mid_idx+1]])
+        p_mid = node_position(q_final, self.dim, self.env.mid_node)
         
         # Distance to target
         dist = np.linalg.norm(p_mid - target_pos)
@@ -268,7 +289,7 @@ class NeuralControlAgent:
                 print(f"{'='*60}")
             
             # Reinitialize controller
-            self.controller = SimpleController(output_dim=6, degree=self.degree, u_max=self.u_max)
+            self.controller = SimpleController(output_dim=self.n_u, degree=self.degree, u_max=self.u_max)
             n_params = self.controller.get_params().size
             self.optimizer = CMAESOptimizer(n_params=n_params, pop_size=self.pop_size, sigma=0.15)
             
@@ -285,8 +306,7 @@ class NeuralControlAgent:
             initial_q = result['final_rollout']['q_traj'][-1]
             
             # Check error
-            mid_idx = self.env.mid_node
-            p_mid = np.array([initial_q[2*mid_idx], initial_q[2*mid_idx+1]])
+            p_mid = node_position(initial_q, self.dim, self.env.mid_node)
             error = np.linalg.norm(p_mid - target_pos)
             
             if verbose:
@@ -319,25 +339,17 @@ def main():
 
     # Create environment
     print("\nInitializing environment...")
-    env = SimulatorEnv_2D(
-        nv=cfg.rod.nv,
-        dt=cfg.rod.dt,
-        rod_length=cfg.rod.rod_length,
-        total_time=cfg.rod.total_time,
-        R_outer=cfg.rod.R_outer,
-        r_inner=cfg.rod.r_inner,
-        E_al=cfg.rod.E_al,
-        rho_al=cfg.rod.rho_al,
-        max_newton_iter=cfg.rod.max_newton_iter,
-        save_history=False,
-    )
-    env.reset(init_x=cfg.start.init_x, init_y=cfg.start.init_y, init_theta=cfg.start.init_theta)
+    dim = env_dim(cfg)
+    env = build_env(cfg)
+    reset_env(env, cfg)
 
     # Target
-    target_pos = np.array(cfg.task.target_xy, dtype=float)
+    target_pos = task_target(cfg)
 
-    print(f"\nTarget: ({target_pos[0]:.2f}, {target_pos[1]:.2f})")
-    print(f"Initial midpoint: ({env.nodes[env.mid_node, 0]:.2f}, {env.nodes[env.mid_node, 1]:.2f})")
+    print(f"Environment: {type(env).__name__}  (dim={dim}, control={control_dim(dim)}D)")
+    print("\nTarget: (" + ", ".join(f"{v:.2f}" for v in target_pos) + ")")
+    print("Initial midpoint: ("
+          + ", ".join(f"{v:.2f}" for v in env.nodes[env.mid_node]) + ")")
 
     # RHC toggle: disabled -> a single "segment" spanning the whole horizon.
     n_segments = cfg.rhc.num_segments if cfg.rhc.enabled else 1

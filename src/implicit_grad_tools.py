@@ -1,5 +1,52 @@
 import numpy as np
 
+def boundary_node_jacobian_3d(control_10d, deltaL):
+    """
+    Analytically computes J_map = d(q_b)/d(u) for the 3D environment, shape 12x10.
+    - u   = [x_l, y_l, z_l, th_l, ph_l, x_r, y_r, z_r, th_r, ph_r]
+    - q_b = [node_0, node_1, node_{n-2}, node_{n-1}]  (3 coords each, flattened),
+      matching SimulatorEnv_3D._control_node_from_pose:
+
+        node_0     = p_l
+        node_1     = p_l + dL * d(th_l, ph_l)
+        node_{n-2} = p_r - dL * d(th_r, ph_r)
+        node_{n-1} = p_r
+
+      with d(th, ph) = (cos(ph)cos(th), cos(ph)sin(th), sin(ph)).
+
+    Returns:
+      J_map: shape (12, 10)
+    """
+    x_l, y_l, z_l, th_l, ph_l, x_r, y_r, z_r, th_r, ph_r = control_10d
+
+    J = np.zeros((12, 10), dtype=float)
+    I3 = np.eye(3)
+
+    def _dd(th, ph):
+        """d(tangent)/d(th), d(tangent)/d(ph)."""
+        ct, st = np.cos(th), np.sin(th)
+        cp, sp = np.cos(ph), np.sin(ph)
+        d_dth = np.array([-cp * st, cp * ct, 0.0])
+        d_dph = np.array([-sp * ct, -sp * st, cp])
+        return d_dth, d_dph
+
+    # ----- left end: node_0 (rows 0:3), node_1 (rows 3:6); pose cols 0:5 -----
+    J[0:3, 0:3] = I3                                  # node_0 = p_l
+    J[3:6, 0:3] = I3                                  # node_1 = p_l + dL*d_l
+    d_dth, d_dph = _dd(th_l, ph_l)
+    J[3:6, 3] = deltaL * d_dth
+    J[3:6, 4] = deltaL * d_dph
+
+    # ----- right end: node_{n-2} (rows 6:9), node_{n-1} (rows 9:12); cols 5:10 -----
+    J[6:9, 5:8] = I3                                  # node_{n-2} = p_r - dL*d_r
+    J[9:12, 5:8] = I3                                 # node_{n-1} = p_r
+    d_dth, d_dph = _dd(th_r, ph_r)
+    J[6:9, 8] = -deltaL * d_dth
+    J[6:9, 9] = -deltaL * d_dph
+
+    return J
+
+
 def boundary_node_jacobian(control_6d, deltaL):
     """
     Analytically computes J_map = d(q_b)/d(u), shape 8x6.
@@ -52,14 +99,25 @@ def boundary_node_jacobian(control_6d, deltaL):
     return J
 
 
-def implicit_final_control_grad(J, free_index, fixed_index, a_free, control_6d, deltaL):
+def _boundary_jacobian(control, deltaL, dim=2):
+    """Dimension dispatch for the d(q_b)/d(u) map."""
+    if dim == 2:
+        return boundary_node_jacobian(control, deltaL)
+    if dim == 3:
+        return boundary_node_jacobian_3d(control, deltaL)
+    raise ValueError(f"dim must be 2 or 3, got {dim}")
+
+
+def implicit_final_control_grad(J, free_index, fixed_index, a_free, control_6d, deltaL,
+                                 dim=2):
     """
     Implicit gradient via the adjoint method (single/final step only).
     Given:
       - the Jacobian sub-blocks of the equilibrium residual r_f(q_f, q_b) = 0, J = df/dq
       - a_free = dL/dq_free  (nonzero only on the free DOFs)
     Returns:
-      g_u : dL/du (6D), corresponding to [x_l, y_l, th_l, x_r, y_r, th_r]
+      g_u : dL/du — 6D [x_l, y_l, th_l, x_r, y_r, th_r] when dim=2,
+            10D [x_l, y_l, z_l, th_l, ph_l, x_r, y_r, z_r, th_r, ph_r] when dim=3
 
     Formula:
       J_ff^T v = a_free
@@ -68,17 +126,17 @@ def implicit_final_control_grad(J, free_index, fixed_index, a_free, control_6d, 
     """
     # Extract sub-blocks
     J_ff = J[np.ix_(free_index, free_index)]         # shape (nf,nf)
-    J_fb = J[np.ix_(free_index, fixed_index)]        # shape (nf,8)
+    J_fb = J[np.ix_(free_index, fixed_index)]        # shape (nf, 4*dim)
 
     # Adjoint solve
     v = np.linalg.solve(J_ff.T, a_free)              # shape (nf,)
 
-    # dL/dq_b (8D)
-    g_qb = - (J_fb.T @ v)                            # shape (8,)
+    # dL/dq_b (4*dim,)
+    g_qb = - (J_fb.T @ v)
 
-    # map 8D -> 6D
-    J_map = boundary_node_jacobian(control_6d, deltaL)  # (8,6)
-    g_u = J_map.T @ g_qb                               # (6,)
+    # map boundary DOFs -> end-effector pose DOFs
+    J_map = _boundary_jacobian(control_6d, deltaL, dim)   # (4*dim, n_u)
+    g_u = J_map.T @ g_qb                                  # (n_u,)
 
     return g_u
 
@@ -94,7 +152,7 @@ def local_dxf_dxb(J, free_index, fixed_index, jac_reg=0.0):
         => dq_f/dq_b = -J_ff^{-1} @ J_fb
 
     Returns:
-      dxf_dxb : shape (n_free, 8)
+      dxf_dxb : shape (n_free, 4*dim)
     """
     J_ff = J[np.ix_(free_index, free_index)]
     J_fb = J[np.ix_(free_index, fixed_index)]
@@ -108,7 +166,7 @@ def local_dxf_dxb(J, free_index, fixed_index, jac_reg=0.0):
 
 
 def multistep_adjoint_gradient(u_seq, J_list, free_index, fixed_index, deltaL,
-                                a_free_per_step, jac_reg=0.0):
+                                a_free_per_step, jac_reg=0.0, dim=2):
     """
     Exact multi-step (receding-horizon) adjoint gradient: computes dL/du_k for
     every step k in the horizon, instead of computing it once at the final
@@ -142,13 +200,14 @@ def multistep_adjoint_gradient(u_seq, J_list, free_index, fixed_index, deltaL,
 
     Parameters
     ----------
-    u_seq : np.ndarray, shape (T, 6)
-        The actual accumulated (absolute) control applied at each step,
-        [x_l,y_l,th_l,x_r,y_r,th_r].
+    u_seq : np.ndarray, shape (T, n_u)
+        The actual accumulated (absolute) control applied at each step:
+        [x_l,y_l,th_l,x_r,y_r,th_r] in 2D (n_u=6), or
+        [x_l,y_l,z_l,th_l,ph_l,x_r,y_r,z_r,th_r,ph_r] in 3D (n_u=10).
     J_list : list[np.ndarray], length T
         The full equilibrium Jacobian returned by objfun at each step.
     free_index, fixed_index : np.ndarray
-        Free / boundary DOF indices (consistent with SimulatorEnv_2D).
+        Free / boundary DOF indices (consistent with the environment).
     deltaL : float
         Discretization length of the rod.
     a_free_per_step : np.ndarray, shape (T, n_free)
@@ -158,10 +217,13 @@ def multistep_adjoint_gradient(u_seq, J_list, free_index, fixed_index, deltaL,
     jac_reg : float
         Regularization coefficient for the equilibrium Jacobian (numerical
         stability).
+    dim : int
+        Spatial dimension of the environment, 2 or 3. Selects the
+        d(q_b)/d(u) map.
 
     Returns
     -------
-    g_u_seq : np.ndarray, shape (T, 6)
+    g_u_seq : np.ndarray, shape (T, n_u)
         dL_total/du_k, for every step's accumulated control.
     """
     u_seq = np.asarray(u_seq, dtype=float)
@@ -175,9 +237,9 @@ def multistep_adjoint_gradient(u_seq, J_list, free_index, fixed_index, deltaL,
         lam_f_cum = lam_f_cum + a_free_per_step[i]
 
         dxf_dxb_i = local_dxf_dxb(J_list[i], free_index, fixed_index, jac_reg)
-        B_i = boundary_node_jacobian(u_seq[i], deltaL)   # (8,6)
+        B_i = _boundary_jacobian(u_seq[i], deltaL, dim)   # (4*dim, n_u)
 
-        g_qb_i = dxf_dxb_i.T @ lam_f_cum                  # (8,)
-        g_u_seq[i] = B_i.T @ g_qb_i                        # (6,)
+        g_qb_i = dxf_dxb_i.T @ lam_f_cum                  # (4*dim,)
+        g_u_seq[i] = B_i.T @ g_qb_i                        # (n_u,)
 
     return g_u_seq

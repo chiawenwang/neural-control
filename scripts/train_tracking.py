@@ -3,6 +3,12 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / 'src'))
 
+# Must run before numpy is imported: OpenBLAS goes multithreaded at about
+# n = 100, and for the small dense solves here (94x94 in 2D, 141x141 in 3D)
+# the threading overhead costs ~2000x. See src/blas_threads.py.
+from blas_threads import limit_blas_threads
+limit_blas_threads()
+
 import numpy as np
 import os
 import torch
@@ -13,23 +19,35 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import argparse
 
-from SimulatorEnv_2D import SimulatorEnv_2D
 from implicit_grad_tools import multistep_adjoint_gradient
 from config import load_config
+from env_factory import (
+    build_env,
+    reset_env,
+    env_dim,
+    end_control_dim,
+    initial_control,
+    make_target_trajectory,
+    node_tracking_loss,
+    dloss_dq_free_node,
+)
 
 
 # ─────────────────────────────────────────────
 # Network architecture
 # ─────────────────────────────────────────────
 class BoundaryVelocityNet(nn.Module):
-    def __init__(self, hidden=64):
+    """lambda -> control rate of the right end (3 DOFs in 2D, 5 in 3D)."""
+
+    def __init__(self, hidden=64, out_dim=3):
         super().__init__()
+        self.out_dim = out_dim
         self.mlp = nn.Sequential(
             nn.Linear(1, hidden),
             nn.Tanh(),
             nn.Linear(hidden, hidden),
             nn.Tanh(),
-            nn.Linear(hidden, 3),   # controls the right end's 3 DOFs
+            nn.Linear(hidden, out_dim),   # controls the right end's DOFs
         )
 
     def forward(self, lam):
@@ -59,54 +77,6 @@ def segment_lengths(N: int, num_segments: int):
     return [base + 1 if i < rem else base for i in range(num_segments)]
 
 
-# ─────────────────────────────────────────────
-# Target trajectory generation
-# ─────────────────────────────────────────────
-def make_target_trajectory(N, rod_length, traj_type="circle"):
-    """Generates the N-step target midpoint trajectory, returning a (N, 2) array."""
-    lams = np.linspace(0, 1, N)
-    targets = np.zeros((N, 2))
-
-    if traj_type == "circle":
-        cx, cy, r = rod_length / 2, 0.25, 0.15
-        for i, lam in enumerate(lams):
-            theta = 2 * np.pi * lam
-            targets[i] = [cx + r * np.cos(theta), cy + r * np.sin(theta)]
-    elif traj_type == "figure8":
-        cx, cy, r = rod_length / 2, 0.0, 0.20
-        for i, lam in enumerate(lams):
-            theta = 2 * np.pi * lam
-            targets[i] = [cx + r * np.sin(theta), cy + r * np.sin(2 * theta) / 2]
-    elif traj_type == "line":
-        for i, lam in enumerate(lams):
-            targets[i] = [rod_length / 2, -0.20 + 0.40 * lam]
-    else:
-        raise ValueError(f"Unknown traj_type: {traj_type}")
-
-    return targets
-
-
-def step_midpoint_loss(q, mid_node, target_xy):
-    mx = q[2 * mid_node]
-    my = q[2 * mid_node + 1]
-    dx = mx - target_xy[0]
-    dy = my - target_xy[1]
-    return dx * dx + dy * dy, (mx, my)
-
-
-def dloss_dq_free_midpoint(q, free_index, mid_node, target_xy):
-    ix = 2 * mid_node
-    iy = 2 * mid_node + 1
-    mx, my = q[ix], q[iy]
-
-    a_free = np.zeros(len(free_index), dtype=float)
-    pos_x = np.where(free_index == ix)[0]
-    pos_y = np.where(free_index == iy)[0]
-    if len(pos_x) == 1:
-        a_free[pos_x[0]] = 2.0 * (mx - target_xy[0])
-    if len(pos_y) == 1:
-        a_free[pos_y[0]] = 2.0 * (my - target_xy[1])
-    return a_free
 
 
 def rollout_segment(env, net, u_start, targets_seg, dlam, device, track_w):
@@ -117,9 +87,10 @@ def rollout_segment(env, net, u_start, targets_seg, dlam, device, track_w):
     converged_mask = np.zeros(T, dtype=bool)
 
     u = u_start.clone()
+    n_left = net.out_dim          # left end is held fixed -> zero rate
     for k in range(T):
         lam = torch.tensor([[k / T]], dtype=torch.float32, device=device)
-        u_dot_full = torch.cat([torch.zeros(3, device=device), net(lam).squeeze(0)])
+        u_dot_full = torch.cat([torch.zeros(n_left, device=device), net(lam).squeeze(0)])
         u = u + dlam * u_dot_full
         u_list.append(u)
 
@@ -134,6 +105,7 @@ def rollout_segment(env, net, u_start, targets_seg, dlam, device, track_w):
 
 def compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets_seg, track_w, jac_reg):
     free_index, fixed_index = env.free_index, env.fixed_index
+    dim = env.dim
     T = len(q_list)
 
     total_loss = 0.0
@@ -141,16 +113,17 @@ def compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets_s
     for k in range(T):
         if not converged_mask[k]:
             continue
-        L_k, _ = step_midpoint_loss(q_list[k], env.mid_node, targets_seg[k])
+        L_k, _ = node_tracking_loss(q_list[k], dim, env.mid_node, targets_seg[k])
         total_loss += track_w * L_k
-        a_free_per_step[k] = track_w * dloss_dq_free_midpoint(q_list[k], free_index, env.mid_node, targets_seg[k])
+        a_free_per_step[k] = track_w * dloss_dq_free_node(q_list[k], free_index, dim, env.mid_node, targets_seg[k])
 
     if not converged_mask.any():
         return None, total_loss
 
     u_seq_np = np.stack([u.detach().cpu().numpy() for u in u_list], axis=0)
     g_u_seq = multistep_adjoint_gradient(
-        u_seq_np, J_list, free_index, fixed_index, env.deltaL, a_free_per_step, jac_reg=jac_reg,
+        u_seq_np, J_list, free_index, fixed_index, env.deltaL, a_free_per_step,
+        jac_reg=jac_reg, dim=dim,
     )
     return g_u_seq, total_loss
 
@@ -196,27 +169,18 @@ def main():
     torch.manual_seed(cfg.train.seed)
     np.random.seed(cfg.train.seed)
 
-    env = SimulatorEnv_2D(
-        nv=cfg.rod.nv,
-        dt=cfg.rod.dt,
-        rod_length=cfg.rod.rod_length,
-        total_time=cfg.rod.total_time,
-        R_outer=cfg.rod.R_outer,
-        r_inner=cfg.rod.r_inner,
-        E_al=cfg.rod.E_al,
-        rho_al=cfg.rod.rho_al,
-        max_newton_iter=cfg.rod.max_newton_iter,
-        save_history=False,
-    )
-    env.reset(init_x=cfg.start.init_x, init_y=cfg.start.init_y, init_theta=cfg.start.init_theta)
+    dim = env_dim(cfg)
+    env = build_env(cfg)
+    reset_env(env, cfg)
 
     N = env.Nsteps
-    targets = make_target_trajectory(N, env.rod_length, traj_type=cfg.task.trajectory_type)
+    targets = make_target_trajectory(N, env.rod_length,
+                                     traj_type=cfg.task.trajectory_type, dim=dim)
 
     device = resolve_device(cfg.train.device)
-    u0 = torch.tensor(list(cfg.start.u_left) + list(cfg.start.u_right), dtype=torch.float32, device=device)
+    u0 = torch.tensor(initial_control(cfg), dtype=torch.float32, device=device)
 
-    net = BoundaryVelocityNet(hidden=cfg.train.hidden).to(device)
+    net = BoundaryVelocityNet(hidden=cfg.train.hidden, out_dim=end_control_dim(dim)).to(device)
     opt = optim.Adam(net.parameters(), lr=cfg.train.lr)
 
     _log_dir = str(_ROOT / 'experiments' / cfg.output.experiment_name)
@@ -225,6 +189,7 @@ def main():
 
     print("Network structure:")
     print(net)
+    print(f"Environment: {type(env).__name__}  (dim={dim}, control={2 * end_control_dim(dim)}D)")
     print(f"Device: {device}")
     print(f"Trajectory type: {cfg.task.trajectory_type}")
     print(f"RHC: {'enabled (' + str(cfg.rhc.num_segments) + ' segments)' if cfg.rhc.enabled else 'disabled (single horizon)'}")
@@ -313,8 +278,9 @@ def main():
 
 
 def _visualize_tracking(env, net, u0, N, targets, device, cfg):
-    env.reset(init_x=cfg.start.init_x, init_y=cfg.start.init_y, init_theta=cfg.start.init_theta)
-    mid_xs, mid_ys = [], []
+    reset_env(env, cfg)
+    dim = env.dim
+    actual = []
 
     if cfg.rhc.enabled:
         seg_lens = segment_lengths(N, cfg.rhc.num_segments)
@@ -322,24 +288,38 @@ def _visualize_tracking(env, net, u0, N, targets, device, cfg):
         seg_lens = [N]
 
     u = u0.clone()
+    n_left = net.out_dim
     with torch.no_grad():
-        step0 = 0
         for T_seg in seg_lens:
             for k in range(T_seg):
                 lam = torch.tensor([[k / T_seg]], dtype=torch.float32, device=device)
-                u_dot_full = torch.cat([torch.zeros(3, device=device), net(lam).squeeze(0)])
+                u_dot_full = torch.cat([torch.zeros(n_left, device=device), net(lam).squeeze(0)])
                 u = u + (1.0 / T_seg) * u_dot_full
                 u_np = u.cpu().numpy()
                 obs, done, info = env.step(u_np, use_inertia=False)
                 if info["converged"]:
-                    mid_xs.append(info["q"][2 * env.mid_node])
-                    mid_ys.append(info["q"][2 * env.mid_node + 1])
-            step0 += T_seg
+                    a = dim * env.mid_node
+                    actual.append(info["q"][a:a + dim])
+    actual = np.array(actual).reshape(-1, dim)
 
-    fig, ax = plt.subplots(figsize=(6, 6))
-    ax.plot(targets[:, 0], targets[:, 1], 'b--', linewidth=2, label="Target trajectory")
-    ax.plot(mid_xs, mid_ys, 'r-o', markersize=3, linewidth=1.5, label="Actual midpoint")
-    ax.set_aspect('equal')
+    fig = plt.figure(figsize=(6, 6))
+    if dim == 2:
+        ax = fig.add_subplot(111)
+        ax.plot(targets[:, 0], targets[:, 1], 'b--', linewidth=2, label="Target trajectory")
+        ax.plot(actual[:, 0], actual[:, 1], 'r-o', markersize=3, linewidth=1.5,
+                label="Actual midpoint")
+        ax.set_aspect('equal')
+    else:
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot(targets[:, 0], targets[:, 1], targets[:, 2], 'b--', linewidth=2,
+                label="Target trajectory")
+        ax.plot(actual[:, 0], actual[:, 1], actual[:, 2], 'r-o', markersize=3,
+                linewidth=1.5, label="Actual midpoint")
+        ax.set_zlabel("z")
+        try:
+            ax.set_box_aspect((1, 1, 1))
+        except AttributeError:      # matplotlib < 3.3
+            pass
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_title(f"Midpoint Tracking ({cfg.task.trajectory_type})")
