@@ -25,6 +25,12 @@ from .env_factory import (
     initial_control,
     task_target,
     make_target_trajectory,
+    resolve_material,
+    material_summary,
 )
-from .utils import visualize_results
+from .utils import (
+    visualize_results,
+    save_trajectory_gif,
+    maybe_save_trajectory_gif,
+)
 from .config import load_config

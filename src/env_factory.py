@@ -53,13 +53,82 @@ def node_position(q, dim: int, node: int) -> np.ndarray:
     return np.asarray(q[a:a + dim], dtype=float)
 
 
+# --------------------------------------------------------------- materials
+
+#: The four fields that define what the rod is made of and how thick it is.
+#: Everything else the solver needs (I, A, EI, EA, nodal mass) is derived.
+MATERIAL_FIELDS = ("R_outer", "r_inner", "E_al", "rho_al")
+
+
+def resolve_material(cfg) -> dict:
+    """Resolve ``rod.material`` against the ``materials:`` presets.
+
+    Precedence: a field given explicitly under ``rod:`` wins over the preset,
+    so a config can pick a material and still tweak one dimension of it.
+    ``material: custom`` (or null/absent) skips the presets, in which case all
+    four fields must be given under ``rod:``.
+    """
+    rod = cfg.get("rod") or {}
+    presets = cfg.get("materials") or {}
+    name = rod.get("material")
+
+    params = {}
+    if name is not None and name != "custom":
+        if name not in presets:
+            known = ", ".join(sorted(presets)) or "(none defined)"
+            raise ValueError(
+                f"rod.material = {name!r} is not defined under `materials:`. "
+                f"Known materials: {known}. Use `custom` to set "
+                f"{'/'.join(MATERIAL_FIELDS)} directly under `rod:`."
+            )
+        preset = presets[name] or {}
+        unknown = sorted(set(preset) - set(MATERIAL_FIELDS))
+        if unknown:
+            raise ValueError(
+                f"material {name!r} has unsupported field(s) {unknown}; "
+                f"a material may only set {list(MATERIAL_FIELDS)}."
+            )
+        params.update(preset)
+
+    # Explicit rod-level values override the preset.
+    params.update({k: rod[k] for k in MATERIAL_FIELDS if k in rod})
+
+    missing = [k for k in MATERIAL_FIELDS if k not in params]
+    if missing:
+        where = "rod.material" if name in (None, "custom") else f"material {name!r}"
+        raise ValueError(f"{where} leaves {missing} undefined; set them under `rod:`.")
+
+    return {k: float(params[k]) for k in MATERIAL_FIELDS}
+
+
+def material_summary(cfg) -> str:
+    """One-line human-readable description of the resolved rod material."""
+    mat = resolve_material(cfg)
+    rod = cfg.get("rod") or {}
+    name = rod.get("material") or "custom"
+    overridden = [k for k in MATERIAL_FIELDS if k in rod]
+
+    I_sec = np.pi * (mat["R_outer"] ** 4 - mat["r_inner"] ** 4) / 4
+    A_sec = np.pi * (mat["R_outer"] ** 2 - mat["r_inner"] ** 2)
+    EI, EA = mat["E_al"] * I_sec, mat["E_al"] * A_sec
+
+    using_preset = name != "custom"
+    suffix = (f" (overriding {', '.join(overridden)})"
+              if overridden and using_preset else "")
+    return (f"{name}{suffix}: R_outer={mat['R_outer']:g} m, "
+            f"r_inner={mat['r_inner']:g} m, E={mat['E_al']:.3g} Pa, "
+            f"rho={mat['rho_al']:g} kg/m^3  ->  EI={EI:.3g} N*m^2, EA={EA:.3g} N")
+
+
 # ------------------------------------------------------------- env building
 
 def build_env(cfg, **overrides):
     """Instantiate the environment selected by ``env.dim``.
 
-    Everything under ``rod:`` is forwarded; ``overrides`` wins over the config
-    (used e.g. by tests that want a smaller rod).
+    Everything under ``rod:`` is forwarded, with the cross-section/material
+    fields resolved from ``rod.material`` + the ``materials:`` presets (see
+    :func:`resolve_material`); ``overrides`` wins over the config (used e.g. by
+    tests that want a smaller rod).
     """
     dim = env_dim(cfg)
 
@@ -68,10 +137,7 @@ def build_env(cfg, **overrides):
         dt=cfg.rod.dt,
         rod_length=cfg.rod.rod_length,
         total_time=cfg.rod.total_time,
-        R_outer=cfg.rod.R_outer,
-        r_inner=cfg.rod.r_inner,
-        E_al=cfg.rod.E_al,
-        rho_al=cfg.rod.rho_al,
+        **resolve_material(cfg),
         max_newton_iter=cfg.rod.max_newton_iter,
         energy_cfg=cfg.get("energy"),
         newton_cfg=cfg.get("newton"),

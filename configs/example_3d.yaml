@@ -13,12 +13,11 @@ env:
   dim: 3                     # -> src/SimulatorEnv_3D.py, 10D control
 
 rod:
+  material: soft_strip       # a soft, thin polymer strip, so the rod actually
+                             # deforms and the run is fast (see `materials:` in
+                             # configs/default.yaml)
   nv: 21                     # fewer nodes: 3D solves are ~2x the DOFs of 2D
   total_time: 1.0
-  R_outer: 0.003             # a soft, thin strip, so the rod actually deforms
-  r_inner: 0.0
-  E_al: 2.0e+9
-  rho_al: 1200
   gravity: [0.0, -9.81, 0.0] # y is "down", matching the 2D environment.
                              # Use [0.0, 0.0, -9.81] for the usual z-up setup.
 

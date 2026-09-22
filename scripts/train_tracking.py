@@ -21,12 +21,14 @@ import argparse
 
 from implicit_grad_tools import multistep_adjoint_gradient
 from config import load_config
+from utils import maybe_save_trajectory_gif
 from env_factory import (
     build_env,
     reset_env,
     env_dim,
     end_control_dim,
     initial_control,
+    material_summary,
     make_target_trajectory,
     node_tracking_loss,
     dloss_dq_free_node,
@@ -190,6 +192,7 @@ def main():
     print("Network structure:")
     print(net)
     print(f"Environment: {type(env).__name__}  (dim={dim}, control={2 * end_control_dim(dim)}D)")
+    print(f"Rod material: {material_summary(cfg)}")
     print(f"Device: {device}")
     print(f"Trajectory type: {cfg.task.trajectory_type}")
     print(f"RHC: {'enabled (' + str(cfg.rhc.num_segments) + ' segments)' if cfg.rhc.enabled else 'disabled (single horizon)'}")
@@ -281,6 +284,7 @@ def _visualize_tracking(env, net, u0, N, targets, device, cfg):
     reset_env(env, cfg)
     dim = env.dim
     actual = []
+    q_traj = []       # full configuration per step, for the animation
 
     if cfg.rhc.enabled:
         seg_lens = segment_lengths(N, cfg.rhc.num_segments)
@@ -300,6 +304,7 @@ def _visualize_tracking(env, net, u0, N, targets, device, cfg):
                 if info["converged"]:
                     a = dim * env.mid_node
                     actual.append(info["q"][a:a + dim])
+                    q_traj.append(info["q"].copy())
     actual = np.array(actual).reshape(-1, dim)
 
     fig = plt.figure(figsize=(6, 6))
@@ -329,6 +334,10 @@ def _visualize_tracking(env, net, u0, N, targets, device, cfg):
     fig.savefig(str(_ROOT / 'experiments' / cfg.output.experiment_name / 'tracking_result.png'), dpi=150)
     plt.close(fig)
     print(f"Tracking result → {_ROOT / 'experiments' / cfg.output.experiment_name / 'tracking_result.png'}")
+
+    maybe_save_trajectory_gif(cfg, q_traj, env, targets,
+                              save_path=str(_ROOT / 'outputs'),
+                              title=f'DLO tracking ({cfg.task.trajectory_type})')
 
 
 if __name__ == "__main__":

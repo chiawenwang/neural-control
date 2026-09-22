@@ -23,7 +23,7 @@ from typing import Dict, List
 import matplotlib.pyplot as plt
 import time
 
-from utils import visualize_results
+from utils import visualize_results, maybe_save_trajectory_gif
 from config import load_config
 from env_factory import (
     build_env,
@@ -32,6 +32,7 @@ from env_factory import (
     control_dim,
     initial_control,
     task_target,
+    material_summary,
     node_position,
 )
 
@@ -347,6 +348,7 @@ def main():
     target_pos = task_target(cfg)
 
     print(f"Environment: {type(env).__name__}  (dim={dim}, control={control_dim(dim)}D)")
+    print(f"Rod material: {material_summary(cfg)}")
     print("\nTarget: (" + ", ".join(f"{v:.2f}" for v in target_pos) + ")")
     print("Initial midpoint: ("
           + ", ".join(f"{v:.2f}" for v in env.nodes[env.mid_node]) + ")")
@@ -387,6 +389,16 @@ def main():
 
     # Visualize
     visualize_results(results, env, target_pos, save_path=str(_ROOT / 'outputs'))
+
+    # One rollout per RHC segment; chain them into a single continuous history.
+    # Each segment's q_traj starts at the previous segment's end state, so that
+    # duplicated first frame is dropped for every segment but the first.
+    q_traj = []
+    for i, rollout in enumerate(results.get('all_rollouts', [])):
+        q_traj.extend(rollout['q_traj'][0 if i == 0 else 1:])
+    maybe_save_trajectory_gif(cfg, q_traj, env, target_pos,
+                              save_path=str(_ROOT / 'outputs'),
+                              title='DLO point-to-point (CMA-ES)')
 
     return results
 

@@ -61,7 +61,45 @@ neural-control/
 │   └── test_gpu.py             # MPS/GPU availability check
 ├── img/                        # README figures
 └── outputs/                    # Generated figures (created at runtime)
+    ├── neural_control_result.png     # final shape + loss curve
+    └── neural_control_animation.gif  # rollout animation (output.save_gif: true)
 ```
+
+## Choosing a rod material
+
+`configs/default.yaml` carries a `materials:` registry of cross-section /
+material presets; `rod.material` picks one:
+
+| preset | EI (1 m rod) | notes |
+|---|---|---|
+| `steel_tube` | 2.19e+3 N·m² | stiff extreme, slow solves |
+| `aluminum_tube` | 7.65e+2 N·m² | the original default |
+| `soft_strip` | 1.27e-1 N·m² | thin polymer strip — fast, visibly deforms |
+| `silicone_cord` | 2.45e-3 N·m² | cable-like, gravity-dominated |
+
+```yaml
+rod:
+  material: soft_strip
+```
+
+A preset only sets `R_outer`, `r_inner`, `E_al` and `rho_al`; everything else
+(I, A, EI, EA, nodal mass) is derived from those. Any of the four can still be
+overridden directly under `rod:`, which wins over the preset:
+
+```yaml
+rod:
+  material: aluminum_tube
+  r_inner: 0.012       # same material, thinner wall
+```
+
+Use `material: custom` to skip the presets and give all four fields yourself.
+To add a preset, append an entry under `materials:` and point `rod.material` at
+it. Each run prints the resolved material and its EI/EA.
+
+Note that EI scales with the *fourth* power of the radius, so the cross-section
+usually matters more than the material. A stiff rod barely deforms under the
+boundary control and its Newton solve needs many more line-search steps —
+`soft_strip` is the fastest preset to iterate with.
 
 ## Setup
 
@@ -287,6 +325,26 @@ Task 1 (point-to-point): elastic strip with 15 nodes, midpoint driven from
 iterations, final tracking error ≈ 0.0227 m.
 
 ![Neural Control result](img/neural_control_result.png)
+
+### Animating the rollout
+
+All three training scripts can additionally write the whole committed control
+rollout as a GIF, `outputs/neural_control_animation.gif` — the rod frame by
+frame over the full horizon, with the midpoint, the path it has traced so far
+and the target (for tracking, the target curve plus the current target point).
+It is off by default because rendering costs a few seconds; enable it in
+`configs/default.yaml`:
+
+```yaml
+output:
+  save_gif: true
+  gif_fps: 20            # playback speed
+  gif_dpi: 100           # resolution
+  gif_max_frames: 200    # longer rollouts are subsampled evenly
+```
+
+In RHC mode the per-segment rollouts are concatenated, so the animation covers
+the whole horizon rather than the last segment.
 
 ## Notes vs. the paper
 

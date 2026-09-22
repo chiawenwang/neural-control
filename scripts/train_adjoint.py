@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 import argparse
 
 from implicit_grad_tools import multistep_adjoint_gradient
-from utils import visualize_results
+from utils import visualize_results, maybe_save_trajectory_gif
 from config import load_config
 from env_factory import (
     build_env,
@@ -29,6 +29,7 @@ from env_factory import (
     end_control_dim,
     initial_control,
     task_target,
+    material_summary,
     node_tracking_loss,
     dloss_dq_free_node,
 )
@@ -208,6 +209,7 @@ def main():
     print("Network structure:")
     print(net)
     print(f"Environment: {type(env).__name__}  (dim={dim}, control={2 * end_control_dim(dim)}D)")
+    print(f"Rod material: {material_summary(cfg)}")
     print(f"Training on device: {device}")
     print(f"RHC: {'enabled (' + str(cfg.rhc.num_segments) + ' segments)' if cfg.rhc.enabled else 'disabled (single horizon)'}")
 
@@ -225,6 +227,7 @@ def main():
         pbar = tqdm(range(cfg.train.epochs), desc="Training", dynamic_ncols=True)
         final_loss = None
         q_last = None
+        q_traj = []
         for ep in pbar:
             env.set_state(checkpoint)
             opt.zero_grad(set_to_none=True)
@@ -265,6 +268,7 @@ def main():
             pbar.set_postfix({"loss": f"{L_np:.6f}"})
             final_loss = L_np
             q_last = q_final
+            q_traj = list(q_list)      # kept for the animation: last converged rollout
             loss_history.append((ep, L_np))
 
             if ep % 10 == 0:
@@ -297,6 +301,7 @@ def main():
         u_current = u0.clone()
 
         q_last = None
+        q_traj = []
         global_ep = 0
         for seg_idx, T_seg in enumerate(seg_lens):
             if cfg.rhc.reinit_policy_each_segment:
@@ -318,6 +323,7 @@ def main():
             checkpoint = env.get_state()
             u_current = u_list[-1].detach().clone()
             q_last = q_list[-1]
+            q_traj.extend(q_list)      # committed rollout, concatenated across segments
 
             loss_history.append((seg_idx, result["best_loss"]))
             writer.add_scalar("loss/segment_best", result["best_loss"], seg_idx)
@@ -336,6 +342,9 @@ def main():
         }
 
     visualize_results(results, env, target_xy, save_path=str(_ROOT / 'outputs'))
+    maybe_save_trajectory_gif(cfg, q_traj, env, target_xy,
+                              save_path=str(_ROOT / 'outputs'),
+                              title='DLO point-to-point')
 
     if loss_history:
         eps, losses = zip(*loss_history)
