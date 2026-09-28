@@ -590,15 +590,25 @@ def build_energy(energy_cfg, *, EI: float, EA: float, deltaL: float, nv: int,
     ``energy_cfg`` may be None or a dict like::
 
         energy:
-          custom: false          # false -> the built-in DER for this `dim`
-          type: der              # only consulted when custom is true
+          custom: false          # false -> the built-in model for this rod
+          type: null             # only consulted when custom is true;
+                                 # null means "the built-in one"
           params: {}             # extra kwargs forwarded to the subclass
 
-    ``dim`` selects the default (``der`` in 2D, ``der3d`` in 3D) and is checked
-    against the registered class, so a 2D energy cannot be used with the 3D
-    environment.
+    Which model is built in depends on the *rod*, not on ``type``:
 
-    Defaults to :class:`DERElasticEnergy`, so existing configs keep working.
+    ====================  ===============
+    2D                    ``der``
+    3D                    ``der3d``
+    3D + ``rod.twist``    ``der3d_twist``
+    ====================  ===============
+
+    With ``custom: false`` (the default) ``type`` is never read at all, so
+    leaving it ``null`` is honest: naming a model there would suggest it is in
+    use when it is not.  With ``custom: true`` it selects a registered class,
+    ``null`` still meaning the built-in default, and the choice is checked
+    against ``dim`` and ``twist`` so a mismatched model is rejected rather than
+    silently misused.
     """
     cfg = dict(energy_cfg or {})
     if twist:
@@ -614,7 +624,9 @@ def build_energy(energy_cfg, *, EI: float, EA: float, deltaL: float, nv: int,
         return default_cls(EI=EI, EA=EA, deltaL=deltaL, nv=nv,
                            frames=frames, poisson=poisson)
 
-    type_name = cfg.get("type", default_name)
+    # `or` rather than a dict default: an explicit `type: null` should mean
+    # "the built-in default", not None.
+    type_name = cfg.get("type") or default_name
     if type_name not in ENERGY_REGISTRY:
         raise KeyError(
             f"Unknown energy type {type_name!r}. "

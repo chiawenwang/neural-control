@@ -143,10 +143,19 @@ rod:
 # stretching + isotropic bending of a naturally straight, twist-free rod).
 # A custom `type` must match env.dim or loading fails with a clear error.
 energy:
-  custom: false
-  type: der                # 2D: der | linear_spring
-                           # 3D: der3d | linear_spring
-                           # 3D + rod.twist: der3d_twist
+  custom: false            # false -> use the built-in model for this rod, chosen
+                           # from env.dim + rod.twist:
+                           #   2D              -> der
+                           #   3D              -> der3d
+                           #   3D + rod.twist  -> der3d_twist
+                           # `type` below is NOT read in this case.
+  type: null               # only consulted when custom is true. null keeps the
+                           # built-in default above; otherwise name a registered
+                           # model:  2D: der | linear_spring
+                           #         3D: der3d | linear_spring
+                           #         3D + rod.twist: der3d_twist
+                           # A model that does not match env.dim / rod.twist is
+                           # rejected with an explicit error, not used silently.
   params: {}               # extra keyword arguments forwarded to the subclass
 
 # Initial boundary configuration (both rod ends).
