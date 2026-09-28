@@ -50,7 +50,15 @@ env:
 #   soft_strip     EI = 1.27e-1 N*m^2     (~6000x softer than aluminum_tube)
 #   silicone_cord  EI = 2.45e-3 N*m^2     (floppiest)
 #
-# To add your own: append an entry here with those four keys, then point
+# Each entry sets five properties: the cross-section (R_outer, r_inner), the
+# Young's modulus E_al, the density rho_al, and the Poisson ratio poisson.
+# `poisson` matters only when rod.twist is on: for the circular section it
+# turns bending stiffness into torsional stiffness, GJ = EI / (1 + poisson).
+# It is a property of the material, not a solver knob, which is why it lives
+# here -- aluminium, nylon, steel and silicone genuinely differ. It may be
+# omitted, in which case it defaults to 0.3.
+#
+# To add your own: append an entry here with those keys, then point
 # `rod.material` at it. Individual keys can also be overridden directly under
 # `rod:` (see below), which is handy for one-off sweeps.
 materials:
@@ -63,6 +71,7 @@ materials:
     r_inner: 0.011
     E_al: 70.0e+9
     rho_al: 2700
+    poisson: 0.33
 
   # Thin solid polymer strip (nylon/PLA-like, E ~ 2 GPa). EI = 0.127 N*m^2,
   # ~6000x softer than the aluminum tube: the rod actually bends under the
@@ -74,6 +83,7 @@ materials:
     r_inner: 0.0
     E_al: 2.0e+9
     rho_al: 1200
+    poisson: 0.40
 
   # Same tube geometry as aluminum_tube but steel: EI = 2.19e+3 N*m^2, ~3x
   # stiffer again. Included as the "stiff extreme"; expect slow solves.
@@ -83,6 +93,7 @@ materials:
     r_inner: 0.011
     E_al: 200.0e+9
     rho_al: 7850
+    poisson: 0.30
 
   # Rubber-like cord (silicone, E ~ 5 MPa) -- the closest of these to a real
   # deformable linear object such as a cable. EI = 2.45e-3 N*m^2, so gravity
@@ -94,6 +105,7 @@ materials:
     r_inner: 0.0
     E_al: 5.0e+6
     rho_al: 1100
+    poisson: 0.49
 
 # Physical / geometric parameters of the manipulated object (elastic rod).
 rod:

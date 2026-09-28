@@ -15,10 +15,11 @@ env:
 
 rod:
   twist: true                # per-edge twist angles + a yaw per gripper
-  poisson: 0.3               # GJ = EI / (1 + poisson) for a circular section
   material: soft_strip       # stiff rods buckle almost immediately under
                              # compression; a soft strip keeps the useful
-                             # range wide (see `materials:` in default.yaml)
+                             # range wide (see `materials:` in default.yaml).
+                             # The preset also carries its Poisson ratio, which
+                             # is what sets GJ = EI / (1 + nu).
   nv: 21
   total_time: 1.0
   gravity: [0.0, -9.81, 0.0]

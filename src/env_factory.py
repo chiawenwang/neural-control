@@ -83,6 +83,18 @@ def node_position(q, dim: int, node: int) -> np.ndarray:
 #: Everything else the solver needs (I, A, EI, EA, nodal mass) is derived.
 MATERIAL_FIELDS = ("R_outer", "r_inner", "E_al", "rho_al")
 
+#: Further material properties with a sensible fallback, so that a preset (or
+#: ``material: custom``) may leave them out.  ``poisson`` is what turns the
+#: bending stiffness into the torsional one: for the circular cross-section
+#: ``J = 2I`` and ``G = E / (2(1+nu))``, so ``GJ = EI / (1 + nu)``.  It is
+#: therefore part of what the rod is *made of*, not a solver setting, and
+#: belongs next to E in a preset -- aluminium, nylon and steel genuinely differ
+#: (~0.33, ~0.40, ~0.30).  Only the 3D environment with ``rod.twist`` uses it.
+MATERIAL_DEFAULTS = {"poisson": 0.3}
+
+#: Everything a material may specify: the required fields plus the optional ones.
+MATERIAL_ALL = MATERIAL_FIELDS + tuple(MATERIAL_DEFAULTS)
+
 
 def resolve_material(cfg) -> dict:
     """Resolve ``rod.material`` against the ``materials:`` presets.
@@ -90,7 +102,8 @@ def resolve_material(cfg) -> dict:
     Precedence: a field given explicitly under ``rod:`` wins over the preset,
     so a config can pick a material and still tweak one dimension of it.
     ``material: custom`` (or null/absent) skips the presets, in which case all
-    four fields must be given under ``rod:``.
+    four required fields must be given under ``rod:``.  Optional fields
+    (:data:`MATERIAL_DEFAULTS`) fall back to their defaults if nobody sets them.
     """
     rod = cfg.get("rod") or {}
     presets = cfg.get("materials") or {}
@@ -106,23 +119,25 @@ def resolve_material(cfg) -> dict:
                 f"{'/'.join(MATERIAL_FIELDS)} directly under `rod:`."
             )
         preset = presets[name] or {}
-        unknown = sorted(set(preset) - set(MATERIAL_FIELDS))
+        unknown = sorted(set(preset) - set(MATERIAL_ALL))
         if unknown:
             raise ValueError(
                 f"material {name!r} has unsupported field(s) {unknown}; "
-                f"a material may only set {list(MATERIAL_FIELDS)}."
+                f"a material may only set {list(MATERIAL_ALL)}."
             )
         params.update(preset)
 
     # Explicit rod-level values override the preset.
-    params.update({k: rod[k] for k in MATERIAL_FIELDS if k in rod})
+    params.update({k: rod[k] for k in MATERIAL_ALL if k in rod})
 
     missing = [k for k in MATERIAL_FIELDS if k not in params]
     if missing:
         where = "rod.material" if name in (None, "custom") else f"material {name!r}"
         raise ValueError(f"{where} leaves {missing} undefined; set them under `rod:`.")
 
-    return {k: float(params[k]) for k in MATERIAL_FIELDS}
+    for key, default in MATERIAL_DEFAULTS.items():
+        params.setdefault(key, default)
+    return {k: float(params[k]) for k in MATERIAL_ALL}
 
 
 def material_summary(cfg) -> str:
@@ -130,7 +145,7 @@ def material_summary(cfg) -> str:
     mat = resolve_material(cfg)
     rod = cfg.get("rod") or {}
     name = rod.get("material") or "custom"
-    overridden = [k for k in MATERIAL_FIELDS if k in rod]
+    overridden = [k for k in MATERIAL_ALL if k in rod]
 
     I_sec = np.pi * (mat["R_outer"] ** 4 - mat["r_inner"] ** 4) / 4
     A_sec = np.pi * (mat["R_outer"] ** 2 - mat["r_inner"] ** 2)
@@ -139,9 +154,13 @@ def material_summary(cfg) -> str:
     using_preset = name != "custom"
     suffix = (f" (overriding {', '.join(overridden)})"
               if overridden and using_preset else "")
-    return (f"{name}{suffix}: R_outer={mat['R_outer']:g} m, "
+    line = (f"{name}{suffix}: R_outer={mat['R_outer']:g} m, "
             f"r_inner={mat['r_inner']:g} m, E={mat['E_al']:.3g} Pa, "
-            f"rho={mat['rho_al']:g} kg/m^3  ->  EI={EI:.3g} N*m^2, EA={EA:.3g} N")
+            f"rho={mat['rho_al']:g} kg/m^3, nu={mat['poisson']:g}"
+            f"  ->  EI={EI:.3g} N*m^2, EA={EA:.3g} N")
+    if env_twist(cfg):
+        line += f", GJ={EI / (1.0 + mat['poisson']):.3g} N*m^2"
+    return line
 
 
 # ------------------------------------------------------------- env building
@@ -156,12 +175,17 @@ def build_env(cfg, **overrides):
     """
     dim = env_dim(cfg)
 
+    material = resolve_material(cfg)
+    # Only the 3D environment has a use for the Poisson ratio (it sets GJ);
+    # the 2D one would reject the keyword.
+    poisson = material.pop("poisson")
+
     kwargs = dict(
         nv=cfg.rod.nv,
         dt=cfg.rod.dt,
         rod_length=cfg.rod.rod_length,
         total_time=cfg.rod.total_time,
-        **resolve_material(cfg),
+        **material,
         max_newton_iter=cfg.rod.max_newton_iter,
         energy_cfg=cfg.get("energy"),
         newton_cfg=cfg.get("newton"),
@@ -177,7 +201,7 @@ def build_env(cfg, **overrides):
         if gravity is not None:
             kwargs["gravity"] = tuple(float(g) for g in gravity)
         kwargs["twist"] = env_twist(cfg)
-        kwargs["poisson"] = float(cfg.rod.get("poisson", 0.3))
+        kwargs["poisson"] = poisson
 
     kwargs.update(overrides)
     return EnvCls(**kwargs)

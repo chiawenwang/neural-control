@@ -72,21 +72,21 @@ neural-control/
 `configs/default.yaml` carries a `materials:` registry of cross-section /
 material presets; `rod.material` picks one:
 
-| preset | EI (1 m rod) | notes |
-|---|---|---|
-| `steel_tube` | 2.19e+3 N·m² | stiff extreme, slow solves |
-| `aluminum_tube` | 7.65e+2 N·m² | the original default |
-| `soft_strip` | 1.27e-1 N·m² | thin polymer strip — fast, visibly deforms |
-| `silicone_cord` | 2.45e-3 N·m² | cable-like, gravity-dominated |
+| preset | EI (1 m rod) | ν | GJ (twist) | notes |
+|---|---|---|---|---|
+| `steel_tube` | 2.19e+3 N·m² | 0.30 | 1.68e+3 N·m² | stiff extreme, slow solves |
+| `aluminum_tube` | 7.65e+2 N·m² | 0.33 | 5.75e+2 N·m² | the original default |
+| `soft_strip` | 1.27e-1 N·m² | 0.40 | 9.09e-2 N·m² | thin polymer strip — fast, visibly deforms |
+| `silicone_cord` | 2.45e-3 N·m² | 0.49 | 1.65e-3 N·m² | cable-like, gravity-dominated |
 
 ```yaml
 rod:
   material: soft_strip
 ```
 
-A preset only sets `R_outer`, `r_inner`, `E_al` and `rho_al`; everything else
-(I, A, EI, EA, nodal mass) is derived from those. Any of the four can still be
-overridden directly under `rod:`, which wins over the preset:
+A preset sets `R_outer`, `r_inner`, `E_al`, `rho_al` and `poisson`; everything
+else (I, A, EI, EA, GJ, nodal mass) is derived from those. Any of them can
+still be overridden directly under `rod:`, which wins over the preset:
 
 ```yaml
 rod:
@@ -94,9 +94,17 @@ rod:
   r_inner: 0.012       # same material, thinner wall
 ```
 
-Use `material: custom` to skip the presets and give all four fields yourself.
-To add a preset, append an entry under `materials:` and point `rod.material` at
-it. Each run prints the resolved material and its EI/EA.
+`poisson` is only used when `rod.twist` is on: for the circular cross-section
+`J = 2I` and `G = E / (2(1+ν))`, so the torsional stiffness is
+**`GJ = EI / (1 + ν)`**. It is a property of the material rather than a solver
+setting, which is why it lives in the preset — aluminium, nylon, steel and
+silicone genuinely differ, and the resulting `GJ/EI` ranges from 0.67
+(silicone) to 0.77 (steel). Omitting it defaults to 0.3.
+
+Use `material: custom` to skip the presets and give the four required fields
+yourself (`poisson` stays optional). To add a preset, append an entry under
+`materials:` and point `rod.material` at it. Each run prints the resolved
+material and its EI/EA, plus GJ when twist is on.
 
 Note that EI scales with the *fourth* power of the radius, so the cross-section
 usually matters more than the material. A stiff rod barely deforms under the
@@ -385,7 +393,9 @@ E = E_stretch(x) + E_bend(x) + E_twist(x, θ)
 E_twist = Σᵢ (GJ / 2ΔL) · mᵢ² ,   mᵢ = θⁱ − θⁱ⁻¹ + ψᵢ(x)
 ```
 
-with `GJ = EI / (1 + ν)` for a circular cross-section (`rod.poisson`).
+with `GJ = EI / (1 + ν)` for a circular cross-section. `ν` comes from the rod's
+material preset (see [Choosing a rod material](#choosing-a-rod-material)), so
+switching material changes bending and torsional stiffness together.
 
 ### Why `ψ` is the whole point
 
