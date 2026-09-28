@@ -419,6 +419,21 @@ control maps onto the clamped twist angles directly, with no geometry in
 between (`boundary_node_jacobian_3d_twist` is the 12-row position map plus two
 rows that are a single `1`).
 
+### Seeing it
+
+With `output.save_gif` on, a twisting run's animation also draws the
+**cross-section orientation** at the two ends and the midpoint — three arrows
+each: the edge tangent (grey) and the two material axes `m1` (orange) and `m2`
+(green). Those are what yaw actually turns, and watching them is the quickest
+way to tell twisting apart from bending: `m1`/`m2` spinning about a tangent
+that is not moving means pure torsion, while the rod buckling into an S means
+the twist has converted into writhe.
+
+The reference directors are simulator state rather than something `q` carries,
+so the plotting code replays them along the recorded configurations instead of
+requiring the training scripts to record them. Nothing is drawn without
+`rod.twist` — a twist-free rod has no material frame to show.
+
 ### Correctness
 
 Everything the adjoint depends on is finite-difference checked by

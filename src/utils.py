@@ -93,13 +93,75 @@ def _positions(q, env, dim):
 
 
 def _as_frames(q_traj, dim, max_frames, env=None):
-    """Stack a list of flat q vectors into (n_frames, nv, dim), subsampled."""
+    """Stack a list of flat q vectors into (n_frames, nv, dim), subsampled.
+
+    Also returns the source step index of every kept frame, so anything else
+    derived per step (the tracking target, the material frames) can be
+    subsampled to match instead of guessing.
+    """
     frames = np.asarray([_positions(q, env, dim) for q in q_traj])
+    idx = np.arange(len(frames))
     if max_frames and len(frames) > max_frames:
         # Keep the first and last frame, evenly subsample in between.
         idx = np.unique(np.linspace(0, len(frames) - 1, max_frames).round().astype(int))
         frames = frames[idx]
-    return frames
+    return frames, idx
+
+
+# ---------------------------------------------------------------------------
+# Material frames (torsion only)
+# ---------------------------------------------------------------------------
+
+#: Where the cross-section triads are drawn, and how each axis is coloured.
+_TRIAD_COLORS = ("#7f7f7f", "#d55e00", "#009e73")      # tangent, m1, m2
+_TRIAD_LABELS = ("tangent", "m1 (cross-section)", "m2")
+
+
+def _material_triads(q_traj, env, idx):
+    """Material frames at the two ends and the midpoint, per kept animation frame.
+
+    Returns ``(anchors, triads)`` of shapes ``(n_frames, 3, 3)`` and
+    ``(n_frames, 3, 3, 3)`` -- three locations, and for each a ``(tangent, m1,
+    m2)`` triad -- or ``None`` when the rod has no torsion.
+
+    The reference directors are simulator *state*, not something ``q`` carries,
+    so they are replayed here: seeded exactly as ``env.reset()`` does and then
+    parallel transported along the recorded configurations.  Replaying is
+    deterministic given the positions, so this reproduces the directors the
+    solver actually used, without the training scripts having to record them.
+    """
+    if not getattr(env, "twist", False):
+        return None
+    from rodframes import RodFrames, tangents
+
+    nv = env.nv
+    # Edges whose cross-section we show, anchored at the node we draw them from.
+    edges = (0, min(max(env.mid_node, 0), nv - 2), nv - 2)
+    nodes = (0, env.mid_node, nv - 1)
+
+    frames_state = RodFrames(nv)
+    frames_state.reset(env.nodes)
+
+    keep = set(int(k) for k in idx)
+    anchors, triads = [], []
+    for k, q in enumerate(q_traj):
+        pos = env.positions(q)
+        frames_state.advance(pos)
+        if k not in keep:
+            continue
+        theta = env.twist_angles(q)
+        t = tangents(pos)
+        u = frames_state.directors
+        tri = np.empty((3, 3, 3))
+        for j, e in enumerate(edges):
+            v = np.cross(t[e], u[e])
+            c, sn = np.cos(theta[e]), np.sin(theta[e])
+            tri[j, 0] = t[e]
+            tri[j, 1] = c * u[e] + sn * v          # material axis m1
+            tri[j, 2] = -sn * u[e] + c * v         # material axis m2
+        anchors.append(pos[list(nodes)])
+        triads.append(tri)
+    return np.asarray(anchors), np.asarray(triads)
 
 
 def save_trajectory_gif(q_traj, env, target_pos, save_path='outputs',
@@ -122,15 +184,15 @@ def save_trajectory_gif(q_traj, env, target_pos, save_path='outputs',
         return None
 
     dim = getattr(env, 'dim', 2)
-    frames = _as_frames(q_traj, dim, max_frames, env)
+    frames, src_idx = _as_frames(q_traj, dim, max_frames, env)
     n_frames = len(frames)
     mid_idx = env.mid_node
+    triad_data = _material_triads(q_traj, env, src_idx) if dim == 3 else None
 
     target = np.asarray(target_pos, dtype=float)
     is_traj_target = target.ndim == 2
-    # Frame k of the animation corresponds to this index in the original rollout,
-    # which is what the per-step tracking target has to be looked up with.
-    src_idx = np.linspace(0, len(q_traj) - 1, n_frames).round().astype(int)
+    # `src_idx` (from _as_frames) says which step each animation frame came
+    # from, which is what the per-step tracking target is looked up with.
 
     # Fixed axis limits over the whole rollout, so the rod does not jitter.
     pts_all = frames.reshape(-1, dim)
@@ -177,6 +239,16 @@ def save_trajectory_gif(q_traj, env, target_pos, save_path='outputs',
                    linestyle='None', label='Midpoint', zorder=10)
     trail, = ax.plot([], [], *([[]] if dim == 3 else []), 'r-', linewidth=1,
                      alpha=0.5, label='Midpoint path')
+    # Cross-section orientation at the two ends and the midpoint. Only a
+    # twisting rod has one: without torsion the material frame is not a degree
+    # of freedom and there would be nothing to show.
+    triad_artists = []
+    if triad_data is not None:
+        arrow_len = 0.12 * span
+        from matplotlib.lines import Line2D
+        for color, label in zip(_TRIAD_COLORS, _TRIAD_LABELS):
+            ax.add_line(Line2D([], [], color=color, lw=2, label=label))
+
     tgt_now = None
     if is_traj_target:
         tgt_now, = ax.plot([], [], *([[]] if dim == 3 else []), 'bx', markersize=11,
@@ -197,6 +269,19 @@ def save_trajectory_gif(q_traj, env, target_pos, save_path='outputs',
         _set(mid, pts[mid_idx])
         _set(trail, frames[:k + 1, mid_idx])
         artists = [rod, ends, mid, trail]
+        if triad_data is not None:
+            # quiver has no in-place update, so the arrows are rebuilt each frame
+            while triad_artists:
+                triad_artists.pop().remove()
+            anchors, triads = triad_data
+            for j in range(anchors.shape[1]):
+                o = anchors[k, j]
+                for a, color in enumerate(_TRIAD_COLORS):
+                    d = triads[k, j, a] * arrow_len
+                    triad_artists.append(ax.quiver(
+                        o[0], o[1], o[2], d[0], d[1], d[2],
+                        color=color, linewidth=1.6, arrow_length_ratio=0.25))
+            artists.extend(triad_artists)
         if is_traj_target:
             j = min(src_idx[k], len(target) - 1)
             _set(tgt_now, target[j])
