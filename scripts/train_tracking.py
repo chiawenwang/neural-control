@@ -26,6 +26,8 @@ from env_factory import (
     build_env,
     reset_env,
     env_dim,
+    env_twist,
+    control_dim,
     end_control_dim,
     initial_control,
     material_summary,
@@ -108,6 +110,7 @@ def rollout_segment(env, net, u_start, targets_seg, dlam, device, track_w):
 def compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets_seg, track_w, jac_reg):
     free_index, fixed_index = env.free_index, env.fixed_index
     dim = env.dim
+    twist = getattr(env, 'twist', False)
     T = len(q_list)
 
     total_loss = 0.0
@@ -125,7 +128,7 @@ def compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets_s
     u_seq_np = np.stack([u.detach().cpu().numpy() for u in u_list], axis=0)
     g_u_seq = multistep_adjoint_gradient(
         u_seq_np, J_list, free_index, fixed_index, env.deltaL, a_free_per_step,
-        jac_reg=jac_reg, dim=dim,
+        jac_reg=jac_reg, dim=dim, twist=twist,
     )
     return g_u_seq, total_loss
 
@@ -172,6 +175,7 @@ def main():
     np.random.seed(cfg.train.seed)
 
     dim = env_dim(cfg)
+    twist = env_twist(cfg)
     env = build_env(cfg)
     reset_env(env, cfg)
 
@@ -182,7 +186,7 @@ def main():
     device = resolve_device(cfg.train.device)
     u0 = torch.tensor(initial_control(cfg), dtype=torch.float32, device=device)
 
-    net = BoundaryVelocityNet(hidden=cfg.train.hidden, out_dim=end_control_dim(dim)).to(device)
+    net = BoundaryVelocityNet(hidden=cfg.train.hidden, out_dim=end_control_dim(dim, twist)).to(device)
     opt = optim.Adam(net.parameters(), lr=cfg.train.lr)
 
     _log_dir = str(_ROOT / 'experiments' / cfg.output.experiment_name)
@@ -191,7 +195,7 @@ def main():
 
     print("Network structure:")
     print(net)
-    print(f"Environment: {type(env).__name__}  (dim={dim}, control={2 * end_control_dim(dim)}D)")
+    print(f"Environment: {type(env).__name__}  (dim={dim}, twist={twist}, control={control_dim(dim, twist)}D)")
     print(f"Rod material: {material_summary(cfg)}")
     print(f"Device: {device}")
     print(f"Trajectory type: {cfg.task.trajectory_type}")
@@ -283,6 +287,7 @@ def main():
 def _visualize_tracking(env, net, u0, N, targets, device, cfg):
     reset_env(env, cfg)
     dim = env.dim
+    twist = getattr(env, 'twist', False)
     actual = []
     q_traj = []       # full configuration per step, for the animation
 

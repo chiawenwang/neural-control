@@ -52,6 +52,7 @@ def solve_equilibrium(q_start, *,
                       dim,
                       tol,
                       obstacles=(),
+                      n_pos=None,
                       max_iter=1000,
                       q_old=None,
                       u_old=None,
@@ -84,7 +85,7 @@ def solve_equilibrium(q_start, *,
 
         if want_jac:
             F_el, J_el = energy.force_and_jacobian(qq)
-            Fc, Jc = get_contact_forces(qq, obstacles, dim=dim)
+            Fc, Jc = get_contact_forces(qq, obstacles, dim=dim, n_pos=n_pos)
             J = -J_el - Jc
             if use_inertia:
                 J = J + mMat / dt ** 2
@@ -92,7 +93,7 @@ def solve_equilibrium(q_start, *,
             # Force-only evaluation: the line search never needs the Hessian,
             # which is the expensive part of the assembly.
             F_el = energy.force(qq)
-            Fc = get_contact_forces(qq, obstacles, dim=dim, forces_only=True)
+            Fc = get_contact_forces(qq, obstacles, dim=dim, forces_only=True, n_pos=n_pos)
             J = None
 
         return F_in - F_el - Fc - W, J

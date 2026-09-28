@@ -26,6 +26,8 @@ from env_factory import (
     build_env,
     reset_env,
     env_dim,
+    env_twist,
+    control_dim,
     end_control_dim,
     initial_control,
     task_target,
@@ -141,6 +143,7 @@ def optimize_segment(env, net, opt, u_start, T, dlam, device, target_xy, cfg,
         fixed_index = env.fixed_index
 
         dim = env.dim
+        twist = getattr(env, 'twist', False)
         L, _ = final_midpoint_loss(q_final, dim, env.mid_node, target_xy)
 
         a_free_per_step = np.zeros((len(q_list), len(free_index)), dtype=float)
@@ -149,7 +152,7 @@ def optimize_segment(env, net, opt, u_start, T, dlam, device, target_xy, cfg,
         u_seq_np = np.stack([u.detach().cpu().numpy() for u in u_list], axis=0)
         g_u_seq = multistep_adjoint_gradient(
             u_seq_np, J_list, free_index, fixed_index, env.deltaL,
-            a_free_per_step, jac_reg=cfg.train.jac_reg, dim=dim,
+            a_free_per_step, jac_reg=cfg.train.jac_reg, dim=dim, twist=twist,
         )
 
         surrogate = torch.zeros((), device=device)
@@ -190,6 +193,7 @@ def main():
     # 1) Environment
     # -----------------------------
     dim = env_dim(cfg)
+    twist = env_twist(cfg)
     env = build_env(cfg)
     reset_env(env, cfg)
 
@@ -199,7 +203,7 @@ def main():
     device = resolve_device(cfg.train.device)
     u0 = torch.tensor(initial_control(cfg), dtype=torch.float32, device=device)
 
-    net = BoundaryVelocityNet(hidden=cfg.train.hidden, out_dim=end_control_dim(dim)).to(device)
+    net = BoundaryVelocityNet(hidden=cfg.train.hidden, out_dim=end_control_dim(dim, twist)).to(device)
     opt = optim.Adam(net.parameters(), lr=cfg.train.lr)
 
     _log_dir = str(_ROOT / 'experiments' / cfg.output.experiment_name)
@@ -208,7 +212,7 @@ def main():
 
     print("Network structure:")
     print(net)
-    print(f"Environment: {type(env).__name__}  (dim={dim}, control={2 * end_control_dim(dim)}D)")
+    print(f"Environment: {type(env).__name__}  (dim={dim}, twist={twist}, control={control_dim(dim, twist)}D)")
     print(f"Rod material: {material_summary(cfg)}")
     print(f"Training on device: {device}")
     print(f"RHC: {'enabled (' + str(cfg.rhc.num_segments) + ' segments)' if cfg.rhc.enabled else 'disabled (single horizon)'}")
@@ -248,7 +252,7 @@ def main():
             u_seq_np = np.stack([u.detach().cpu().numpy() for u in u_list], axis=0)
             g_u_seq = multistep_adjoint_gradient(
                 u_seq_np, J_list, free_index, fixed_index, env.deltaL,
-                a_free_per_step, jac_reg=cfg.train.jac_reg, dim=dim,
+                a_free_per_step, jac_reg=cfg.train.jac_reg, dim=dim, twist=twist,
             )
 
             surrogate = torch.zeros((), device=device)

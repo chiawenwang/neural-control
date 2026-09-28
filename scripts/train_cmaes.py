@@ -29,6 +29,7 @@ from env_factory import (
     build_env,
     reset_env,
     env_dim,
+    env_twist,
     control_dim,
     initial_control,
     task_target,
@@ -113,14 +114,16 @@ class CMAESOptimizer:
 class NeuralControlAgent:
     """Agent using evolution strategy for optimization.
 
-    Works with either environment: ``env.dim`` selects the control width
-    (6D in 2D, 10D in 3D) and the rollout's boundary-pose bookkeeping.
+    Works with either environment: ``env.dim`` and ``env.twist`` select the
+    control width (6D in 2D, 10D in 3D, 12D in 3D with yaw) and the rollout's
+    boundary-pose bookkeeping.
     """
     def __init__(self, env, segment_horizon: int = 8, degree: int = 3, 
                  u_max: float = 0.1, pop_size: int = 15):
         self.env = env
         self.dim = getattr(env, "dim", 2)
-        self.n_u = control_dim(self.dim)
+        self.twist = getattr(env, "twist", False)
+        self.n_u = control_dim(self.dim, self.twist)
         self.segment_horizon = segment_horizon
         self.degree = degree
         self.u_max = u_max
@@ -157,10 +160,10 @@ class NeuralControlAgent:
             # Per end the layout is (position..., angles...):
             #   2D -> (x, y, theta)            3D -> (x, y, z, theta, phi)
             d = self.dim
-            n_ang = d - 1                       # 1 angle in 2D, 2 in 3D
-            per_end = d + n_ang
-            left_pos = q_current[:d]            # node_0
-            right_pos = q_current[-d:]          # node_{n-1}
+            per_end = self.n_u // 2             # (x,y[,z]) + tangent angles [+ yaw]
+            left_pos = q_current[:d]                       # node_0
+            n_pos = getattr(self.env, "n_pos", q_current.size)
+            right_pos = q_current[n_pos - d:n_pos]         # node_{n-1}
 
             # Smooth incremental control
             delta_scale = 0.05  # Small steps
@@ -187,7 +190,11 @@ class NeuralControlAgent:
                     deltaL=self.env.deltaL,
                     free_index=self.env.free_index,
                     control_node=control_node,
-                    use_inertia=False
+                    use_inertia=False,
+                    # The 3D solver scatters the clamped DOFs by index, and
+                    # skips contact on the twist angles; both are no-ops in 2D.
+                    **({} if self.dim == 2 else
+                       dict(fixed_index=self.env.fixed_index, n_pos=self.env.n_pos)),
                 )
                 
                 if flag < 0:
@@ -341,13 +348,15 @@ def main():
     # Create environment
     print("\nInitializing environment...")
     dim = env_dim(cfg)
+    twist = env_twist(cfg)
     env = build_env(cfg)
     reset_env(env, cfg)
 
     # Target
     target_pos = task_target(cfg)
 
-    print(f"Environment: {type(env).__name__}  (dim={dim}, control={control_dim(dim)}D)")
+    print(f"Environment: {type(env).__name__}  "
+          f"(dim={dim}, twist={twist}, control={control_dim(dim, twist)}D)")
     print(f"Rod material: {material_summary(cfg)}")
     print("\nTarget: (" + ", ".join(f"{v:.2f}" for v in target_pos) + ")")
     print("Initial midpoint: ("

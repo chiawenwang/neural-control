@@ -32,14 +32,34 @@ def env_dim(cfg) -> int:
     return dim
 
 
-def control_dim(dim: int) -> int:
+def env_twist(cfg) -> bool:
+    """Whether the rod carries torsion (``rod.twist``, default false)."""
+    twist = bool((cfg.get("rod") or {}).get("twist", False))
+    if twist and env_dim(cfg) != 3:
+        raise ValueError("rod.twist: true requires env.dim: 3")
+    return twist
+
+
+def end_control_dim(dim: int, twist: bool = False) -> int:
+    """Control DOFs for a single rod end — what the policy net outputs.
+
+    ================  ==========================================
+    2D                3   (x, y, theta)
+    3D                5   (x, y, z, theta, phi)
+    3D + twist        6   (x, y, z, theta, phi, yaw)
+    ================  ==========================================
+
+    ``theta``/``phi`` aim the tangent; ``yaw`` is the spin about it, the third
+    rotational freedom, and it only exists when the rod can actually twist.
+    """
+    if dim == 2:
+        return 3
+    return 6 if twist else 5
+
+
+def control_dim(dim: int, twist: bool = False) -> int:
     """Length of the full control vector u (both ends)."""
-    return 6 if dim == 2 else 10
-
-
-def end_control_dim(dim: int) -> int:
-    """Number of control DOFs for a single end — what the policy net outputs."""
-    return 3 if dim == 2 else 5
+    return 2 * end_control_dim(dim, twist)
 
 
 def node_index(dim: int, node: int) -> int:
@@ -48,7 +68,11 @@ def node_index(dim: int, node: int) -> int:
 
 
 def node_position(q, dim: int, node: int) -> np.ndarray:
-    """Position of ``node`` as a ``dim``-vector."""
+    """Position of ``node`` as a ``dim``-vector.
+
+    Positions occupy the front of ``q``, so this is correct with or without
+    the twist angles appended behind them.
+    """
     a = dim * node
     return np.asarray(q[a:a + dim], dtype=float)
 
@@ -152,6 +176,8 @@ def build_env(cfg, **overrides):
         gravity = cfg.rod.get("gravity")
         if gravity is not None:
             kwargs["gravity"] = tuple(float(g) for g in gravity)
+        kwargs["twist"] = env_twist(cfg)
+        kwargs["poisson"] = float(cfg.rod.get("poisson", 0.3))
 
     kwargs.update(overrides)
     return EnvCls(**kwargs)
@@ -167,7 +193,8 @@ def reset_env(env, cfg):
                      init_y=cfg.start.init_y,
                      init_z=cfg.start.get("init_z", 0.0),
                      init_theta=cfg.start.init_theta,
-                     init_phi=cfg.start.get("init_phi", 0.0))
+                     init_phi=cfg.start.get("init_phi", 0.0),
+                     init_yaw=cfg.start.get("init_yaw", 0.0))
 
 
 # --------------------------------------------------------- controls / tasks
@@ -175,21 +202,32 @@ def reset_env(env, cfg):
 def initial_control(cfg) -> np.ndarray:
     """The initial absolute control u0 (both ends concatenated).
 
-    2D reads ``start.u_left`` / ``start.u_right`` (3 entries each);
-    3D reads ``start.u_left_3d`` / ``start.u_right_3d`` (5 entries each).
+    Which keys are read follows ``env.dim`` and ``rod.twist``:
+
+    ====================  ===========================================  =======
+    2D                    ``start.u_left``      / ``u_right``          3 each
+    3D                    ``start.u_left_3d``   / ``u_right_3d``       5 each
+    3D + twist            ``start.u_left_twist``/ ``u_right_twist``    6 each
+    ====================  ===========================================  =======
     """
     dim = env_dim(cfg)
+    twist = env_twist(cfg)
     if dim == 2:
         left, right = cfg.start.u_left, cfg.start.u_right
         keys = ("start.u_left", "start.u_right")
+    elif twist:
+        left, right = cfg.start.u_left_twist, cfg.start.u_right_twist
+        keys = ("start.u_left_twist", "start.u_right_twist")
     else:
         left, right = cfg.start.u_left_3d, cfg.start.u_right_3d
         keys = ("start.u_left_3d", "start.u_right_3d")
 
-    n = end_control_dim(dim)
+    n = end_control_dim(dim, twist)
     for key, vec in zip(keys, (left, right)):
         if len(vec) != n:
-            raise ValueError(f"{key} must have {n} entries for dim={dim}, got {len(vec)}")
+            raise ValueError(
+                f"{key} must have {n} entries for dim={dim}"
+                f"{' with twist' if twist else ''}, got {len(vec)}")
 
     return np.array(list(left) + list(right), dtype=float)
 

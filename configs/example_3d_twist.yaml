@@ -1,0 +1,44 @@
+# =============================================================================
+# Example 3D experiment WITH torsion.
+#
+#   python scripts/train_adjoint.py  --config configs/example_3d_twist.yaml
+#   python scripts/train_tracking.py --config configs/example_3d_twist.yaml
+#
+# Validate the torsion model itself with:
+#   python scripts/check_twist.py
+#
+# Only the fields that differ from configs/default.yaml are listed.
+# =============================================================================
+
+env:
+  dim: 3
+
+rod:
+  twist: true                # per-edge twist angles + a yaw per gripper
+  poisson: 0.3               # GJ = EI / (1 + poisson) for a circular section
+  material: soft_strip       # stiff rods buckle almost immediately under
+                             # compression; a soft strip keeps the useful
+                             # range wide (see `materials:` in default.yaml)
+  nv: 21
+  total_time: 1.0
+  gravity: [0.0, -9.81, 0.0]
+
+start:
+  # 6 DOFs per end now: (x, y, z, theta, phi, yaw).
+  # theta/phi aim the tangent, yaw is the spin about it.
+  u_left_twist:  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # held fixed all horizon
+  u_right_twist: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  init_yaw: 0.0
+
+task:
+  type: point_to_point
+  target_xyz: [0.45, 0.05, 0.15]
+  trajectory_type: helix
+  track_w: 1.0
+
+train:
+  epochs: 50
+  lr: 0.005
+
+output:
+  experiment_name: dlo_3d_twist

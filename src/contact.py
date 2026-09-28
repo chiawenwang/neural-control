@@ -128,7 +128,7 @@ class SphereObstacle:
         return F, J
 
 
-def get_contact_forces(q, obstacles, dim=2, forces_only=False):
+def get_contact_forces(q, obstacles, dim=2, forces_only=False, n_pos=None):
     """
     Aggregate contact force vector and Jacobian matrix from all obstacles.
 
@@ -139,6 +139,9 @@ def get_contact_forces(q, obstacles, dim=2, forces_only=False):
     dim       : int – 2 or 3
     forces_only : bool – return just Fc, skipping the (dim*N, dim*N) Jacobian.
                   Used by the Newton line search, which only needs the residual.
+    n_pos     : int or None – how many leading entries of q are positions.
+                The twisting rod appends per-edge angles after them; contact
+                acts on the nodes only, so everything past n_pos stays zero.
 
     Returns
     -------
@@ -146,7 +149,8 @@ def get_contact_forces(q, obstacles, dim=2, forces_only=False):
     Jc : ndarray (dim*N, dim*N) – total contact force Jacobian (unless forces_only)
     """
     ndof = q.size
-    N = ndof // dim
+    npos = ndof if n_pos is None else int(n_pos)
+    N = npos // dim
     Fc = np.zeros(ndof)
 
     if forces_only:

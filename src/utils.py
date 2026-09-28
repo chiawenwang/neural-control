@@ -15,7 +15,7 @@ def visualize_results(results, env, target_pos, save_path='img'):
     """Visualize results (works for both SimulatorEnv_2D and SimulatorEnv_3D)."""
     final_q = results['final_q']
     dim = getattr(env, 'dim', 2)
-    pts = final_q.reshape(-1, dim)
+    pts = _positions(final_q, env, dim)
     mid_idx = env.mid_node
     mid = pts[mid_idx]
 
@@ -79,9 +79,22 @@ def visualize_results(results, env, target_pos, save_path='img'):
 # Trajectory animation
 # ---------------------------------------------------------------------------
 
-def _as_frames(q_traj, dim, max_frames):
+def _positions(q, env, dim):
+    """Node coordinates out of a DOF vector, ``(nv, dim)``.
+
+    With torsion the DOF vector carries per-edge twist angles after the
+    positions, so a plain ``reshape(-1, dim)`` would be wrong; the environment
+    knows the split.
+    """
+    get = getattr(env, 'positions', None)
+    if get is not None:
+        return get(q)
+    return np.asarray(q).reshape(-1, dim)
+
+
+def _as_frames(q_traj, dim, max_frames, env=None):
     """Stack a list of flat q vectors into (n_frames, nv, dim), subsampled."""
-    frames = np.asarray([np.asarray(q).reshape(-1, dim) for q in q_traj])
+    frames = np.asarray([_positions(q, env, dim) for q in q_traj])
     if max_frames and len(frames) > max_frames:
         # Keep the first and last frame, evenly subsample in between.
         idx = np.unique(np.linspace(0, len(frames) - 1, max_frames).round().astype(int))
@@ -109,7 +122,7 @@ def save_trajectory_gif(q_traj, env, target_pos, save_path='outputs',
         return None
 
     dim = getattr(env, 'dim', 2)
-    frames = _as_frames(q_traj, dim, max_frames)
+    frames = _as_frames(q_traj, dim, max_frames, env)
     n_frames = len(frames)
     mid_idx = env.mid_node
 

@@ -46,6 +46,7 @@ import matplotlib.pyplot as plt
 
 from contact import get_contact_forces
 from energy import build_energy
+from rodframes import RodFrames
 from newton import solve_equilibrium
 
 ############################
@@ -62,7 +63,9 @@ def objfun_3d(q_old, u_old, dt, tol, maximum_iter,
               control_node=None,
               use_inertia=False,
               obstacles=None,
-              newton_cfg=None):
+              newton_cfg=None,
+              fixed_index=None,
+              n_pos=None):
     """Single-step implicit (quasi-static) equilibrium solve.
 
     Thin wrapper around :func:`newton.solve_equilibrium`: it only applies the
@@ -73,8 +76,10 @@ def objfun_3d(q_old, u_old, dt, tol, maximum_iter,
         raise ValueError("Control node position must be provided.")
 
     q_start = q_old.copy()
-    q_start[:6] = control_node[:6]    # left end: nodes 0 and 1
-    q_start[-6:] = control_node[6:]   # right end: nodes n-2 and n-1
+    # `control_node` is listed in exactly `free_index`'s complement order, so a
+    # single scatter handles both the twist-free layout (12 clamped position
+    # DOFs) and the twisting one (12 positions + the two end twist angles).
+    q_start[fixed_index] = control_node
 
     cfg = dict(newton_cfg or {})
     q_new, flag, J, info = solve_equilibrium(
@@ -85,6 +90,7 @@ def objfun_3d(q_old, u_old, dt, tol, maximum_iter,
         dim=3,
         tol=tol,
         obstacles=obstacles or [],
+        n_pos=n_pos,
         max_iter=maximum_iter,
         q_old=q_old,
         u_old=u_old,
@@ -127,6 +133,8 @@ class SimulatorEnv_3D:
                  max_newton_iter=1000,
                  save_history=False,
                  gravity=(0.0, -9.81, 0.0),
+                 twist=False,
+                 poisson=0.3,
                  energy_cfg=None,
                  energy=None,
                  newton_cfg=None,
@@ -142,6 +150,10 @@ class SimulatorEnv_3D:
         self.max_newton_iter = max_newton_iter
         self.save_history = save_history
         self.gravity = np.asarray(gravity, dtype=float)
+        #: Torsion on/off.  With twist the DOF vector grows by one angle per
+        #: edge and each gripper gains a yaw input (see the module docstring).
+        self.twist = bool(twist)
+        self.poisson = float(poisson)
         # Newton solver options (the `newton:` block of the YAML config) and
         # a running count of steps whose equilibrium solve did not converge.
         self.newton_cfg = dict(newton_cfg or {})
@@ -160,30 +172,44 @@ class SimulatorEnv_3D:
         # Elastic energy model. Defaults to the built-in 3D DER; `energy_cfg`
         # is the `energy:` block of the YAML config, and `energy` lets a caller
         # inject a RodEnergy instance directly (overrides energy_cfg).
+        # Material frames, only needed when the rod can twist.  They are state:
+        # carried from step to step by parallel transport, like the warm start.
+        self.frames = RodFrames(nv) if self.twist else None
+
         self.energy = energy if energy is not None else build_energy(
-            energy_cfg, EI=self.EI, EA=self.EA, deltaL=self.deltaL, nv=nv, dim=3)
+            energy_cfg, EI=self.EI, EA=self.EA, deltaL=self.deltaL, nv=nv, dim=3,
+            twist=self.twist, frames=self.frames, poisson=self.poisson)
 
         # Node coordinates (initially a straight rod along +x)
         self.nodes = np.zeros((nv, 3))
         self.nodes[:, 0] = np.arange(nv) * self.deltaL
 
+        # DOF layout: positions first, then (with twist) one angle per edge.
+        self.n_pos = 3 * nv
+        self.n_twist = (nv - 1) if self.twist else 0
+        self.n_dof = self.n_pos + self.n_twist
+
         # Mass
         m_node = np.pi * (R_outer ** 2 - r_inner ** 2) * rod_length * rho_al / (nv - 1)
         self.m_node = m_node
-        self.m = np.full(3 * nv, m_node)
+        self.m = np.full(self.n_dof, m_node)
         self.mMat = np.diag(self.m)
 
-        # Gravity (external load vector W, per DOF)
-        self.W = np.tile(self.gravity, nv) * m_node
+        # Gravity (external load vector W, per DOF); it does no work on twist.
+        self.W = np.zeros(self.n_dof)
+        self.W[:self.n_pos] = np.tile(self.gravity, nv) * m_node
 
         # Newton iteration tolerance
         self.tol = self.energy.stiffness_scale / rod_length ** 2 * 1e-3
 
-        # Constrained DOFs: the two nodes at each end are clamped by the control
-        all_DOFs = np.arange(3 * nv)
-        self.fixed_index = np.concatenate([np.arange(0, 6),
-                                           np.arange(3 * nv - 6, 3 * nv)])
-        self.free_index = np.setdiff1d(all_DOFs, self.fixed_index)
+        # Constrained DOFs: the two nodes at each end are clamped by the
+        # control, and with twist so is each end edge's twist angle (the
+        # gripper yaw).
+        clamped = [np.arange(0, 6), np.arange(3 * nv - 6, 3 * nv)]
+        if self.twist:
+            clamped.append(np.array([self.n_pos, self.n_pos + nv - 2]))
+        self.fixed_index = np.concatenate(clamped)
+        self.free_index = np.setdiff1d(np.arange(self.n_dof), self.fixed_index)
 
         # Mid-node index
         self.mid_node = nv // 2
@@ -227,24 +253,62 @@ class SimulatorEnv_3D:
 
     # ---------- inner tools ----------
 
+    @property
+    def control_size(self) -> int:
+        """Length of the control vector: 10 without twist, 12 with yaw."""
+        return 12 if self.twist else 10
+
     def _control_node_from_pose(self, control_vec):
-        """Map the 10D end-effector control to the 12D clamped boundary DOFs.
+        """Map the end-effector control onto the clamped boundary DOFs.
 
-        control_vec = [x_l, y_l, z_l, th_l, ph_l, x_r, y_r, z_r, th_r, ph_r]
-        returns     = [node_0, node_1, node_{n-2}, node_{n-1}]   (flattened)
+        Without twist (10D control)::
+
+            [x_l, y_l, z_l, th_l, ph_l,  x_r, y_r, z_r, th_r, ph_r]
+            -> [node_0, node_1, node_{n-2}, node_{n-1}]              (12)
+
+        With twist each end gains a yaw (12D control)::
+
+            [x_l, y_l, z_l, th_l, ph_l, yaw_l,  x_r, ..., yaw_r]
+            -> [node_0, node_1, node_{n-2}, node_{n-1}, theta^0, theta^{n-2}]  (14)
+
+        ``yaw`` is the rotation of the gripper's cross-section about the rod
+        tangent, measured from that edge's reference director.  Because the
+        reference frame is carried by twist-free parallel transport, holding
+        yaw constant means applying no twist, and changing it twists the rod.
+        The two angle inputs ``th``/``ph`` fix where the tangent *points*; yaw
+        is the third rotational freedom, the spin about it.
         """
-        x_l, y_l, z_l, th_l, ph_l, x_r, y_r, z_r, th_r, ph_r = control_vec
+        control_vec = np.asarray(control_vec, dtype=float)
+        k = 6 if self.twist else 5
+        p_l, th_l, ph_l = control_vec[0:3], control_vec[3], control_vec[4]
+        p_r, th_r, ph_r = control_vec[k:k + 3], control_vec[k + 3], control_vec[k + 4]
 
-        p_l = np.array([x_l, y_l, z_l], dtype=float)
-        p_r = np.array([x_r, y_r, z_r], dtype=float)
         n0 = p_l
         n1 = p_l + tangent_from_angles(th_l, ph_l) * self.deltaL
         nm2 = p_r - tangent_from_angles(th_r, ph_r) * self.deltaL
         nm1 = p_r
-        return np.concatenate([n0, n1, nm2, nm1])
+        out = [n0, n1, nm2, nm1]
+        if self.twist:
+            out.append(np.array([control_vec[5], control_vec[11]]))
+        return np.concatenate(out)
 
     # Alias, so 2D code paths calling the 2D name keep working.
     _control_node_from_xytheta = _control_node_from_pose
+
+    def positions(self, q=None):
+        """The node positions as an ``(nv, 3)`` array.
+
+        With twist the DOF vector also carries the per-edge angles, so this is
+        the safe way to get coordinates out of ``q`` (plain ``reshape(-1, 3)``
+        is only correct when twist is off).
+        """
+        q = self.q if q is None else q
+        return np.asarray(q, dtype=float)[:self.n_pos].reshape(-1, 3)
+
+    def twist_angles(self, q=None):
+        """The per-edge twist angles, shape ``(nv - 1,)``; empty without twist."""
+        q = self.q if q is None else q
+        return np.asarray(q, dtype=float)[self.n_pos:]
 
     def _get_midpoint(self):
         """Returns the current midpoint coordinates (midx, midy, midz)."""
@@ -268,7 +332,8 @@ class SimulatorEnv_3D:
               init_y=None,
               init_z=None,
               init_theta=None,
-              init_phi=None):
+              init_phi=None,
+              init_yaw=None):
         """
         Resets the environment and returns the initial observation.
         The initial control value only affects the control applied on the
@@ -284,8 +349,16 @@ class SimulatorEnv_3D:
             init_theta = 0.0
         if init_phi is None:
             init_phi = 0.0
+        if init_yaw is None:
+            init_yaw = 0.0
 
-        self.q = self.nodes.reshape(-1).copy()
+        self.q = np.zeros(self.n_dof)
+        self.q[:self.n_pos] = self.nodes.reshape(-1)
+        if self.twist:
+            # A straight rod with a uniform twist angle carries no twist at
+            # all: only differences between adjacent edges cost energy.
+            self.q[self.n_pos:] = init_yaw
+            self.frames.reset(self.nodes)
 
         self.u = np.zeros_like(self.q)
         self.ctime = 0.0
@@ -308,10 +381,12 @@ class SimulatorEnv_3D:
           obs, done, info
         """
         control = np.asarray(control, dtype=float).flatten()
-        if control.shape[0] != 10:
+        if control.shape[0] != self.control_size:
+            layout = ("[x_l, y_l, z_l, th_l, ph_l, yaw_l, "
+                      "x_r, y_r, z_r, th_r, ph_r, yaw_r]" if self.twist else
+                      "[x_l, y_l, z_l, th_l, ph_l, x_r, y_r, z_r, th_r, ph_r]")
             raise ValueError(
-                "control must be a 10D vector: "
-                "[x_l, y_l, z_l, th_l, ph_l, x_r, y_r, z_r, th_r, ph_r].")
+                f"control must be a {self.control_size}D vector: {layout}")
 
         control_node = self._control_node_from_pose(control)
 
@@ -331,6 +406,8 @@ class SimulatorEnv_3D:
             use_inertia=use_inertia,
             obstacles=self.obstacles,
             newton_cfg=self.newton_cfg,
+            fixed_index=self.fixed_index,
+            n_pos=self.n_pos,
         )
 
         if flag < 0:
@@ -343,6 +420,12 @@ class SimulatorEnv_3D:
         # Update velocity and time
         u_new = (q_new - self.q) / self.dt
         self.q = q_new
+        if self.twist:
+            # Carry the reference directors onto the new configuration, by
+            # twist-free parallel transport. This is the frame counterpart of
+            # the warm start: it keeps the twist measured along one continuous
+            # branch instead of jumping between frame choices.
+            self.frames.advance(self.positions(q_new))
         self.u = u_new
         self.ctime += self.dt
         self.current_step += 1
@@ -360,7 +443,7 @@ class SimulatorEnv_3D:
             "J": J,
             "free_index": self.free_index.copy(),
             "fixed_index": self.fixed_index.copy(),
-            "control_node": control_node.copy(),  # 12D boundary DOFs
+            "control_node": control_node.copy(),  # clamped boundary DOFs
             "newton": ninfo,
         }
 
@@ -377,13 +460,18 @@ class SimulatorEnv_3D:
 
     def get_state(self):
         """Snapshot the current simulator state (used to warm-start RHC segments)."""
-        return {
+        state = {
             "q": self.q.copy(),
             "u": self.u.copy(),
             "ctime": self.ctime,
             "current_step": self.current_step,
             "lamda": self.lamda,
         }
+        if self.twist:
+            # The material frames are state too -- restoring q without them
+            # would silently change what "zero twist" means.
+            state["frames"] = self.frames.get_state()
+        return state
 
     def set_state(self, state):
         """Restore a state previously returned by get_state()."""
@@ -392,11 +480,13 @@ class SimulatorEnv_3D:
         self.ctime = state["ctime"]
         self.current_step = state["current_step"]
         self.lamda = state["lamda"]
+        if self.twist and "frames" in state:
+            self.frames.set_state(state["frames"])
 
     def render(self, saveimg=False, show=True,
                xlim=None, ylim=None, zlim=None):
         """Visualizes the current rod shape in a 3D axes."""
-        pts = self.q.reshape(-1, 3)
+        pts = self.positions()
         midx, midy, midz = self._get_midpoint()
 
         if not getattr(self, "_render_initialized", False):

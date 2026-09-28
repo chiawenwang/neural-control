@@ -46,6 +46,10 @@ class RodEnergy:
     #: Human-readable name, used in log output.
     name = "base"
 
+    #: Whether the model carries per-edge twist DOFs (and so needs material
+    #: frames).  Twist-free models leave the DOF vector as pure positions.
+    has_twist = False
+
     #: Spatial dimension the model is written for (2 or 3).  The DOF vector q
     #: is laid out node-major, i.e. ``q = [x0, y0, (z0), x1, y1, (z1), ...]``
     #: with ``dim`` entries per node.  Set it to ``None`` if the model works in
@@ -433,11 +437,154 @@ class DERElasticEnergy3D(RodEnergy):
 
 
 ############################
+# Built-in: 3D DER with torsion (material frames + twist DOFs)
+############################
+
+@register_energy("der3d_twist")
+class DERElasticEnergy3DTwist(RodEnergy):
+    """3D Discrete Elastic Rod *with* torsion, for a naturally straight rod.
+
+    This is :class:`DERElasticEnergy3D` plus a twisting term, which costs an
+    extra degree of freedom per edge.  The DOF vector grows accordingly::
+
+        q = [ x0 y0 z0 ... x_{nv-1} y_{nv-1} z_{nv-1} | theta^0 ... theta^{nv-2} ]
+            \\________________ 3 * nv positions _______/ \\___ nv - 1 twists ___/
+
+    ``theta^i`` is the rotation of edge i's material frame away from its
+    reference director, about the edge tangent (see :mod:`rodframes`).
+
+    Energy::
+
+        E = E_stretch(x) + E_bend(x) + E_twist(x, theta)
+
+        E_twist = sum_i  (GJ / (2 dL)) * m_i^2 ,
+        m_i     = theta^i - theta^{i-1} + psi_i(x)
+
+    ``psi_i`` is the reference twist -- the failure of parallel transport along
+    the rod to close up.  It is what makes twisting and bending couple: without
+    it ``E_twist`` would depend on ``theta`` alone, the centreline would not
+    respond to twisting at all, and the gradient of a position-based loss with
+    respect to gripper yaw would be identically zero.
+
+    Stretching and bending are untouched, so with ``GJ = 0`` (or with the twist
+    DOFs pinned) this reproduces :class:`DERElasticEnergy3D` exactly.
+
+    Only the *isotropic* case is modelled: the bending stiffness is the same
+    about both cross-section axes, so bending needs no material frame and the
+    frame enters through the twist term alone.
+    """
+
+    dim = 3
+    has_twist = True
+
+    def __init__(self, EI: float, EA: float, deltaL: float, nv: int,
+                 GJ: float = None, poisson: float = 0.3, frames=None, **_ignored):
+        self.EI = EI
+        self.EA = EA
+        self.deltaL = deltaL
+        self.nv = int(nv)
+        # Circular cross-section: J = 2I and G = E / (2(1+nu)), so GJ = EI/(1+nu).
+        self.GJ = float(EI / (1.0 + poisson)) if GJ is None else float(GJ)
+        self.frames = frames
+        self._bend = DERElasticEnergy3D(EI=EI, EA=EA, deltaL=deltaL)
+        #: stiffness of one twist term, E_twist = sum (beta/2) m^2
+        self.beta = self.GJ / self.deltaL
+
+    # ---------- layout helpers ----------
+
+    @property
+    def n_pos(self) -> int:
+        """Number of position DOFs; the twist angles follow them in ``q``."""
+        return 3 * self.nv
+
+    @property
+    def n_dof(self) -> int:
+        return 4 * self.nv - 1
+
+    def split(self, q):
+        """``q -> (positions (nv, 3), twist angles (nv - 1,))``."""
+        q = np.asarray(q, dtype=float)
+        return q[:self.n_pos].reshape(-1, 3), q[self.n_pos:]
+
+    # ---------- the twist term ----------
+
+    def _twist_terms(self, q):
+        """``(positions, m, psi)`` with ``m_i = dtheta_i + psi_i``."""
+        pos, theta = self.split(q)
+        psi = self.frames.reference_twist(pos)
+        return pos, (theta[1:] - theta[:-1]) + psi, psi
+
+    # ---------- RodEnergy interface ----------
+
+    def energy(self, q):
+        pos, m, _ = self._twist_terms(q)
+        E = self._bend.energy(q[:self.n_pos])
+        return float(E + 0.5 * self.beta * float(np.sum(m * m)))
+
+    def gradient(self, q):
+        from rodframes import psi_grad_hess
+
+        pos, m, _ = self._twist_terms(q)
+        np_ = self.n_pos
+        g = np.zeros(self.n_dof)
+        g[:np_] = self._bend.gradient(q[:np_])
+
+        tbar = self.frames.stored_tangents
+        for i in range(1, self.nv - 1):
+            c = self.beta * m[i - 1]
+            if c == 0.0:
+                continue
+            gpsi, _ = psi_grad_hess(pos[i - 1], pos[i], pos[i + 1],
+                                    tbar[i - 1], tbar[i])
+            g[3 * (i - 1):3 * (i + 2)] += c * gpsi
+            g[np_ + i - 1] -= c          # d m_i / d theta^{i-1} = -1
+            g[np_ + i] += c              # d m_i / d theta^i     = +1
+        return g
+
+    def hessian(self, q):
+        from rodframes import psi_grad_hess
+
+        pos, m, _ = self._twist_terms(q)
+        np_, nd = self.n_pos, self.n_dof
+        H = np.zeros((nd, nd))
+        H[:np_, :np_] = self._bend.hessian(q[:np_])
+
+        tbar = self.frames.stored_tangents
+        for i in range(1, self.nv - 1):
+            gpsi, Hpsi = psi_grad_hess(pos[i - 1], pos[i], pos[i + 1],
+                                       tbar[i - 1], tbar[i])
+            sl = slice(3 * (i - 1), 3 * (i + 2))
+            ia, ib = np_ + i - 1, np_ + i        # theta^{i-1}, theta^i
+
+            # d2E/dx2 = beta * (grad psi (x) grad psi  +  m * hess psi)
+            H[sl, sl] += self.beta * (np.outer(gpsi, gpsi) + m[i - 1] * Hpsi)
+
+            # d2E/dx dtheta = beta * grad psi * dm/dtheta
+            col = self.beta * gpsi
+            H[sl, ia] -= col
+            H[sl, ib] += col
+            H[ia, sl] -= col
+            H[ib, sl] += col
+
+            # d2E/dtheta2 = beta * (dm/dtheta) (x) (dm/dtheta)
+            H[ia, ia] += self.beta
+            H[ib, ib] += self.beta
+            H[ia, ib] -= self.beta
+            H[ib, ia] -= self.beta
+        return H
+
+    @property
+    def stiffness_scale(self):
+        return self.EI
+
+
+############################
 # Factory
 ############################
 
 def build_energy(energy_cfg, *, EI: float, EA: float, deltaL: float, nv: int,
-                 dim: int = 2) -> RodEnergy:
+                 dim: int = 2, twist: bool = False, frames=None,
+                 poisson: float = 0.3) -> RodEnergy:
     """Build the energy model selected by the ``energy:`` block of the config.
 
     ``energy_cfg`` may be None or a dict like::
@@ -454,11 +601,20 @@ def build_energy(energy_cfg, *, EI: float, EA: float, deltaL: float, nv: int,
     Defaults to :class:`DERElasticEnergy`, so existing configs keep working.
     """
     cfg = dict(energy_cfg or {})
-    default_cls = DERElasticEnergy if dim == 2 else DERElasticEnergy3D
-    if not cfg.get("custom", False):
-        return default_cls(EI=EI, EA=EA, deltaL=deltaL)
+    if twist:
+        if dim != 3:
+            raise ValueError("rod.twist requires env.dim: 3")
+        default_cls, default_name = DERElasticEnergy3DTwist, "der3d_twist"
+    elif dim == 2:
+        default_cls, default_name = DERElasticEnergy, "der"
+    else:
+        default_cls, default_name = DERElasticEnergy3D, "der3d"
 
-    type_name = cfg.get("type", "der" if dim == 2 else "der3d")
+    if not cfg.get("custom", False):
+        return default_cls(EI=EI, EA=EA, deltaL=deltaL, nv=nv,
+                           frames=frames, poisson=poisson)
+
+    type_name = cfg.get("type", default_name)
     if type_name not in ENERGY_REGISTRY:
         raise KeyError(
             f"Unknown energy type {type_name!r}. "
@@ -467,6 +623,13 @@ def build_energy(energy_cfg, *, EI: float, EA: float, deltaL: float, nv: int,
         )
 
     cls = ENERGY_REGISTRY[type_name]
+    if bool(getattr(cls, "has_twist", False)) != bool(twist):
+        want = "a twist-capable" if twist else "a twist-free"
+        raise ValueError(
+            f"energy.type={type_name!r} is not {want} model, but rod.twist="
+            f"{twist}. Twist-capable: "
+            f"{sorted(k for k, v in ENERGY_REGISTRY.items() if getattr(v, 'has_twist', False))}."
+        )
     cls_dim = getattr(cls, "dim", dim)
     if cls_dim is not None and cls_dim != dim:
         raise ValueError(
@@ -476,4 +639,5 @@ def build_energy(energy_cfg, *, EI: float, EA: float, deltaL: float, nv: int,
         )
 
     params = dict(cfg.get("params") or {})
-    return cls(EI=EI, EA=EA, deltaL=deltaL, nv=nv, dim=dim, **params)
+    return cls(EI=EI, EA=EA, deltaL=deltaL, nv=nv, dim=dim,
+               frames=frames, poisson=poisson, **params)

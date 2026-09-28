@@ -46,7 +46,8 @@ neural-control/
 ├── src/
 │   ├── SimulatorEnv_2D.py      # Equilibrium (Newton-Raphson) rod simulator, 2D
 │   ├── SimulatorEnv_3D.py      # Equilibrium (Newton-Raphson) rod simulator, 3D
-│   ├── energy.py               # Pluggable elastic-energy models (der, der3d, custom)
+│   ├── energy.py               # Pluggable elastic-energy models (der, der3d, der3d_twist)
+│   ├── rodframes.py            # Material frames + reference twist (torsion)
 │   ├── contact.py              # Penalty-based obstacle contact forces (Circle/Sphere)
 │   ├── implicit_grad_tools.py  # Adjoint / implicit-gradient computation (2D and 3D)
 │   ├── env_factory.py          # dim-aware env/control/target construction
@@ -57,6 +58,7 @@ neural-control/
 │   ├── train_cmaes.py          # Task 1: point-to-point, CMA-ES controller (recommended)
 │   ├── train_adjoint.py        # Task 1: point-to-point, adjoint-gradient MLP controller
 │   ├── train_tracking.py       # Task 2: trajectory tracking, adjoint-gradient MLP controller
+│   ├── check_twist.py          # Finite-difference validation of the torsion model
 │   ├── snapshot_overlay.py     # Multi-frame DLO configuration visualization
 │   └── test_gpu.py             # MPS/GPU availability check
 ├── img/                        # README figures
@@ -134,16 +136,16 @@ care about (deep-merged onto the defaults). Key sections:
 Set `env.dim` in the config; all three training scripts, the adjoint
 gradients, contact, and the plots follow it.
 
-|                      | `dim: 2`                   | `dim: 3`                                 |
-| -------------------- | -------------------------- | ---------------------------------------- |
-| simulator            | `SimulatorEnv_2D`          | `SimulatorEnv_3D`                        |
-| DOFs per node        | `(x, y)`                   | `(x, y, z)`                              |
-| control per rod end  | `(x, y, θ)`                | `(x, y, z, θ, φ)`                        |
-| full control vector  | 6D                         | 10D                                      |
-| elastic energy       | `der`                      | `der3d`                                  |
-| obstacles            | `CircleObstacle`           | `SphereObstacle`                         |
-| target / trajectory  | `task.target_xy`           | `task.target_xyz`                        |
-| initial end poses    | `start.u_left`/`u_right`   | `start.u_left_3d`/`u_right_3d`           |
+|                     | `dim: 2`                 | `dim: 3`                       | `dim: 3` + `rod.twist`                |
+| ------------------- | ------------------------ | ------------------------------ | ------------------------------------- |
+| simulator           | `SimulatorEnv_2D`        | `SimulatorEnv_3D`              | `SimulatorEnv_3D`                     |
+| DOFs                | `2·nv`                   | `3·nv`                         | `4·nv − 1` (+1 twist angle per edge)  |
+| control per rod end | `(x, y, θ)`              | `(x, y, z, θ, φ)`              | `(x, y, z, θ, φ, yaw)`                |
+| full control vector | 6D                       | 10D                            | 12D                                   |
+| elastic energy      | `der`                    | `der3d`                        | `der3d_twist`                         |
+| obstacles           | `CircleObstacle`         | `SphereObstacle`               | `SphereObstacle`                      |
+| target / trajectory | `task.target_xy`         | `task.target_xyz`              | `task.target_xyz`                     |
+| initial end poses   | `start.u_left`/`u_right` | `start.u_left_3d`/`u_right_3d` | `start.u_left_twist`/`u_right_twist`  |
 
 Both rod ends are **clamped**: the control prescribes each end's position and
 its tangent direction. In 3D the tangent needs two angles instead of one —
@@ -162,9 +164,10 @@ model for a naturally straight rod: per-edge stretching springs plus isotropic
 bending `E_b = Σ (EI / 2ΔL)·|κb|²`. Because the rod is naturally straight and
 bending is isotropic, `|κb|²` reduces to a function of the single scalar
 `c = t_e · t_f`, which is what makes the *exact* Hessian — required by the
-adjoint gradient — cheap to write in closed form. A per-edge **twist** DOF
-would need material frames and parallel transport, and is deliberately not
-modelled; the 3D environment captures out-of-plane bending only.
+adjoint gradient — cheap to write in closed form.
+
+Torsion is off by default and enabled with `rod.twist: true`; see
+[Torsion and gripper yaw](#torsion-and-gripper-yaw).
 
 Gravity in 3D is the config vector `rod.gravity`, defaulting to
 `[0, -9.81, 0]` so that y stays "down" as in 2D. With that default, a 3D run
@@ -355,17 +358,98 @@ the whole horizon rather than the last segment.
 - The demo simulator uses `nv` nodes (`configs/default.yaml`, `rod.nv`)
   rather than the paper's 101, for faster iteration.
 
-## Still missing in 3D
+## Torsion and gripper yaw
 
-The 3D environment models out-of-plane bending, not torsion. Adding twist
-would mean:
+`rod.twist: true` gives the rod a third rotational freedom at each end and lets
+it actually twist. Without it the gripper can only *aim* its tangent — two
+angles, azimuth `θ` and elevation `φ` — and the spin about that tangent has
+nowhere to live.
 
-- a per-edge material frame with parallel transport, and a twisting energy
-  (`getFt`) alongside the existing stretching/bending terms in `der3d`;
-- state grows from `3*nv` positions to `3*nv + (nv-1)` twist angles, with
-  `free_index`/`fixed_index` extended to match;
-- the end-effector control grows from `(x, y, z, θ, φ)` to a full 6-DOF pose
-  per end — at which point the tangent-angle parameterization should be
-  replaced by axis-angle or quaternions (Euler angles gimbal-lock);
-- `implicit_grad_tools.py` still needs **no change** beyond the `d(q_b)/d(u)`
-  map: the adjoint solve itself is dimension-agnostic linear algebra.
+### What gets added
+
+Following the Discrete Elastic Rod construction (Bergou et al.; the same one
+[DEFORM](https://roahmlab.github.io/DEFORM/) uses), every edge carries a
+**material frame**, split into a *reference director* moved by twist-free
+parallel transport plus a scalar **twist angle** `θⁱ`. Those angles are real
+degrees of freedom, so the DOF vector grows:
+
+```
+q = [ x₀ y₀ z₀ … x_{nv-1} y_{nv-1} z_{nv-1} | θ⁰ … θ^{nv-2} ]
+    \______________ 3·nv positions ________/ \__ nv−1 twists __/
+```
+
+The energy gains a twisting term:
+
+```
+E = E_stretch(x) + E_bend(x) + E_twist(x, θ)
+E_twist = Σᵢ (GJ / 2ΔL) · mᵢ² ,   mᵢ = θⁱ − θⁱ⁻¹ + ψᵢ(x)
+```
+
+with `GJ = EI / (1 + ν)` for a circular cross-section (`rod.poisson`).
+
+### Why `ψ` is the whole point
+
+`ψᵢ` is the **reference twist**: parallel transport along the rod is not
+integrable, so carrying the director from edge `i−1` onto edge `i` does not
+land on edge `i`'s own director, and `ψᵢ` is the gap. It depends on the
+*positions*, and that is exactly what couples twisting to bending — the
+discrete form of link = twist + writhe.
+
+Drop it and `E_twist` would depend on `θ` alone: the rod would twist, its
+centreline would not move, and `dL/d(yaw)` for any position-based loss would be
+**identically zero** — a dead control input. With it, `dL/d(yaw)` is nonzero
+and the policy can actually learn to use yaw.
+
+### Yaw
+
+Yaw is measured from that edge's reference director. Because the reference
+frame is carried by twist-free parallel transport between steps, holding yaw
+constant means applying no twist and changing it twists the rod — so the
+control maps onto the clamped twist angles directly, with no geometry in
+between (`boundary_node_jacobian_3d_twist` is the 12-row position map plus two
+rows that are a single `1`).
+
+### Correctness
+
+Everything the adjoint depends on is finite-difference checked by
+`python scripts/check_twist.py` (9/9 at the time of writing):
+
+| check | error |
+| --- | --- |
+| `grad(ψ)` | 3.7e-09 |
+| `hess(ψ)` | 8.4e-07 |
+| twisting energy force / Jacobian | ~7e-11 |
+| `GJ = 0` reduces to `der3d` | exactly 0 |
+| boundary map `d(q_b)/d(u)`, 14×12 | 5.3e-10 |
+| adjoint `dL/du` incl. yaw | 6.8e-08 |
+
+Two things that cost real debugging time, recorded so they are not rediscovered:
+
+- **`hess(ψ)` is the *symmetric part* of the chain-rule matrix.** Differentiating
+  the `kb/2L` gradient expression directly gives a matrix carrying a spurious
+  antisymmetric piece; the raw version is off by >100%.
+- **`grad(ψ)` has a re-adaptation term** beyond the classical holonomy, from
+  carrying each stored director onto the current tangent. It vanishes when the
+  stored tangents equal the current ones, so it is invisible at the start of a
+  step and only appears once the Newton iterate has moved — dropping it costs
+  ~50% of the gradient.
+
+One approximation is left, and it is the same class the horizon adjoint already
+makes: the reference frames advance once a step is committed, so a perturbed
+control follows a slightly different frame path that the single-step implicit
+gradient does not see. `check_twist.py` measures it at ~6.5e-04 relative over a
+3-step rollout.
+
+### What is still not modelled
+
+Anisotropic bending (different stiffness about the two cross-section axes) and
+non-zero natural curvature or natural twist. Both would need the bending term
+rewritten against the material frame; the twist machinery is already in place.
+
+## Limits of the 3D model
+
+The end-effector orientation is parameterized as `(θ, φ, yaw)`. That is three
+angles, so it does cover the full rotation group, but like any Euler-style
+chart it degenerates: at `φ = ±π/2` the tangent points along `z` and `θ` and
+`yaw` become the same rotation (gimbal lock). Trajectories that drive an end
+near vertical should switch to axis-angle or quaternions.
