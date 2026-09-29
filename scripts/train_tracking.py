@@ -32,6 +32,8 @@ from env_factory import (
     initial_control,
     material_summary,
     make_target_trajectory,
+    initial_midpoint,
+    task_target,
     node_tracking_loss,
     node_position,
     dloss_dq_free_node,
@@ -181,8 +183,12 @@ def main():
     reset_env(env, cfg)
 
     N = env.Nsteps
-    targets = make_target_trajectory(N, env.rod_length,
-                                     traj_type=cfg.task.trajectory_type, dim=dim)
+    # `segment` runs from where the mid node actually starts to the
+    # point-to-point target, so step 0 begins with ~no error; the other curves
+    # ignore both and sit wherever they are defined.
+    targets = make_target_trajectory(
+        N, env.rod_length, traj_type=cfg.task.trajectory_type, dim=dim,
+        start=initial_midpoint(env, cfg), end=task_target(cfg))
 
     device = resolve_device(cfg.train.device)
     u0 = torch.tensor(initial_control(cfg), dtype=torch.float32, device=device)

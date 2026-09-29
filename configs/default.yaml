@@ -188,9 +188,17 @@ task:
   type: point_to_point       # point_to_point (train_adjoint.py) | tracking (train_tracking.py)
   target_xy: [0.2, 0.4]          # 2D point_to_point: target position for the mid node
   target_xyz: [0.35, 0.1, 0.1]    # 3D point_to_point: target position for the mid node
-  # tracking: circle | figure8 | line  (both dims; the planar curves sit at z=0 in 3D)
-  #           helix | figure8_3d       (3D only)
-  trajectory_type: circle
+  # tracking: which path the mid node should follow.
+  #   segment     a straight line from where the mid node actually starts to
+  #               target_xy / target_xyz above. Starts with ~zero error, so the
+  #               loss measures following rather than a gap the rod was never
+  #               given a chance to close -- and it shares its endpoint with the
+  #               point_to_point task, making the two directly comparable.
+  #   circle | figure8 | line   fixed curves in the vertical plane (x-y in 2D,
+  #               x-z in 3D). They sit where they are defined regardless of the
+  #               rod, so the run starts by travelling to reach step 0.
+  #   helix | figure8_3d        genuinely 3D, 3D only.
+  trajectory_type: segment
   track_w: 1.0                 # tracking: per-step loss weight
 
 # Receding-horizon control (RHC). When disabled, the whole horizon is

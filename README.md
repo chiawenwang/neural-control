@@ -191,7 +191,9 @@ against gravity, not a horizontal sweep — so they follow whichever axis gravit
 is on: **x-y in 2D, x-z in 3D**. Their in-plane coordinates are identical
 between the two (verified exactly), only the plane differs. `helix` (a
 horizontal circle that climbs) and `figure8_3d` (the vertical figure-8 plus a
-lateral wobble) are genuinely three-dimensional and 3D-only.
+lateral wobble) are genuinely three-dimensional and 3D-only. `segment` (the
+default, see [Tracking targets](#tracking-targets)) is anchored to the rod
+rather than to an axis, so the convention does not affect it.
 
 If you want the two simulators to agree node for node — useful for
 cross-checking them — set
@@ -252,6 +254,47 @@ force and Hessian (~8.6 ms per call in 3D, ~18.3 ms in 2D), at ~10 Newton
 iterations per step. Vectorizing those stencil loops — not a faster linear
 solver — is the next worthwhile optimization; the Hessian is banded (only
 2.8% nonzero in 3D), so a banded solver would help only for much larger `nv`.
+
+## Tracking targets
+
+`task.trajectory_type` picks the path the mid node should follow. The default
+is **`segment`**: a straight line from where the mid node *actually starts* to
+`task.target_xy` / `target_xyz` — the same point the `point_to_point` task aims
+at.
+
+That anchoring is the point. The fixed curves sit wherever their formula puts
+them, which for a 1 m rod is typically a long way from the rod's own starting
+configuration:
+
+| `trajectory_type` | distance from the rod at step 0 |
+| --- | --- |
+| `segment` | **0.000 m** |
+| `figure8_3d` | 0.004 m |
+| `circle` | 0.295 m |
+
+A run on `circle` therefore spends its first stretch travelling to reach step 0,
+and the loss is dominated by a gap the rod was never given a chance to close —
+it measures the head start, not how well the policy follows. Anchoring the path
+at the rod removes that. Same setup, 25 epochs, mean distance to the target:
+
+| | first epoch | best |
+| --- | --- | --- |
+| `segment` | 0.173 m | **0.026 m** |
+| `circle` | 0.282 m | 0.148 m |
+
+`segment` also shares its endpoint with `point_to_point`, so the two tasks
+become directly comparable on the same config: one asks only for the
+destination, the other for the whole path to it.
+
+The starting point comes from `initial_midpoint(env, cfg)`, which takes one
+step with the initial control and reads the result — not `env.nodes[mid]`,
+because the rod sags as soon as the first equilibrium is solved, and a
+trajectory anchored at the undeformed midpoint would already be wrong on step
+0. The probe restores the environment afterwards, material frames included.
+
+The fixed curves are still there for when you want a specific shape; they just
+ignore the rod's starting position. `configs/example_3d.yaml` (`helix`) and
+`configs/example_3d_twist.yaml` (`figure8_3d`) keep theirs as 3D demonstrations.
 
 ## Newton convergence
 

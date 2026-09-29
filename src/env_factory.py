@@ -256,6 +256,24 @@ def initial_control(cfg) -> np.ndarray:
     return np.array(list(left) + list(right), dtype=float)
 
 
+def initial_midpoint(env, cfg) -> np.ndarray:
+    """Where the controlled node sits at the *start* of a rollout.
+
+    Not the undeformed rod's midpoint: the rod sags as soon as the first
+    equilibrium is solved, so a trajectory anchored at ``env.nodes[mid]`` would
+    already be wrong on step 0.  This takes one step with the initial control,
+    reads the midpoint, and restores the environment -- including the material
+    frames, which ``get_state``/``set_state`` carry.
+    """
+    dim = env_dim(cfg)
+    state = env.get_state()
+    try:
+        _, _, info = env.step(initial_control(cfg))
+        return node_position(info["q"], dim, env.mid_node)
+    finally:
+        env.set_state(state)
+
+
 def task_target(cfg) -> np.ndarray:
     """Point-to-point target for the mid node: ``task.target_xy`` / ``task.target_xyz``."""
     dim = env_dim(cfg)
@@ -266,8 +284,23 @@ def task_target(cfg) -> np.ndarray:
     return target
 
 
-def make_target_trajectory(N, rod_length, traj_type="circle", dim=2, up_axis=None):
+def make_target_trajectory(N, rod_length, traj_type="circle", dim=2, up_axis=None,
+                           start=None, end=None):
     """The N-step target trajectory for the mid node, shape (N, dim).
+
+    ``segment`` is the default and the one to reach for: a straight line from
+    where the mid node actually starts (``start``, see :func:`initial_midpoint`)
+    to the point-to-point target (``end``, ``task.target_*``).  Because it
+    begins at the rod's own configuration the error at step 0 is ~zero, so the
+    loss measures how well the policy *follows* rather than being dominated by
+    a gap the rod was never given a chance to close.  It also makes tracking
+    and point-to-point directly comparable: same endpoint, same target, one
+    asks only for the destination and the other for the whole path to it.
+
+    The fixed curves (``circle``, ``figure8``, ``line``, ``helix``,
+    ``figure8_3d``) ignore ``start``: they sit wherever they are defined, so
+    the rod generally has to travel to reach step 0 and the first part of the
+    run is spent closing that gap.
 
     The planar curves (``circle``, ``figure8``, ``line``) are laid out in the
     *vertical* plane -- the one containing gravity -- because that is what they
@@ -285,7 +318,18 @@ def make_target_trajectory(N, rod_length, traj_type="circle", dim=2, up_axis=Non
     up = (1 if dim == 2 else 2) if up_axis is None else int(up_axis)
     lat = 1 if dim == 3 else None      # the remaining horizontal axis, 3D only
 
-    if traj_type == "circle":
+    if traj_type == "segment":
+        if start is None or end is None:
+            raise ValueError(
+                "trajectory_type 'segment' needs both ends: pass start="
+                "initial_midpoint(env, cfg) and end=task_target(cfg).")
+        p0 = np.asarray(start, dtype=float).reshape(-1)
+        p1 = np.asarray(end, dtype=float).reshape(-1)
+        if p0.size != dim or p1.size != dim:
+            raise ValueError(f"segment endpoints must be {dim}D, got "
+                             f"{p0.size} and {p1.size}")
+        targets[:] = p0 + np.outer(lams, p1 - p0)
+    elif traj_type == "circle":
         cx, cu, r = rod_length / 2, 0.25, 0.15
         theta = 2 * np.pi * lams
         targets[:, 0] = cx + r * np.cos(theta)
