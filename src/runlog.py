@@ -1,18 +1,26 @@
 # -*- coding: utf-8 -*-
 """Per-run training log: what happened, as it happens, on disk.
 
-TensorBoard event files are good for eyeballing a curve but poor for going
-back and answering "what exactly did that run do?" -- they hold a handful of
-scalars, nothing about the configuration, and every run of the same experiment
-piles into the same directory.  This module writes, per run, a self-contained
-directory that answers that question::
+Every run gets a self-contained directory -- including its own TensorBoard
+event file, so runs are separate, comparable entries rather than piling into
+one directory where a later run buries an earlier one::
 
     experiments/<experiment_name>/runs/<timestamp>/
-        config.yaml    the fully resolved config, as actually used
-        meta.json      git commit, device, rod/env description, start time
-        log.jsonl      one JSON record per epoch or segment, flushed as it goes
-        summary.json   final results, written when the run ends
-        log.txt        the same records as readable lines
+        events.out.tfevents.*   TensorBoard scalars, flushed per record
+        config.yaml             the fully resolved config, as actually used
+        meta.json               git commit, device, rod/env description
+        log.jsonl               one JSON record per epoch or segment
+        summary.json            final results, and how the run ended
+        log.txt                 the same records as readable lines
+
+Watch them live with::
+
+    tensorboard --logdir experiments
+
+:meth:`RunLogger.log` is the single place a result goes: it writes the JSON
+record, the readable line, *and* the TensorBoard scalars, so the three can
+never drift apart.  Scalars are flushed on every record, which is what makes
+the curve update while the run is still going.
 
 ``log.jsonl`` is flushed on every record, so a run that crashes or is killed
 still leaves everything up to that point -- which is exactly when the log is
@@ -42,6 +50,27 @@ import traceback
 from datetime import datetime
 
 import numpy as np
+
+#: Scalar names in TensorBoard.  Grouped by prefix so the sidebar collapses
+#: into loss / error / physics rather than one flat list, and named for what
+#: the number means rather than for the variable that happened to hold it.
+_TB_NAME = {
+    "loss": "loss/final",
+    "total_loss": "loss/total",
+    "best_loss": "loss/best",
+    "error": "error/distance",
+    "mean_track_error": "error/track_mean",
+    "max_track_error": "error/track_max",
+    "converged": "physics/converged",
+    "converged_ratio": "physics/converged_ratio",
+    "newton_failures": "physics/newton_failures",
+    "steps": "physics/steps_completed",
+    "horizon": "physics/horizon",
+    "iterations": "train/iterations",
+}
+
+#: Fields that are recorded but make no sense as a curve.
+_TB_SKIP = {"i", "t", "note", "target", "losses", "u_final", "epoch", "segment"}
 
 
 def _jsonable(v):
@@ -92,25 +121,58 @@ class RunLogger:
         self.dir = None
         self._jsonl = None
         self._txt = None
-        if not self.enabled:
-            return
+        self._writer = None
+        self._cfg = cfg
+        self._env = env
 
         root = root or os.getcwd()
         exp = (cfg.get("output") or {}).get("experiment_name", "run")
+        #: Where a run's own figures belong. With logging off there is no run
+        #: directory, so they fall back to the experiment directory.
+        self.experiment_dir = os.path.join(str(root), "experiments", str(exp))
+        self.artifact_dir = self.experiment_dir
+        if not self.enabled:
+            os.makedirs(self.experiment_dir, exist_ok=True)
+            self._writer = self._make_writer(self.experiment_dir)
+            return
+
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         if tag:
             stamp = f"{stamp}-{tag}"
-        self.dir = os.path.join(str(root), "experiments", str(exp), "runs", stamp)
+        self.dir = os.path.join(self.experiment_dir, "runs", stamp)
+        self.artifact_dir = self.dir
         os.makedirs(self.dir, exist_ok=True)
 
         self._write_config(cfg)
         self._write_meta(cfg, env, root)
         self._jsonl = open(os.path.join(self.dir, "log.jsonl"), "w")
         self._txt = open(os.path.join(self.dir, "log.txt"), "w")
+        self._writer = self._make_writer(self.dir)
+        if self._writer is not None:
+            # The config as text so it is readable from TensorBoard itself,
+            # not just from the run directory.
+            try:
+                with open(os.path.join(self.dir, "config.yaml")) as f:
+                    self._writer.add_text("config", "```yaml\n" + f.read() + "\n```", 0)
+            except Exception:
+                pass
         # If the process dies before finish(), still close the run out rather
         # than leaving a directory with no summary at all.
         atexit.register(self._atexit)
         print(f"Run log -> {self.dir}")
+
+    @staticmethod
+    def _make_writer(log_dir):
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+            return SummaryWriter(log_dir=log_dir)
+        except Exception:
+            return None
+
+    @property
+    def writer(self):
+        """The run's SummaryWriter, for anything log() cannot express."""
+        return self._writer
 
     def _atexit(self):
         if self._jsonl is not None:
@@ -162,16 +224,43 @@ class RunLogger:
     # ---------- during the run ----------
 
     def log(self, **fields):
-        """Append one record. Flushed immediately so a killed run keeps it."""
-        if not self.enabled:
-            return
+        """Record one epoch or segment: JSON, readable line, and TensorBoard.
+
+        Everything is flushed immediately, so the curve updates while the run
+        is still going and a killed run keeps what it had.
+        """
         rec = {"i": self.n_records, "t": round(time.time() - self.t0, 3)}
         rec.update(_jsonable(fields))
-        self._jsonl.write(json.dumps(rec) + "\n")
-        self._jsonl.flush()
-        self._txt.write("  ".join(f"{k}={_fmt(v)}" for k, v in rec.items()) + "\n")
-        self._txt.flush()
+
+        # The x-axis is the epoch (or RHC segment) when there is one, so skipped
+        # epochs leave a visible gap rather than silently shifting the curve.
+        step = int(rec.get("epoch", rec.get("segment", self.n_records)))
+        self._tb_scalars(rec, step)
+
+        if self.enabled:
+            self._jsonl.write(json.dumps(rec) + "\n")
+            self._jsonl.flush()
+            self._txt.write("  ".join(f"{k}={_fmt(v)}" for k, v in rec.items()) + "\n")
+            self._txt.flush()
         self.n_records += 1
+
+    def _tb_scalars(self, rec, step):
+        w = self._writer
+        if w is None:
+            return
+        for k, v in rec.items():
+            if k in _TB_SKIP:
+                continue
+            name = _TB_NAME.get(k, f"train/{k}")
+            if isinstance(v, bool):
+                w.add_scalar(name, float(v), step)
+            elif isinstance(v, (int, float)) and np.isfinite(v):
+                w.add_scalar(name, float(v), step)
+            elif (isinstance(v, (list, tuple)) and 0 < len(v) <= 3
+                  and all(isinstance(x, (int, float)) for x in v)):
+                for axis, x in zip("xyz", v):
+                    w.add_scalar(f"{k}/{axis}", float(x), step)
+        w.flush()
 
     # ---------- end of run ----------
 
@@ -181,6 +270,11 @@ class RunLogger:
         ``status`` records how the run ended, so an interrupted run is not
         mistaken for a successful one that happened to score badly.
         """
+        self._tb_hparams(status, fields)
+        if self._writer is not None:
+            self._writer.flush()
+            self._writer.close()
+            self._writer = None
         if not self.enabled:
             return
         summary = {
@@ -206,6 +300,33 @@ class RunLogger:
         except Exception:
             pass
         print(f"Run summary -> {os.path.join(self.dir, 'summary.json')}  ({status})")
+
+    def _tb_hparams(self, status, fields):
+        """One HPARAMS row per run, so runs can be compared in a table."""
+        w = self._writer
+        if w is None:
+            return
+        cfg, env = self._cfg or {}, self._env
+        rod = cfg.get("rod") or {}
+        train = cfg.get("train") or {}
+        hp = {
+            "dim": int(getattr(env, "dim", (cfg.get("env") or {}).get("dim", 2))),
+            "twist": bool(getattr(env, "twist", rod.get("twist", False))),
+            "nv": int(rod.get("nv", getattr(env, "nv", 0) or 0)),
+            "material": str(rod.get("material", "custom")),
+            "lr": float(train.get("lr", 0.0)),
+            "epochs": int(train.get("epochs", 0)),
+            "rhc": bool((cfg.get("rhc") or {}).get("enabled", False)),
+            "task": str(fields.get("task", (cfg.get("task") or {}).get("type", ""))),
+            "status": str(status),
+        }
+        metrics = {f"hparam/{k}": float(fields[k])
+                   for k in ("final_loss", "final_error", "best_loss")
+                   if isinstance(fields.get(k), (int, float))}
+        try:
+            w.add_hparams(hp, metrics or {"hparam/records": float(self.n_records)})
+        except Exception:
+            pass
 
     # ---------- context manager: record crashes too ----------
 

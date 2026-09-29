@@ -14,7 +14,6 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import argparse
@@ -207,9 +206,8 @@ def main():
     net = BoundaryVelocityNet(hidden=cfg.train.hidden, out_dim=end_control_dim(dim, twist)).to(device)
     opt = optim.Adam(net.parameters(), lr=cfg.train.lr)
 
-    _log_dir = str(_ROOT / 'experiments' / cfg.output.experiment_name)
-    os.makedirs(_log_dir, exist_ok=True)
-    writer = SummaryWriter(log_dir=_log_dir)
+    # RunLogger owns the TensorBoard writer: every result goes through
+    # run.log(), so the JSON record and the scalars cannot drift apart.
     run = RunLogger(cfg, env=env, root=_ROOT,
                     enabled=bool((cfg.get("output") or {}).get("run_log", True)))
 
@@ -242,7 +240,6 @@ def main():
             u_list, q_list, J_list, converged = rollout_segment(env, net, u0, N, dlam, device, cfg.train.jac_reg)
             if not converged:
                 pbar.set_postfix({"status": "Newton failed"})
-                writer.add_scalar("physics/newton_converged", 0.0, ep)
                 run.log(epoch=ep, converged=False, steps=len(u_list),
                         newton_failures=env.n_newton_failures,
                         note="rollout aborted, no gradient step")
@@ -269,11 +266,6 @@ def main():
             surrogate.backward()
             torch.nn.utils.clip_grad_norm_([p for p in net.parameters() if p.requires_grad], 1.0)
             opt.step()
-
-            writer.add_scalar("loss/final", L_np, ep)
-            for c, axis_name in enumerate("xyz"[:dim]):
-                writer.add_scalar(f"midpoint/{axis_name}", mid_pos[c], ep)
-            writer.add_scalar("physics/newton_converged", 1.0, ep)
 
             pbar.set_postfix({"loss": f"{L_np:.6f}"})
             final_loss = L_np
@@ -340,10 +332,7 @@ def main():
             q_traj.extend(q_list)      # committed rollout, concatenated across segments
 
             loss_history.append((seg_idx, result["best_loss"]))
-            writer.add_scalar("loss/segment_best", result["best_loss"], seg_idx)
             mid_pos = q_last[dim * env.mid_node: dim * env.mid_node + dim]
-            for c, axis_name in enumerate("xyz"[:dim]):
-                writer.add_scalar(f"midpoint/{axis_name}", mid_pos[c], seg_idx)
             mid_s = ",".join(f"{v:.3f}" for v in mid_pos)
             print(f"[segment {seg_idx}] best_loss={result['best_loss']:.6e}  midpoint=({mid_s})")
             run.log(segment=seg_idx, horizon=int(T_seg),
@@ -376,7 +365,7 @@ def main():
         ax.set_title("Training Loss Curve")
         ax.grid(True, linestyle="--", alpha=0.5)
         fig.tight_layout()
-        save_path = str(_ROOT / 'experiments' / cfg.output.experiment_name / 'loss_curve.png')
+        save_path = os.path.join(run.artifact_dir, 'loss_curve.png')
         fig.savefig(save_path, dpi=150)
         plt.close(fig)
         print(f"Loss curve saved to: {save_path}")
@@ -395,7 +384,6 @@ def main():
         newton_failures_total=env.n_newton_failures,
         device=str(device),
     )
-    writer.close()
 
 
 if __name__ == "__main__":

@@ -14,7 +14,6 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import argparse
@@ -191,9 +190,8 @@ def main():
     net = BoundaryVelocityNet(hidden=cfg.train.hidden, out_dim=end_control_dim(dim, twist)).to(device)
     opt = optim.Adam(net.parameters(), lr=cfg.train.lr)
 
-    _log_dir = str(_ROOT / 'experiments' / cfg.output.experiment_name)
-    os.makedirs(_log_dir, exist_ok=True)
-    writer = SummaryWriter(log_dir=_log_dir)
+    # RunLogger owns the TensorBoard writer: every result goes through
+    # run.log(), so the JSON record and the scalars cannot drift apart.
     run = RunLogger(cfg, env=env, root=_ROOT,
                     enabled=bool((cfg.get("output") or {}).get("run_log", True)))
 
@@ -220,7 +218,6 @@ def main():
             g_u_seq, total_loss = compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets, cfg.task.track_w, cfg.train.jac_reg)
 
             converged_ratio = converged_mask.mean()
-            writer.add_scalar("physics/converged_ratio", converged_ratio, ep)
 
             if g_u_seq is None:
                 pbar.set_postfix({"status": "Newton failed all steps"})
@@ -238,7 +235,6 @@ def main():
             torch.nn.utils.clip_grad_norm_([p for p in net.parameters() if p.requires_grad], 1.0)
             opt.step()
 
-            writer.add_scalar("loss/total", total_loss, ep)
             loss_history.append((ep, total_loss))
 
             pbar.set_postfix({"total_loss": f"{total_loss:.4f}", "conv%": f"{converged_ratio*100:.0f}"})
@@ -279,12 +275,27 @@ def main():
             u_current = u_list[-1].detach().clone()
 
             loss_history.append((seg_idx, result["best_loss"]))
-            writer.add_scalar("loss/segment_best", result["best_loss"], seg_idx)
             print(f"[segment {seg_idx}] best_loss={result['best_loss']:.6e}")
             run.log(segment=seg_idx, horizon=int(T_seg),
                     best_loss=float(result["best_loss"]),
                     converged_ratio=float(result["converged_mask"].mean()),
                     newton_failures=env.n_newton_failures)
+
+    if loss_history:
+        eps, losses = zip(*loss_history)
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.plot(eps, losses, linewidth=1.5, color="steelblue")
+        ax.set_xlabel("Epoch" if not cfg.rhc.enabled else "RHC segment")
+        ax.set_ylabel("Total Tracking Loss")
+        ax.set_title(f"Tracking Loss ({cfg.task.trajectory_type})")
+        ax.grid(True, linestyle="--", alpha=0.5)
+        fig.tight_layout()
+        out = os.path.join(run.artifact_dir, 'loss_curve.png')
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
+        print(f"Loss curve → {out}")
+
+    _visualize_tracking(env, net, u0, N, targets, device, cfg, run.artifact_dir)
 
     run.finish(
         task="tracking",
@@ -297,25 +308,9 @@ def main():
         newton_failures_total=env.n_newton_failures,
         device=str(device),
     )
-    writer.close()
-
-    if loss_history:
-        eps, losses = zip(*loss_history)
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.plot(eps, losses, linewidth=1.5, color="steelblue")
-        ax.set_xlabel("Epoch" if not cfg.rhc.enabled else "RHC segment")
-        ax.set_ylabel("Total Tracking Loss")
-        ax.set_title(f"Tracking Loss ({cfg.task.trajectory_type})")
-        ax.grid(True, linestyle="--", alpha=0.5)
-        fig.tight_layout()
-        fig.savefig(str(_ROOT / 'experiments' / cfg.output.experiment_name / 'loss_curve.png'), dpi=150)
-        plt.close(fig)
-        print(f"Loss curve → {_ROOT / 'experiments' / cfg.output.experiment_name / 'loss_curve.png'}")
-
-    _visualize_tracking(env, net, u0, N, targets, device, cfg)
 
 
-def _visualize_tracking(env, net, u0, N, targets, device, cfg):
+def _visualize_tracking(env, net, u0, N, targets, device, cfg, out_dir):
     reset_env(env, cfg)
     dim = env.dim
     twist = getattr(env, 'twist', False)
@@ -367,9 +362,10 @@ def _visualize_tracking(env, net, u0, N, targets, device, cfg):
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.4)
     fig.tight_layout()
-    fig.savefig(str(_ROOT / 'experiments' / cfg.output.experiment_name / 'tracking_result.png'), dpi=150)
+    out = os.path.join(out_dir, 'tracking_result.png')
+    fig.savefig(out, dpi=150)
     plt.close(fig)
-    print(f"Tracking result → {_ROOT / 'experiments' / cfg.output.experiment_name / 'tracking_result.png'}")
+    print(f"Tracking result → {out}")
 
     maybe_save_trajectory_gif(cfg, q_traj, env, targets,
                               save_path=str(_ROOT / 'outputs'),

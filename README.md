@@ -352,20 +352,45 @@ results = agent.run_rhc(target_pos=np.array([0.5, 0.2, 0.1]), n_segments=4,
 
 ## Training logs
 
-Every run writes a self-contained directory under the experiment, so you can go
-back later and answer "what exactly did that run do?" — which the TensorBoard
-event files cannot, since they hold a handful of scalars, nothing about the
-configuration, and every run of the same experiment piles into one place.
+Every run writes a self-contained directory — **including its own TensorBoard
+event file**, so runs are separate, comparable entries instead of piling into
+one directory where a later run buries an earlier one.
+
+```bash
+tensorboard --logdir experiments
+```
+
+Curves update while the run is still going: scalars are flushed on every
+record. The run selector shows `<experiment_name>/runs/<timestamp>`, so
+several runs — or several experiments — overlay directly.
 
 ```
 experiments/<experiment_name>/runs/<timestamp>/
-├── config.yaml     the fully resolved config, as actually used
-├── meta.json       git commit (and whether the tree was dirty), device, python,
-│                   and the rod: dim, twist, nv, DOFs, EI/EA/GJ, gravity, tolerance
-├── log.jsonl       one JSON record per epoch or segment
-├── log.txt         the same records as readable lines
-└── summary.json    final results, and how the run ended
+├── events.out.tfevents.*   TensorBoard scalars + the config under TEXT
+│                           + one HPARAMS row for comparing runs in a table
+├── config.yaml             the fully resolved config, as actually used
+├── meta.json               git commit (and whether the tree was dirty), device,
+│                           python, and the rod: dim, twist, nv, DOFs, EI/EA/GJ,
+│                           gravity, Newton tolerance
+├── log.jsonl               one JSON record per epoch or segment
+├── log.txt                 the same records as readable lines
+├── loss_curve.png          (and tracking_result.png for a tracking run)
+└── summary.json            final results, and how the run ended
 ```
+
+`RunLogger.log()` is the single place a result goes — it writes the JSON
+record, the readable line *and* the scalars — so the three cannot drift apart.
+Scalars it emits:
+
+| | |
+| --- | --- |
+| `loss/final`, `loss/total`, `loss/best` | whichever the task reports |
+| `error/distance`, `error/track_mean`, `error/track_max` | distance to target |
+| `midpoint/x`, `/y`, `/z` | where the controlled node actually went |
+| `physics/converged`, `/converged_ratio`, `/newton_failures`, `/steps_completed` | whether the simulation held up |
+
+The x-axis is the epoch (or RHC segment), so a skipped epoch leaves a visible
+gap rather than silently shifting the curve along.
 
 A record carries what you would want to plot or grep, not just the loss:
 
