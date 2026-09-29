@@ -266,46 +266,56 @@ def task_target(cfg) -> np.ndarray:
     return target
 
 
-def make_target_trajectory(N, rod_length, traj_type="circle", dim=2):
+def make_target_trajectory(N, rod_length, traj_type="circle", dim=2, up_axis=None):
     """The N-step target trajectory for the mid node, shape (N, dim).
 
-    The 2D curves are unchanged.  In 3D, ``circle`` and ``figure8`` are the
-    same planar curves lifted into the x-y plane (z = 0), so a 3D run can be
-    compared directly against the 2D one; ``helix`` and ``figure8_3d`` are
-    genuinely three-dimensional.
+    The planar curves (``circle``, ``figure8``, ``line``) are laid out in the
+    *vertical* plane -- the one containing gravity -- because that is what they
+    were designed for: a circle whose centre sits above the rod is a lift
+    against gravity, not a horizontal sweep.  Which plane that is depends on
+    the convention: gravity runs along -y in 2D and along -z in 3D, so the
+    curves occupy x-y in 2D and x-z in 3D.  ``up_axis`` overrides the choice
+    for a config that tilts gravity somewhere else.
+
+    ``helix`` and ``figure8_3d`` are genuinely three-dimensional and 3D-only.
     """
     lams = np.linspace(0, 1, N)
     targets = np.zeros((N, dim))
+    # Index of the axis gravity acts along; the planar curves stand up in it.
+    up = (1 if dim == 2 else 2) if up_axis is None else int(up_axis)
+    lat = 1 if dim == 3 else None      # the remaining horizontal axis, 3D only
 
     if traj_type == "circle":
-        cx, cy, r = rod_length / 2, 0.25, 0.15
+        cx, cu, r = rod_length / 2, 0.25, 0.15
         theta = 2 * np.pi * lams
         targets[:, 0] = cx + r * np.cos(theta)
-        targets[:, 1] = cy + r * np.sin(theta)
+        targets[:, up] = cu + r * np.sin(theta)
     elif traj_type == "figure8":
-        cx, cy, r = rod_length / 2, 0.0, 0.20
+        cx, cu, r = rod_length / 2, 0.0, 0.20
         theta = 2 * np.pi * lams
         targets[:, 0] = cx + r * np.sin(theta)
-        targets[:, 1] = cy + r * np.sin(2 * theta) / 2
+        targets[:, up] = cu + r * np.sin(2 * theta) / 2
     elif traj_type == "line":
         targets[:, 0] = rod_length / 2
-        targets[:, 1] = -0.20 + 0.40 * lams
+        targets[:, up] = -0.20 + 0.40 * lams
     elif traj_type == "helix":
         if dim != 3:
             raise ValueError("trajectory_type 'helix' requires env.dim: 3")
+        # Axis along gravity: a horizontal circle that climbs.
         cx, cy, r = rod_length / 2, 0.0, 0.15
         theta = 4 * np.pi * lams
         targets[:, 0] = cx + r * np.cos(theta)
-        targets[:, 1] = cy + r * np.sin(theta)
-        targets[:, 2] = -0.15 + 0.30 * lams
+        targets[:, lat] = cy + r * np.sin(theta)
+        targets[:, up] = -0.15 + 0.30 * lams
     elif traj_type == "figure8_3d":
         if dim != 3:
             raise ValueError("trajectory_type 'figure8_3d' requires env.dim: 3")
+        # The vertical figure-8, plus a lateral wobble out of its plane.
         cx, r = rod_length / 2, 0.20
         theta = 2 * np.pi * lams
         targets[:, 0] = cx + r * np.sin(theta)
-        targets[:, 1] = r * np.sin(2 * theta) / 2
-        targets[:, 2] = 0.15 * np.sin(2 * theta)
+        targets[:, up] = r * np.sin(2 * theta) / 2
+        targets[:, lat] = 0.15 * np.sin(2 * theta)
     else:
         raise ValueError(f"Unknown traj_type: {traj_type}")
 

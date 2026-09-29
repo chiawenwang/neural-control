@@ -22,7 +22,7 @@ rod:
                              # is what sets GJ = EI / (1 + nu).
   nv: 21
   total_time: 1.0
-  gravity: [0.0, -9.81, 0.0]
+  gravity: [0.0, 0.0, -9.81]
 
 start:
   # 6 DOFs per end now: (x, y, z, theta, phi, yaw).
@@ -33,12 +33,12 @@ start:
 
 task:
   type: point_to_point
-  target_xyz: [0.45, 0.05, 0.15]
-  trajectory_type: helix
+  target_xyz: [0.45, 0.15, 0.05]
+  trajectory_type: helix  
   track_w: 1.0
 
 train:
-  epochs: 50
+  epochs: 100
   lr: 0.005
 
 output:

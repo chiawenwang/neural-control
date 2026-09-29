@@ -36,10 +36,14 @@ The two clamped nodes at each end are then::
 
 Gravity
 -------
-``gravity`` is a full 3-vector and defaults to ``(0, -9.81, 0)`` — i.e. y is
-"down", matching the 2D environment — so a 3D run confined to z = 0 with
-``phi = 0`` reproduces the 2D run node for node.  Set it to
-``(0, 0, -9.81)`` for the more usual z-up convention.
+``gravity`` is a full 3-vector and defaults to ``(0, 0, -9.81)``: z is up, the
+usual convention and the one a real manipulator works in.
+
+The 2D environment has gravity along -y instead, so the two are different
+physical setups and a 3D run does not reduce to a 2D one under the default.
+Setting ``gravity=(0, -9.81, 0)`` restores that correspondence exactly -- with
+it, a 3D run confined to z = 0 with ``phi = 0`` reproduces the 2D run node for
+node (to ~1e-17), which is useful for cross-checking the two simulators.
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -132,7 +136,7 @@ class SimulatorEnv_3D:
                  rho_al=2700,
                  max_newton_iter=1000,
                  save_history=False,
-                 gravity=(0.0, -9.81, 0.0),
+                 gravity=(0.0, 0.0, -9.81),
                  twist=False,
                  poisson=0.3,
                  energy_cfg=None,

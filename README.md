@@ -152,6 +152,7 @@ gradients, contact, and the plots follow it.
 | full control vector | 6D                       | 10D                            | 12D                                   |
 | elastic energy      | `der`                    | `der3d`                        | `der3d_twist`                         |
 | obstacles           | `CircleObstacle`         | `SphereObstacle`               | `SphereObstacle`                      |
+| gravity             | −y (hardcoded)           | `rod.gravity`, default −z      | `rod.gravity`, default −z             |
 | target / trajectory | `task.target_xy`         | `task.target_xyz`              | `task.target_xyz`                     |
 | initial end poses   | `start.u_left`/`u_right` | `start.u_left_3d`/`u_right_3d` | `start.u_left_twist`/`u_right_twist`  |
 
@@ -177,13 +178,33 @@ adjoint gradient — cheap to write in closed form.
 Torsion is off by default and enabled with `rod.twist: true`; see
 [Torsion and gripper yaw](#torsion-and-gripper-yaw).
 
-Gravity in 3D is the config vector `rod.gravity`, defaulting to
-`[0, -9.81, 0]` so that y stays "down" as in 2D. With that default, a 3D run
-confined to `z = 0` and `φ = 0` reproduces the 2D run node for node (verified
-to machine precision). Use `[0, 0, -9.81]` for the usual z-up convention.
+### Which way is down
 
-Tracking trajectories: `circle`, `figure8` and `line` work in both dims (the
-planar curves sit at `z = 0` in 3D); `helix` and `figure8_3d` are 3D-only.
+**3D uses z-up**: `rod.gravity` defaults to `[0, 0, -9.81]`, the convention a
+real manipulator works in. **2D has gravity along −y**, hardcoded, because a
+2D rod has no third axis to put it on. So the two are genuinely different
+physical setups, not the same one at different dimensions.
+
+That matters for the tracking curves. `circle`, `figure8` and `line` are meant
+to stand up in the *vertical* plane — a circle centred above the rod is a lift
+against gravity, not a horizontal sweep — so they follow whichever axis gravity
+is on: **x-y in 2D, x-z in 3D**. Their in-plane coordinates are identical
+between the two (verified exactly), only the plane differs. `helix` (a
+horizontal circle that climbs) and `figure8_3d` (the vertical figure-8 plus a
+lateral wobble) are genuinely three-dimensional and 3D-only.
+
+If you want the two simulators to agree node for node — useful for
+cross-checking them — set
+
+```yaml
+rod:
+  gravity: [0.0, -9.81, 0.0]    # put 3D's gravity back on 2D's axis
+```
+
+A 3D run confined to `z = 0` with `φ = 0` then reproduces the 2D run to ~1e-17.
+Under the z-up default they differ, as they should: the rod sags along a
+different axis. `make_target_trajectory(..., up_axis=...)` overrides the curve
+plane if you tilt gravity somewhere else again.
 
 `scripts/snapshot_overlay.py` and `src/render_neurips.py` remain 2D-only.
 

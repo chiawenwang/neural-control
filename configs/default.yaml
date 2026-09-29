@@ -125,7 +125,10 @@ rod:
   total_time: 2.0          # horizon length [s] -> N = total_time / dt control steps
   rod_length: 1.0          # undeformed rod length [m]
   max_newton_iter: 1000    # max Newton-Raphson iterations per equilibrium solve
-  gravity: [0.0, 0.0, -9.81]  # 3D only: gravity vector [gx, gy, gz].
+  gravity: [0.0, 0.0, -9.81]  # 3D only: gravity vector [gx, gy, gz]. z is up.
+                              # The 2D environment has gravity along -y, so the
+                              # two are different setups; [0.0, -9.81, 0.0]
+                              # makes a planar 3D run reproduce 2D exactly.
                               # The default keeps y as "down", matching the 2D
                               # environment, so a 3D run confined to z = 0
                               # reproduces the 2D run node for node. Use
