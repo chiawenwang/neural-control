@@ -127,12 +127,21 @@ rod:
   max_newton_iter: 1000    # max Newton-Raphson iterations per equilibrium solve
   gravity: [0.0, 0.0, -9.81]  # 3D only: gravity vector [gx, gy, gz]. z is up.
                               # The 2D environment has gravity along -y, so the
-                              # two are different setups; [0.0, -9.81, 0.0]
-                              # makes a planar 3D run reproduce 2D exactly.
-                              # The default keeps y as "down", matching the 2D
-                              # environment, so a 3D run confined to z = 0
-                              # reproduces the 2D run node for node. Use
-                              # [0.0, 0.0, -9.81] for the usual z-up convention.
+                              # two are different physical setups;
+                              # [0.0, -9.81, 0.0] puts 3D's gravity back on 2D's
+                              # axis and makes a planar 3D run reproduce a 2D one
+                              # node for node. See README, "Which way is down".
+
+  # 3D only: torsion. false -> the rod bends in space but cannot twist, and each
+  # gripper has 5 control DOFs (x, y, z, theta, phi). true -> every edge gains a
+  # twist angle (DOFs become 4*nv - 1) and each gripper gains a yaw, the spin
+  # about its own tangent, for 6 DOFs per end and a 12D control vector. Twisting
+  # couples back to the shape through the reference twist, so yaw is a real
+  # control input rather than a dead one. See src/rodframes.py.
+  #
+  # The torsional stiffness GJ = EI / (1 + poisson) comes from the material
+  # preset; validate the model itself with scripts/check_twist.py.
+  twist: false
 
 # Elastic energy model of the rod.
 #
@@ -184,22 +193,33 @@ start:
   u_right_twist: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # (x, y, z, theta, phi, yaw)
 
 # Control task definition.
+# What the rod is asked to do.
+#
+# WHICH TASK RUNS IS DECIDED BY THE SCRIPT YOU RUN, not by anything in here:
+#   scripts/train_adjoint.py   point-to-point, adjoint-gradient MLP
+#   scripts/train_cmaes.py     point-to-point, CMA-ES polynomial
+#   scripts/train_tracking.py  trajectory tracking, adjoint-gradient MLP
+#
+# `target_*` is shared: point-to-point drives the mid node there, and the
+# default tracking path (`segment`) ends there. Keys that only one task reads
+# are nested under it, so it is clear at a glance what applies.
 task:
-  type: point_to_point       # point_to_point (train_adjoint.py) | tracking (train_tracking.py)
-  target_xy: [0.2, 0.4]          # 2D point_to_point: target position for the mid node
-  target_xyz: [0.35, 0.1, 0.1]    # 3D point_to_point: target position for the mid node
-  # tracking: which path the mid node should follow.
-  #   segment     a straight line from where the mid node actually starts to
-  #               target_xy / target_xyz above. Starts with ~zero error, so the
-  #               loss measures following rather than a gap the rod was never
-  #               given a chance to close -- and it shares its endpoint with the
-  #               point_to_point task, making the two directly comparable.
-  #   circle | figure8 | line   fixed curves in the vertical plane (x-y in 2D,
-  #               x-z in 3D). They sit where they are defined regardless of the
-  #               rod, so the run starts by travelling to reach step 0.
-  #   helix | figure8_3d        genuinely 3D, 3D only.
-  trajectory_type: segment
-  track_w: 1.0                 # tracking: per-step loss weight
+  target_xy: [0.2, 0.4]          # 2D: target position for the mid node
+  target_xyz: [0.35, 0.1, 0.1]   # 3D: target position for the mid node
+  # Read only by scripts/train_tracking.py; inert for point-to-point.
+  tracking:
+    # Which path the mid node should follow.
+    #   segment     a straight line from where the mid node actually starts to
+    #               target_* above. Starts with ~zero error, so the loss
+    #               measures following rather than a gap the rod was never
+    #               given a chance to close -- and sharing its endpoint with
+    #               point-to-point makes the two directly comparable.
+    #   circle | figure8 | line   fixed curves in the vertical plane (x-y in
+    #               2D, x-z in 3D). They sit where they are defined regardless
+    #               of the rod, so the run starts by travelling to reach step 0.
+    #   helix | figure8_3d        genuinely 3D, 3D only.
+    trajectory_type: segment
+    weight: 1.0                # per-step loss weight
 
 # Receding-horizon control (RHC). When disabled, the whole horizon is
 # optimized as a single continuation segment (lambda in [0,1] over all N

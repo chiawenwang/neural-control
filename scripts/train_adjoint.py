@@ -213,6 +213,7 @@ def main():
 
     print("Network structure:")
     print(net)
+    print(f"Task: point-to-point  (adjoint gradients)  -- fixed by this script, not by the config")
     print(f"Environment: {type(env).__name__}  (dim={dim}, twist={twist}, control={control_dim(dim, twist)}D)")
     print(f"Rod material: {material_summary(cfg)}")
     print(f"Training on device: {device}")

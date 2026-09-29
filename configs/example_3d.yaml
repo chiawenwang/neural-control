@@ -29,11 +29,14 @@ start:
   u_left_3d:  [0.0, 0.0, 0.0, 0.0, 0.0]   # (x, y, z, theta, phi)
   u_right_3d: [1.0, 0.0, 0.0, 0.0, 0.0]
 
+# Which task runs depends on the script: train_adjoint.py / train_cmaes.py do
+# point-to-point, train_tracking.py does tracking. Both read target_xyz.
 task:
-  type: point_to_point
   target_xyz: [0.45, 0.15, 0.05]   # off-plane target for the mid node
-  trajectory_type: helix           # tracking only: helix | figure8_3d | circle | figure8 | line
-  track_w: 1.0
+  tracking:
+    trajectory_type: helix         # a genuinely 3D curve, as a demonstration;
+                                   # `segment` is the better default (see README)
+    weight: 1.0
 
 train:
   epochs: 50

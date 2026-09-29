@@ -144,8 +144,8 @@ def optimize_segment(env, net, opt, u_start, targets_seg, dlam, device, cfg, n_i
         env.set_state(checkpoint)
         opt.zero_grad(set_to_none=True)
 
-        u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u_start, targets_seg, dlam, device, cfg.task.track_w)
-        g_u_seq, total_loss = compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets_seg, cfg.task.track_w, cfg.train.jac_reg)
+        u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u_start, targets_seg, dlam, device, cfg.task.tracking.weight)
+        g_u_seq, total_loss = compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets_seg, cfg.task.tracking.weight, cfg.train.jac_reg)
         if g_u_seq is None:
             continue
 
@@ -162,7 +162,7 @@ def optimize_segment(env, net, opt, u_start, targets_seg, dlam, device, cfg, n_i
 
     env.set_state(checkpoint)
     with torch.no_grad():
-        u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u_start, targets_seg, dlam, device, cfg.task.track_w)
+        u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u_start, targets_seg, dlam, device, cfg.task.tracking.weight)
 
     return {"best_loss": best_loss, "q_list": q_list, "u_final": u_list[-1], "converged_mask": converged_mask}
 
@@ -187,7 +187,7 @@ def main():
     # point-to-point target, so step 0 begins with ~no error; the other curves
     # ignore both and sit wherever they are defined.
     targets = make_target_trajectory(
-        N, env.rod_length, traj_type=cfg.task.trajectory_type, dim=dim,
+        N, env.rod_length, traj_type=cfg.task.tracking.trajectory_type, dim=dim,
         start=initial_midpoint(env, cfg), end=task_target(cfg))
 
     device = resolve_device(cfg.train.device)
@@ -203,10 +203,11 @@ def main():
 
     print("Network structure:")
     print(net)
+    print(f"Task: trajectory tracking  (adjoint gradients)  -- fixed by this script, not by the config")
     print(f"Environment: {type(env).__name__}  (dim={dim}, twist={twist}, control={control_dim(dim, twist)}D)")
     print(f"Rod material: {material_summary(cfg)}")
     print(f"Device: {device}")
-    print(f"Trajectory type: {cfg.task.trajectory_type}")
+    print(f"Trajectory type: {cfg.task.tracking.trajectory_type}")
     print(f"RHC: {'enabled (' + str(cfg.rhc.num_segments) + ' segments)' if cfg.rhc.enabled else 'disabled (single horizon)'}")
 
     loss_history = []
@@ -220,8 +221,8 @@ def main():
             env.set_state(checkpoint)
             opt.zero_grad(set_to_none=True)
 
-            u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u0, targets, dlam, device, cfg.task.track_w)
-            g_u_seq, total_loss = compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets, cfg.task.track_w, cfg.train.jac_reg)
+            u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u0, targets, dlam, device, cfg.task.tracking.weight)
+            g_u_seq, total_loss = compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets, cfg.task.tracking.weight, cfg.train.jac_reg)
 
             converged_ratio = converged_mask.mean()
 
@@ -276,7 +277,7 @@ def main():
 
             env.set_state(checkpoint)
             with torch.no_grad():
-                u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u_current, targets_seg, dlam, device, cfg.task.track_w)
+                u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u_current, targets_seg, dlam, device, cfg.task.tracking.weight)
             checkpoint = env.get_state()
             u_current = u_list[-1].detach().clone()
 
@@ -293,7 +294,7 @@ def main():
         ax.plot(eps, losses, linewidth=1.5, color="steelblue")
         ax.set_xlabel("Epoch" if not cfg.rhc.enabled else "RHC segment")
         ax.set_ylabel("Total Tracking Loss")
-        ax.set_title(f"Tracking Loss ({cfg.task.trajectory_type})")
+        ax.set_title(f"Tracking Loss ({cfg.task.tracking.trajectory_type})")
         ax.grid(True, linestyle="--", alpha=0.5)
         fig.tight_layout()
         out = os.path.join(run.artifact_dir, 'loss_curve.png')
@@ -305,7 +306,7 @@ def main():
 
     run.finish(
         task="tracking",
-        trajectory=cfg.task.trajectory_type,
+        trajectory=cfg.task.tracking.trajectory_type,
         mode="rhc" if cfg.rhc.enabled else "single_horizon",
         final_loss=(loss_history[-1][1] if loss_history else None),
         best_loss=(min(l for _, l in loss_history) if loss_history else None),
@@ -364,7 +365,7 @@ def _visualize_tracking(env, net, u0, N, targets, device, cfg, out_dir):
             pass
     ax.set_xlabel("x")
     ax.set_ylabel("y")
-    ax.set_title(f"Midpoint Tracking ({cfg.task.trajectory_type})")
+    ax.set_title(f"Midpoint Tracking ({cfg.task.tracking.trajectory_type})")
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.4)
     fig.tight_layout()
@@ -375,7 +376,7 @@ def _visualize_tracking(env, net, u0, N, targets, device, cfg, out_dir):
 
     maybe_save_trajectory_gif(cfg, q_traj, env, targets,
                               save_path=str(_ROOT / 'outputs'),
-                              title=f'DLO tracking ({cfg.task.trajectory_type})')
+                              title=f'DLO tracking ({cfg.task.tracking.trajectory_type})')
 
 
 if __name__ == "__main__":

@@ -128,12 +128,31 @@ All three training scripts are driven by a single YAML config,
 `--config path/to/your.yaml` with a file that only overrides the fields you
 care about (deep-merged onto the defaults). Key sections:
 
+**The script decides the task, not the config.** `train_adjoint.py` and
+`train_cmaes.py` always do point-to-point; `train_tracking.py` always does
+tracking. Each prints which one it is at startup. `task.target_*` is shared —
+point-to-point drives the mid node there, and the default tracking path ends
+there — while keys only one task reads are nested under it (`task.tracking:`).
+
+A user config may only set keys `configs/default.yaml` defines; anything else
+raises, with the nearest defined key suggested:
+
+```
+configs/mine.yaml sets keys that configs/default.yaml does not define:
+  - rod.nvv (did you mean 'rod.nv'?)
+```
+
+Silently ignoring a stray key is how a run ends up not doing what its config
+appears to say. (`materials:` and `energy.params:` are open-ended and exempt.)
+
+Key sections:
+
 - `env` — `dim: 2` or `dim: 3`, i.e. which simulator to use
 - `rod` — physical/geometric parameters (node count, timestep, horizon, material,
   and `gravity` in 3D)
 - `energy` — elastic energy model (built-in DER, or your own; see `src/energy.py`)
 - `start` — initial boundary pose for both rod ends
-- `task` — task type (`point_to_point` / `tracking`) and target/trajectory
+- `task` — the target, and under `task.tracking:` the path for tracking runs
 - `newton` — equilibrium-solver safeguards (line search, regularization); see
   [Newton convergence](#newton-convergence)
 - `rhc` — whether to use receding-horizon control, segment count, re-init policy

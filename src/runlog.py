@@ -317,7 +317,9 @@ class RunLogger:
             "lr": float(train.get("lr", 0.0)),
             "epochs": int(train.get("epochs", 0)),
             "rhc": bool((cfg.get("rhc") or {}).get("enabled", False)),
-            "task": str(fields.get("task", (cfg.get("task") or {}).get("type", ""))),
+            # The script decides the task and passes it in; the config has no
+            # say, so there is nothing to fall back to.
+            "task": str(fields.get("task", "")),
             "status": str(status),
         }
         metrics = {f"hparam/{k}": float(fields[k])

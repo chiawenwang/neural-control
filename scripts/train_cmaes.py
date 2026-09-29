@@ -363,6 +363,7 @@ def main():
     # Target
     target_pos = task_target(cfg)
 
+    print(f"Task: point-to-point  (CMA-ES)  -- fixed by this script, not by the config")
     print(f"Environment: {type(env).__name__}  "
           f"(dim={dim}, twist={twist}, control={control_dim(dim, twist)}D)")
     print(f"Rod material: {material_summary(cfg)}")
