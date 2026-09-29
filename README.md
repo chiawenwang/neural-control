@@ -350,6 +350,53 @@ results = agent.run_rhc(target_pos=np.array([0.5, 0.2, 0.1]), n_segments=4,
                         n_iterations_per_segment=25)
 ```
 
+## Training logs
+
+Every run writes a self-contained directory under the experiment, so you can go
+back later and answer "what exactly did that run do?" — which the TensorBoard
+event files cannot, since they hold a handful of scalars, nothing about the
+configuration, and every run of the same experiment piles into one place.
+
+```
+experiments/<experiment_name>/runs/<timestamp>/
+├── config.yaml     the fully resolved config, as actually used
+├── meta.json       git commit (and whether the tree was dirty), device, python,
+│                   and the rod: dim, twist, nv, DOFs, EI/EA/GJ, gravity, tolerance
+├── log.jsonl       one JSON record per epoch or segment
+├── log.txt         the same records as readable lines
+└── summary.json    final results, and how the run ended
+```
+
+A record carries what you would want to plot or grep, not just the loss:
+
+```
+epoch=3  loss=0.00520285  error=0.0721308  midpoint=[0.470121, -0.019214, 0.147276]
+target=[0.45, 0.05, 0.15]  converged=True  steps=15  newton_failures=0  u_final=[...]
+```
+
+Tracking runs log `mean_track_error` and `max_track_error` alongside the total —
+the total is a sum of squares and scales with the horizon, so it is not
+comparable between configs, while the mean distance is.
+
+`log.jsonl` is flushed on every record, so **a run that crashes or is killed
+still leaves everything up to that point** — which is exactly when the log is
+worth having. `summary.json` records *how* the run ended (`finished`,
+`incomplete`, `interrupted`, or `error` with the traceback), so a run that died
+is never mistaken for a successful one that merely scored badly.
+
+Read one back with `load_run`:
+
+```python
+import sys; sys.path.insert(0, 'src')
+from runlog import load_run
+
+meta, config, records, summary = load_run("experiments/dlo_3d/runs/20260928-173254")
+losses = [r["loss"] for r in records if "loss" in r]
+print(summary["status"], summary["final_error"], meta["git"]["commit"])
+```
+
+Turn it off for throwaway runs with `output.run_log: false`.
+
 ## Example result
 
 Task 1 (point-to-point): elastic strip with 15 nodes, midpoint driven from

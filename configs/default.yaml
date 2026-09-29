@@ -244,6 +244,14 @@ train:
 output:
   experiment_name: dlo_final_shape
 
+  # Per-run training log. Each run writes a self-contained directory under
+  # experiments/<experiment_name>/runs/<timestamp>/ holding the resolved
+  # config, the environment/git/device metadata, one JSON record per epoch or
+  # segment (flushed as it goes, so a killed run keeps what it had), and a
+  # final summary that also records how the run ended. Read one back with
+  # src/runlog.py's load_run().
+  run_log: true
+
   # Animation of the final (committed) control rollout, written next to
   # outputs/neural_control_result.png as outputs/neural_control_animation.gif.
   # It shows the rod frame by frame over the whole horizon, plus the midpoint,

@@ -42,4 +42,5 @@ from .utils import (
     save_trajectory_gif,
     maybe_save_trajectory_gif,
 )
+from .runlog import RunLogger, load_run
 from .config import load_config

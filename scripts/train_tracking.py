@@ -21,6 +21,7 @@ import argparse
 
 from implicit_grad_tools import multistep_adjoint_gradient
 from config import load_config
+from runlog import RunLogger
 from utils import maybe_save_trajectory_gif
 from env_factory import (
     build_env,
@@ -33,6 +34,7 @@ from env_factory import (
     material_summary,
     make_target_trajectory,
     node_tracking_loss,
+    node_position,
     dloss_dq_free_node,
 )
 
@@ -192,6 +194,8 @@ def main():
     _log_dir = str(_ROOT / 'experiments' / cfg.output.experiment_name)
     os.makedirs(_log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir=_log_dir)
+    run = RunLogger(cfg, env=env, root=_ROOT,
+                    enabled=bool((cfg.get("output") or {}).get("run_log", True)))
 
     print("Network structure:")
     print(net)
@@ -220,6 +224,9 @@ def main():
 
             if g_u_seq is None:
                 pbar.set_postfix({"status": "Newton failed all steps"})
+                run.log(epoch=ep, converged_ratio=float(converged_ratio),
+                        newton_failures=env.n_newton_failures,
+                        note="no converged step, no gradient step")
                 continue
 
             surrogate = torch.zeros((), device=device)
@@ -235,6 +242,15 @@ def main():
             loss_history.append((ep, total_loss))
 
             pbar.set_postfix({"total_loss": f"{total_loss:.4f}", "conv%": f"{converged_ratio*100:.0f}"})
+            # Mean per-step distance to the target is the number to read; the
+            # total loss is a sum of squares and scales with the horizon.
+            errs = [float(np.linalg.norm(node_position(q, dim, env.mid_node) - targets[k]))
+                    for k, q in enumerate(q_list) if converged_mask[k]]
+            run.log(epoch=ep, total_loss=float(total_loss),
+                    mean_track_error=float(np.mean(errs)) if errs else None,
+                    max_track_error=float(np.max(errs)) if errs else None,
+                    converged_ratio=float(converged_ratio),
+                    newton_failures=env.n_newton_failures)
             if ep % 20 == 0:
                 print(f"[ep {ep:04d}]  total_loss={total_loss:.6f}  converged={converged_ratio*100:.0f}%")
 
@@ -265,7 +281,22 @@ def main():
             loss_history.append((seg_idx, result["best_loss"]))
             writer.add_scalar("loss/segment_best", result["best_loss"], seg_idx)
             print(f"[segment {seg_idx}] best_loss={result['best_loss']:.6e}")
+            run.log(segment=seg_idx, horizon=int(T_seg),
+                    best_loss=float(result["best_loss"]),
+                    converged_ratio=float(result["converged_mask"].mean()),
+                    newton_failures=env.n_newton_failures)
 
+    run.finish(
+        task="tracking",
+        trajectory=cfg.task.trajectory_type,
+        mode="rhc" if cfg.rhc.enabled else "single_horizon",
+        final_loss=(loss_history[-1][1] if loss_history else None),
+        best_loss=(min(l for _, l in loss_history) if loss_history else None),
+        losses=[l for _, l in loss_history],
+        epochs_recorded=len(loss_history),
+        newton_failures_total=env.n_newton_failures,
+        device=str(device),
+    )
     writer.close()
 
     if loss_history:

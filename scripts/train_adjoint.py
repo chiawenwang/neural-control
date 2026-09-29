@@ -21,6 +21,7 @@ import argparse
 
 from implicit_grad_tools import multistep_adjoint_gradient
 from utils import visualize_results, maybe_save_trajectory_gif
+from runlog import RunLogger
 from config import load_config
 from env_factory import (
     build_env,
@@ -209,6 +210,8 @@ def main():
     _log_dir = str(_ROOT / 'experiments' / cfg.output.experiment_name)
     os.makedirs(_log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir=_log_dir)
+    run = RunLogger(cfg, env=env, root=_ROOT,
+                    enabled=bool((cfg.get("output") or {}).get("run_log", True)))
 
     print("Network structure:")
     print(net)
@@ -240,6 +243,9 @@ def main():
             if not converged:
                 pbar.set_postfix({"status": "Newton failed"})
                 writer.add_scalar("physics/newton_converged", 0.0, ep)
+                run.log(epoch=ep, converged=False, steps=len(u_list),
+                        newton_failures=env.n_newton_failures,
+                        note="rollout aborted, no gradient step")
                 continue
 
             q_final = q_list[-1]
@@ -274,6 +280,10 @@ def main():
             q_last = q_final
             q_traj = list(q_list)      # kept for the animation: last converged rollout
             loss_history.append((ep, L_np))
+            run.log(epoch=ep, loss=float(L_np), error=float(L_np ** 0.5),
+                    midpoint=mid_pos, target=target_xy, converged=True,
+                    steps=len(u_list), newton_failures=env.n_newton_failures,
+                    u_final=u_list[-1].detach().cpu().numpy())
 
             if ep % 10 == 0:
                 mid_s = ",".join(f"{v:.3f}" for v in mid_pos)
@@ -336,6 +346,13 @@ def main():
                 writer.add_scalar(f"midpoint/{axis_name}", mid_pos[c], seg_idx)
             mid_s = ",".join(f"{v:.3f}" for v in mid_pos)
             print(f"[segment {seg_idx}] best_loss={result['best_loss']:.6e}  midpoint=({mid_s})")
+            run.log(segment=seg_idx, horizon=int(T_seg),
+                    best_loss=float(result["best_loss"]),
+                    error=float(result["best_loss"] ** 0.5),
+                    midpoint=mid_pos, target=target_xy,
+                    converged=bool(result["converged"]),
+                    newton_failures=env.n_newton_failures,
+                    u_final=u_current.detach().cpu().numpy())
             global_ep += 1
 
         final_loss = loss_history[-1][1] if loss_history else None
@@ -364,6 +381,20 @@ def main():
         plt.close(fig)
         print(f"Loss curve saved to: {save_path}")
 
+    run.finish(
+        task="point_to_point",
+        mode="rhc" if cfg.rhc.enabled else "single_horizon",
+        final_loss=None if final_loss is None else float(final_loss),
+        final_error=results['final_error'],
+        final_midpoint=(None if q_last is None else
+                        q_last[dim * env.mid_node: dim * env.mid_node + dim]),
+        target=target_xy,
+        losses=[l for _, l in loss_history],
+        best_loss=(min(l for _, l in loss_history) if loss_history else None),
+        epochs_recorded=len(loss_history),
+        newton_failures_total=env.n_newton_failures,
+        device=str(device),
+    )
     writer.close()
 
 

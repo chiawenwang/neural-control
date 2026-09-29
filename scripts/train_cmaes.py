@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import time
 
 from utils import visualize_results, maybe_save_trajectory_gif
+from runlog import RunLogger
 from config import load_config
 from env_factory import (
     build_env,
@@ -281,7 +282,8 @@ class NeuralControlAgent:
         }
     
     def run_rhc(self, target_pos: np.ndarray, n_segments: int = 5,
-               n_iterations_per_segment: int = 30, verbose: bool = True) -> Dict:
+               n_iterations_per_segment: int = 30, verbose: bool = True,
+               run=None) -> Dict:
         """Run RHC"""
         obs = self.env.reset()
         initial_q = self.env.q.copy()
@@ -319,6 +321,12 @@ class NeuralControlAgent:
             
             if verbose:
                 print(f"Segment {m+1} error: {error:.6f}")
+            if run is not None:
+                run.log(segment=m, best_loss=float(result['best_loss']),
+                        error=float(error), midpoint=p_mid, target=target_pos,
+                        iterations=len(result['losses']),
+                        losses=[float(x) for x in result['losses']],
+                        newton_failures=getattr(self.env, "n_newton_failures", None))
             
             if error < 5e-3:
                 print(f"\nTarget reached after {m+1} segments!")
@@ -377,13 +385,16 @@ def main():
 
     # Run
     print("\nStarting Neural Control...")
+    run = RunLogger(cfg, env=env, root=_ROOT,
+                    enabled=bool((cfg.get("output") or {}).get("run_log", True)))
     start_time = time.time()
 
     results = agent.run_rhc(
         target_pos=target_pos,
         n_segments=n_segments,
         n_iterations_per_segment=cfg.train.iterations_per_segment,
-        verbose=True
+        verbose=True,
+        run=run,
     )
 
     elapsed = time.time() - start_time
@@ -409,6 +420,20 @@ def main():
                               save_path=str(_ROOT / 'outputs'),
                               title='DLO point-to-point (CMA-ES)')
 
+    run.finish(
+        task="point_to_point",
+        optimizer="cma-es",
+        mode="rhc" if cfg.rhc.enabled else "single_horizon",
+        final_error=float(results['final_error']),
+        final_loss=float(results['final_error'] ** 2),
+        final_midpoint=node_position(results['final_q'], dim, env.mid_node),
+        target=target_pos,
+        segment_losses=[float(x) for x in results['segment_losses']],
+        best_loss=(min(results['all_losses']) if results['all_losses'] else None),
+        segments_run=len(results['segment_losses']),
+        newton_failures_total=getattr(env, "n_newton_failures", None),
+        train_sec=round(elapsed, 3),   # optimisation only; elapsed_sec covers the whole run
+    )
     return results
 
 
