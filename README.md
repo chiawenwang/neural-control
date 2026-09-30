@@ -52,6 +52,7 @@ neural-control/
 │   ├── implicit_grad_tools.py  # Adjoint / implicit-gradient computation (2D and 3D)
 │   ├── env_factory.py          # dim-aware env/control/target construction
 │   ├── config.py               # YAML config loader (deep-merges onto configs/default.yaml)
+│   ├── compute_audit.py        # Redundancy audit: how much inner-loop work is a repeat
 │   ├── render_neurips.py       # DLO rendering utilities (2D)
 │   └── utils.py                # Result visualization
 ├── scripts/
@@ -273,6 +274,99 @@ force and Hessian (~8.6 ms per call in 3D, ~18.3 ms in 2D), at ~10 Newton
 iterations per step. Vectorizing those stencil loops — not a faster linear
 solver — is the next worthwhile optimization; the Hessian is banded (only
 2.8% nonzero in 3D), so a banded solver would help only for much larger `nv`.
+
+### Where the repeated work is: the compute audit
+
+Knowing *which* kernel is hot is a profiler's job. The question that actually
+decides what to do about it is **how much of that work was already done** — the
+same input computed again, or one close enough that the previous result could
+have been reused. [`src/compute_audit.py`](src/compute_audit.py) answers that.
+
+```bash
+python scripts/train_adjoint.py --config configs/example_3d_twist.yaml --audit
+python scripts/train_adjoint.py --config configs/example_3d_twist.yaml --audit --audit-kernels
+```
+
+It wraps the inner-loop kernels — `env.step`, the Newton solve, the
+force/Hessian assembly, the adjoint's per-step implicit solve — and for every
+call records the *input*, the time exclusive of instrumented calls nested inside
+it, and where in training it happened (epoch, rollout step, RHC segment). Then
+it finds each call's nearest **earlier** input of the same kind: exactly (hash of
+the raw bytes) and approximately (random-projection LSH plus a
+Johnson–Lindenstrauss sketch, so the search is O(1) per call rather than O(n)).
+The report lands in the run directory as `compute_audit.txt` / `.json`, with the
+per-call table in `compute_audit_records.npz`.
+
+Three tables come out of it:
+
+- **Share of calls that repeat an earlier input.** `exact%` is work a one-entry
+  memo cache removes with results unchanged. The `<=tol` columns are cumulative
+  and relative: the share of calls whose input had already been seen to within
+  that distance — i.e. the accuracy budget a frozen Jacobian or a warm start
+  would be working with.
+- **Share of time on those calls** — the same thing weighted by cost, which is
+  what a fix would actually recover.
+- **Epoch over epoch** — each rollout step paired with the same step of the
+  previous epoch. This is the "is every epoch just redoing the last one"
+  question, answered with a number instead of a hunch.
+
+`--audit-kernels` additionally instruments the per-stencil kernels
+(`_bend_stencil`, `psi_grad_hess`, `RodFrames.reference_twist`). They are called
+millions of times in a full run, so the instrumentation itself becomes
+measurable; it is worth turning on once to see whether the Hessian assembly is
+repeating the gradient's work.
+
+The audit is off unless asked for: with `audit.enabled: false` (the default)
+nothing is wrapped and the hot path is untouched. Turning it on costs a few
+percent of wall time without `--audit-kernels`. Everything is configurable under
+the `audit:` block of [`configs/default.yaml`](configs/default.yaml).
+
+A long run does not have to finish before you can read the audit: set
+`audit.report_every: 10` and `compute_audit.txt` is rewritten every 10 epochs
+(every 10 gradient steps in RHC mode), so
+
+```bash
+watch -n 30 cat experiments/<name>/runs/<stamp>/compute_audit.txt
+```
+
+shows it filling in. The periodic write skips the per-call `.npz`, which is the
+slow part of saving.
+
+Two caveats worth knowing. The near-duplicate search is reliable out to a
+relative distance of about `1e-2`; past that its counts are a lower bound, since
+LSH stops colliding — exact duplicates are always counted exactly. And with
+`--audit-kernels`, the wrapper's own per-call cost inflates how much of the time
+the per-stencil kernels appear to own; the duplicate *fractions* are call counts
+and are unaffected.
+
+#### What it found on `configs/example_3d_twist.yaml`
+
+Measured over 8 epochs of the 3D twisting rod (nv=21, N=100):
+
+| kernel | calls | byte-identical to an earlier call |
+| ------ | ----- | --------------------------------- |
+| `psi_grad_hess`         | 301 785 | **64.4%** |
+| `RodFrames.reference_twist` | 15 891 | **64.4%** |
+| `_bend_stencil`         | 301 929 | **68.8%** |
+| `_stretch_stencil`      | 317 820 | **71.9%** |
+| `energy.gradient`       | 10 378  | **45.4%** |
+
+Roughly two thirds of the stencil work is a literal recomputation, and it comes
+from two places that compound:
+
+1. `RodEnergy.force_and_jacobian` is `(-gradient(q), -hessian(q))`, and for the
+   twisting rod both halves walk the same stencils — `reference_twist` once
+   each, `psi_grad_hess` once per interior node each — and `psi_grad_hess`
+   returns the gradient *and* the Hessian of `ψ` either way. So the Hessian
+   assembly recomputes everything the gradient assembly just computed.
+2. The Newton line search evaluates `force(q_try)`, and when that step is
+   accepted the next iteration immediately calls `force_and_jacobian(q)` at the
+   *same* `q` — hence `energy.gradient`'s 45%.
+
+The epoch-over-epoch table rules out the other suspect: consecutive epochs are
+about `1e-1` apart in input at the same rollout step, with only ~3% of pairs
+within `1e-2`. Nothing is worth caching *across* epochs; the redundancy is all
+inside a single step.
 
 ## Tracking targets
 

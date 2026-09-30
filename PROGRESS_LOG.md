@@ -9,6 +9,8 @@
 | 2026-09-21 | 3D 环境、全局化 Newton 求解、BLAS 线程修复 | 已完成 |
 | 2026-09-22 | 训练结束输出整段控制过程的 GIF 动画（配置开关） | 已完成 |
 | 2026-09-22 | 材料预设选择器（`rod.material` + `materials:` 注册表） | 已完成 |
+| 2026-09-28 | 3D 杆的扭转能量 + 夹爪 yaw 控制（`rod.twist`） | 已完成 |
+| 2026-09-29 | 计算冗余审计（`--audit`）：找出内层循环里重复算了多少 | 已完成 |
 
 ---
 
@@ -532,3 +534,192 @@ Rod material: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/
 - **默认行为不变**：`configs/default.yaml` 默认仍是 `aluminum_tube`，解析出的四个数与改动前逐字相同
 - `configs/example_3d.yaml` 解析结果与改动前相同
 
+---
+
+## 2026-09-28 — 3D 杆的扭转能量 + 夹爪 yaw 控制（已完成）
+
+提交：`a538c2e`（主体）、`4414fe5`（泊松比归入材料）、`462d436`（`energy.type` 不再说谎）、`0f705fa`（动画画出截面朝向）。
+
+补上了 09-21 那条"下一步"里留的坑：**扭转**。用 `rod.twist` 一个开关控制，关掉时全部逻辑失效，无扭转的 3D 路径与改动前**逐位相同**。
+
+### 怎么用
+
+```yaml
+rod:
+  twist: true
+  material: soft_strip     # 预设自带泊松比，GJ 跟着材料走
+start:
+  u_left_twist:  [0, 0, 0, 0, 0, 0]      # 每端 6 个数
+  u_right_twist: [1, 0, 0, 0, 0, 0]
+  init_yaw: 0.0
+```
+
+```bash
+python scripts/train_adjoint.py --config configs/example_3d_twist.yaml
+python scripts/check_twist.py                     # 扭转模型本身的有限差分自检
+```
+
+### 1. 模型：DOF 多了一维，能量多了一项
+
+沿用 Discrete Elastic Rods（Bergou et al. / DEFORM）的 material frame 做法。每条边带一个**参考指向子**（reference director，用无扭转的平行移动搬运）加一个**标量扭转角** `theta^i`，DOF 向量从 `3*nv` 长到 `4*nv - 1`：
+
+```
+q = [ 3*nv 个位置 | nv-1 个扭转角 ]
+
+E = E_stretch(x) + E_bend(x) + E_twist(x, theta)
+E_twist = Σ_i (GJ / 2dL) * m_i² ,   m_i = theta^i - theta^{i-1} + psi_i(x)
+```
+
+圆截面下 `J = 2I`、`G = E/(2(1+nu))`，所以 `GJ = EI / (1 + nu)`。拉伸和弯曲一个字没动，`GJ = 0` 精确还原 `der3d`（实测差 0.0）。
+
+**`psi_i`（reference twist）是整件事的关键**，它是平行移动沿杆走一圈"合不拢"的那部分。它**依赖位置**，这正是扭转与弯曲耦合的来源（离散版的 link = twist + writhe）。少了它，`E_twist` 就只依赖 `theta`，中心线对扭转毫无反应，`dL/d(yaw)` 恒等于零 —— yaw 会变成一个死掉的控制输入。
+
+### 2. 控制：每端多一个 yaw
+
+每端从 `(x, y, z, theta, phi)` 变成 `(x, y, z, theta, phi, yaw)`，**控制向量 12 维，边界映射 14×12**（对照 §4a / 09-21 那条的 10 维与 12×10）。`theta/phi` 指定切线方向，`yaw` 是绕切线的自旋 —— 第三个转动自由度。
+
+yaw 是**相对边的参考指向子**量的，而那个标架本身由无扭转平行移动搬运，所以"yaw 保持不变"就等于"不施加扭转"。结果是 yaw 直接对应到被钉死的两个扭转角上，**中间没有任何几何换算**（`boundary_node_jacobian_3d_twist` 里那两行就是两个 1）。
+
+### 3. 两个花了真功夫才 debug 出来的结论
+
+这两条记下来，以后再碰 material frame 不用重踩：
+
+- **`hess(psi)` 是链式法则矩阵的对称部分。** 直接对 `kb/2L` 的梯度表达式求导，会多出一块伪反对称项，误差 **>100%**。
+- **`grad(psi)` 比经典的 holonomy 多一个"重新适配项"**，来自把每个存下来的指向子搬到当前切线上。当存储切线等于当前切线时它为零 —— 所以在一步的**起点看不见**，只有 Newton 迭代走动之后才冒出来。漏掉它梯度差 **~50%**。
+
+### 4. 还剩一个近似
+
+标架是在一步 commit 之后才推进的，所以被扰动的控制会走一条略微不同的标架路径，而单步隐式梯度看不见这件事。这和时域伴随法本来就在做的近似是同一类。3 步 rollout 上实测相对误差 **~6.5e-04**。
+
+### 5. 连带改的三件小事
+
+| 提交 | 改了什么 |
+|---|---|
+| `4414fe5` | **泊松比归入材料预设**。`nu` 决定扭转刚度，它是"杆是什么做的"的属性，不该松散地挂在 `rod:` 下面、换材料时还留在原地。四个预设各自带值（steel 0.30 / aluminum 0.33 / soft_strip 0.40 / silicone 0.49），换材料时弯曲刚度和扭转刚度一起变。不写仍然默认 0.3，`rod.poisson` 仍可单点覆盖 |
+| `462d436` | `energy.type: der` 原本读起来像在陈述事实，但 `custom: false`（默认）时 `build_energy` 根本不看这一行 —— 真正建的模型由**杆**决定（2D 是 der，3D 是 der3d，开 twist 是 der3d_twist）。填一个根本没注册的名字也毫无反应，可见这个字段多误导。现在默认是 `type: null` |
+| `0f705fa` | 动画里画出**截面朝向**。纯扭转只让截面自转、形状不变，所以只画中心线的话，最有意思的那个自由度是看不见的。现在在两端和中点画出 material frame（切线 + m1/m2）。指向子是求解器状态、`q` 里没有，所以按记录的构型重放（确定性的，训练脚本不用额外存东西） |
+
+### 改了哪些文件
+
+| 文件 | 改了什么 |
+|---|---|
+| `src/rodframes.py` | **新文件**（294 行）。material frame、平行移动、`reference_twist`、`psi_grad_hess` |
+| `src/energy.py` | 新增 `der3d_twist`（`DERElasticEnergy3DTwist`），复用 `der3d` 算拉伸/弯曲 |
+| `src/implicit_grad_tools.py` | 新增 `boundary_node_jacobian_3d_twist`（14×12），伴随法入口统一加 `twist` 参数 |
+| `src/SimulatorEnv_3D.py` | 扭转 DOF、标架状态（`get_state/set_state` 要一起存，否则读档后扭转会跳）、12 维控制 |
+| `src/contact.py` / `src/newton.py` | 加 `n_pos`：只作用在位置 DOF 上，别碰扭转角 |
+| `src/utils.py` | 改走 `env.positions()`，原来的 `reshape(-1, dim)` 只在无扭转时才对 |
+| `src/env_factory.py` | 维度 + twist 感知的控制维数 / 初始控制 / 目标 |
+| `scripts/check_twist.py` | **新文件**。9 项有限差分自检 |
+| `configs/example_3d_twist.yaml` | **新文件**。最小的 twist 配置 |
+
+### 已验证
+
+`scripts/check_twist.py` 把伴随法依赖的每一环都对了有限差分，**9/9 通过**。提交当时记录的数值：
+
+| 检查项 | 相对误差 |
+|---|---|
+| `grad(psi)` | 3.7e-09 |
+| `hess(psi)` | 8.4e-07 |
+| 扭转能量的力 / 雅可比 | ~7e-11 |
+| `GJ = 0` 退化回 `der3d` | 精确 0.0 |
+| 边界映射 14×12 | 5.3e-10 |
+| 含 yaw 的 `dL/du` | 6.8e-08 |
+| 标架历史的漂移（3 步，属于 §4 那个近似，**不算失败项**） | ~6.5e-04 |
+
+09-29 重跑仍然 **9/9**，数值同量级（边界映射 5.3e-10、`dL/du` 1.1e-09、`dL/d(yaw)` 3.7e-07、标架漂移 4.2e-04）—— 具体数字随算例浮动，看的是量级和是否过容差。
+
+另外：三个训练脚本 × 2D / 3D / 3D+twist 全部跑通；**3D 不开 twist 的结果与改动前最后一位都相同**。
+
+### 下一步
+
+- 各向异性截面（现在只建模了各向同性弯曲，所以弯曲不需要 material frame，标架只在扭转项里出现）
+- 自然曲率 / 自然扭转（现在假设杆天然是直的）
+
+---
+
+## 2026-09-29 — 计算冗余审计（已完成）
+
+跑 `configs/example_3d_twist.yaml` 时每个 epoch 要 12~25 s，怀疑内层循环在重复算 Hessian 之类的东西。Profiler 只能说"哪个函数慢"，但真正决定怎么改的问题是"**这些计算里有多少是以前已经算过的**"。新增 `src/compute_audit.py` 来回答后者。
+
+### 怎么用
+
+```bash
+# 短跑一次拿数字，开销约 2.5%
+python scripts/train_adjoint.py --config configs/example_3d_twist.yaml --audit
+
+# 再往下一层，看每个 stencil kernel（调用量极大，会明显变慢）
+python scripts/train_adjoint.py --config configs/example_3d_twist.yaml --audit --audit-kernels
+```
+
+长训练想**边跑边看**，配置里写：
+
+```yaml
+audit:
+  enabled: true
+  report_every: 10        # 每 10 个 epoch 重写一次报告（RHC 模式是每 10 次梯度更新）
+```
+
+然后另开终端 `watch -n 30 cat experiments/<name>/runs/<时间戳>/compute_audit.txt`。周期性写入会跳过 `.npz`（保存里最慢的那部分）。
+
+默认 `audit.enabled: false`，此时**什么都不包**，热路径完全没动过。
+
+### 原理
+
+包住几个热点：`env.step`、Newton 求解、`force_and_jacobian / force / gradient / hessian`、伴随法的 `local_dxf_dxb` 和 `multistep_adjoint_gradient`。每次调用记三样东西 —— **输入**（决定结果的那个向量）、**耗时**（扣掉嵌套在内部的、同样被记录的调用，所以不重复计时）、**位置**（第几个 epoch / rollout 第几步 / 第几个 RHC segment）。
+
+然后对每次调用去找**之前**最近的同类输入：完全相同用字节哈希精确判定；"接近"用随机投影 LSH + JL sketch，所以每次调用的查找是 **O(1)** 而不是 O(n) —— 否则审计本身会比训练还慢。
+
+输出写进 run 目录：`compute_audit.txt`（人读）、`.json`（程序读）、`compute_audit_records.npz`（每次调用一行的原始表，字段有耗时 / 到最近历史输入的相对距离 / epoch / step / seg）。
+
+报告有三张表：
+
+- **调用重复率** —— `exact%` 是"加个一行缓存就能去掉、结果完全不变"的部分；`<=1e-4` 这类列是累积的相对距离，也就是冻结 Jacobian 或热启动能有的精度预算
+- **时间重复率** —— 同一件事按耗时加权，这才是真能省下的
+- **逐 epoch 对比** —— 把每个 rollout step 和上一个 epoch 的同一 step 配对，直接回答"是不是每个 epoch 都在重算上一个 epoch"
+
+### 测出来什么（8 epoch，nv=21，N=100）
+
+| kernel | 调用次数 | 输入与之前某次**逐字节相同** |
+|---|---|---|
+| `psi_grad_hess` | 301 785 | **64.4%** |
+| `RodFrames.reference_twist` | 15 891 | **64.4%** |
+| `_bend_stencil` | 301 929 | **68.8%** |
+| `_stretch_stencil` | 317 820 | **71.9%** |
+| `energy.gradient` | 10 378 | **45.4%** |
+
+约三分之二的 stencil 计算是**字面意义上的重算**，来自两个叠加的原因：
+
+1. `RodEnergy.force_and_jacobian` 是 `(-gradient(q), -hessian(q))`。对带扭转的杆，这两半走的是**同一批 stencil**：`reference_twist` 各调一次，`psi_grad_hess` 每个内部节点各调一次，而 `psi_grad_hess` 本来就同时返回 psi 的梯度**和** Hessian。所以 Hessian 那一遍把 gradient 那一遍刚算完的东西又算了一次。
+2. Newton 的线搜索先算 `force(q_try)`，这一步被接受后，下一轮迭代立刻在**同一个 `q`** 上调 `force_and_jacobian(q)`。这就是 `energy.gradient` 那 45%。
+
+**原本的猜想里不成立的那一半**：跨 epoch 的重复。逐 epoch 表显示相邻 epoch 在同一 rollout step 上的输入相距约 `1e-1`，只有 ~3% 的配对落在 `1e-2` 以内 —— **跨 epoch 缓存没有价值，冗余全部在单个 step 内部**。另外 `<=1e-2` 那一列几乎处处是 99%，这是 modified Newton（多轮迭代之间冻结 Jacobian）能用的精度预算。
+
+### 改了哪些文件
+
+| 文件 | 改了什么 |
+|---|---|
+| `src/compute_audit.py` | **新文件**。`ComputeAudit`：包热点、记录、LSH + sketch 找最近历史输入、出报告 |
+| `scripts/train_adjoint.py` | `--audit` / `--audit-kernels` 两个开关；epoch / step / segment 打标；训练结束（在画图之前）出报告；`report_every` 的周期性刷新 |
+| `configs/default.yaml` | 新增 `audit:` 段 |
+| `README.md` | 目录树 + Performance 下的 "Where the repeated work is: the compute audit" 小节 |
+
+### 已验证
+
+- 近似重复的判定对着注入的已知扰动测过：1e-8 / 1e-4 / 1e-2 三档的中位数都对得上，`1e-2` 以内召回率 100%
+- 关掉审计（默认）时行为与改动前一致；开 `--audit` 的额外开销约 **2.5%**
+- `report_every` 的周期性刷新在 6 epoch 的短跑里按预期刷了 3 次
+
+### 两个限制
+
+- 近似重复的检测在相对距离 `1e-2` 以内可靠，**超出这个范围计数是下界**（LSH 不再碰撞）。精确重复永远是精确计数
+- 开 `--audit-kernels` 时，wrapper 自身的开销会抬高那几个高频 kernel 在**时间**列里的占比；重复**比例**是调用计数，不受影响
+
+### 下一步
+
+审计只做测量，**没有动任何 kernel**。按上面的数字，可做的有两件：
+
+1. 让 `force_and_jacobian` 一趟同时出梯度和 Hessian（`psi_grad_hess` / `_bend_stencil` 本来就两个都算），并把线搜索最后一次 `force(q)` 的结果缓存给紧接着的 `force_and_jacobian(q)`
+2. 更激进的话，利用 `<=1e-2` 那 99%，在 Newton 迭代之间冻结 Jacobian（modified Newton）
+
+另外 `--audit` 目前只接到了 `train_adjoint.py`，`train_tracking.py` 要的话是同样的三行改动。

@@ -18,6 +18,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import argparse
 
+from compute_audit import ComputeAudit, from_config as audit_from_config
 from implicit_grad_tools import multistep_adjoint_gradient
 from utils import visualize_results, maybe_save_trajectory_gif
 from runlog import RunLogger
@@ -35,6 +36,12 @@ from env_factory import (
     node_tracking_loss,
     dloss_dq_free_node,
 )
+
+
+#: Redundancy audit for the inner-loop kernels.  Disabled (and unpatched)
+#: unless `audit.enabled` is set in the config or --audit is passed, in which
+#: case main() replaces it with a live one.
+AUDIT = ComputeAudit(enabled=False)
 
 
 class BoundaryVelocityNet(nn.Module):
@@ -106,6 +113,7 @@ def rollout_segment(env, net, u_start, T, dlam, device, jac_reg):
     u = u_start.clone()
     n_left = net.out_dim          # left end is held fixed -> zero rate
     for k in range(T):
+        AUDIT.set_context(step=k)
         lam = torch.tensor([[k / T]], dtype=torch.float32, device=device)
         u_dot_full = torch.cat([torch.zeros(n_left, device=device), net(lam).squeeze(0)])
         u = u + dlam * u_dot_full
@@ -124,13 +132,15 @@ def rollout_segment(env, net, u_start, T, dlam, device, jac_reg):
 
 
 def optimize_segment(env, net, opt, u_start, T, dlam, device, target_xy, cfg,
-                      n_iterations, checkpoint):
+                      n_iterations, checkpoint, checkpoint_dir=None):
     """Run `n_iterations` exact-gradient updates for one horizon/segment,
     always rolling out from the same `checkpoint` state. Returns the final
     (post-optimization) rollout so the caller can commit it and advance."""
     best_loss = float("inf")
 
     for it in range(n_iterations):
+        AUDIT.set_context(epoch=it)
+        AUDIT.checkpoint_report(checkpoint_dir, it)
         env.set_state(checkpoint)
         opt.zero_grad(set_to_none=True)
 
@@ -183,8 +193,19 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None,
                         help="Path to a YAML config overriding configs/default.yaml")
+    parser.add_argument("--audit", action="store_true",
+                        help="Audit the inner-loop kernels for repeated and "
+                             "near-repeated computation (see src/compute_audit.py). "
+                             "Writes compute_audit.txt/.json into the run directory.")
+    parser.add_argument("--audit-kernels", action="store_true",
+                        help="With --audit, also instrument the per-stencil "
+                             "kernels. Much finer, and measurably slower.")
     args = parser.parse_args()
     cfg = load_config(args.config)
+    if args.audit:
+        cfg.setdefault("audit", {})["enabled"] = True
+    if args.audit_kernels:
+        cfg.setdefault("audit", {})["trace_kernels"] = True
 
     torch.manual_seed(cfg.train.seed)
     np.random.seed(cfg.train.seed)
@@ -196,6 +217,9 @@ def main():
     twist = env_twist(cfg)
     env = build_env(cfg)
     reset_env(env, cfg)
+
+    global AUDIT
+    AUDIT = audit_from_config(cfg).install(env)
 
     N = env.Nsteps
     target_xy = task_target(cfg)
@@ -218,6 +242,8 @@ def main():
     print(f"Rod material: {material_summary(cfg)}")
     print(f"Training on device: {device}")
     print(f"RHC: {'enabled (' + str(cfg.rhc.num_segments) + ' segments)' if cfg.rhc.enabled else 'disabled (single horizon)'}")
+    if AUDIT.enabled:
+        print("Compute audit: ON  (instrumented kernels are wrapped; expect some overhead)")
 
     loss_history = []
 
@@ -235,6 +261,7 @@ def main():
         q_last = None
         q_traj = []
         for ep in pbar:
+            AUDIT.set_context(epoch=ep)
             env.set_state(checkpoint)
             opt.zero_grad(set_to_none=True)
 
@@ -278,6 +305,10 @@ def main():
                     steps=len(u_list), newton_failures=env.n_newton_failures,
                     u_final=u_list[-1].detach().cpu().numpy())
 
+            if AUDIT.checkpoint_report(run.artifact_dir, ep):
+                print(f"[audit] report refreshed -> "
+                      f"{os.path.join(run.artifact_dir, 'compute_audit.txt')}")
+
             if ep % 10 == 0:
                 mid_s = ",".join(f"{v:.3f}" for v in mid_pos)
                 tgt_s = ",".join(f"{v:.3f}" for v in target_xy)
@@ -315,12 +346,14 @@ def main():
                 reinit_net_(net)
                 opt = optim.Adam([p for p in net.parameters() if p.requires_grad], lr=cfg.train.lr)
 
+            AUDIT.set_context(seg=seg_idx)
             dlam = 1.0 / T_seg
             print(f"\n{'='*70}\nRHC segment {seg_idx + 1}/{len(seg_lens)}  (T={T_seg})\n{'='*70}")
 
             result = optimize_segment(
                 env, net, opt, u_current, T_seg, dlam, device, target_xy, cfg,
                 n_iterations=cfg.train.iterations_per_segment, checkpoint=checkpoint,
+                checkpoint_dir=run.artifact_dir,
             )
 
             # Commit: advance the persistent simulator + control state.
@@ -351,6 +384,16 @@ def main():
             'final_error': float(final_loss ** 0.5) if final_loss is not None else float('nan'),
             'all_losses': [l for _, l in loss_history],
         }
+
+    # Before any plotting/animation, so the audit's wall time is the training's.
+    if AUDIT.enabled:
+        AUDIT.restore()
+        report = AUDIT.save(run.artifact_dir,
+                            save_records=bool(cfg.audit.get("save_records", True)))
+        print()
+        print(report)
+        print("Compute audit written to: "
+              + os.path.join(run.artifact_dir, 'compute_audit.txt'))
 
     visualize_results(results, env, target_xy, save_path=str(_ROOT / 'outputs'))
     maybe_save_trajectory_gif(cfg, q_traj, env, target_xy,

@@ -290,3 +290,36 @@ output:
   gif_dpi: 100             # resolution; 150+ gets large quickly
   gif_max_frames: 200      # cap on frames; longer rollouts are subsampled
                            #   evenly (first and last step always kept)
+
+# Compute-redundancy audit (src/compute_audit.py).
+#
+# Instruments the expensive kernels -- the Hessian assembly, the Newton solves
+# around it, the adjoint's linear solves -- and reports, per kernel, how much of
+# the work was already done before: exactly the same input (removable by a
+# cache, results unchanged) or close enough to an earlier one that reuse or a
+# warm start is on the table. Writes compute_audit.txt / .json / _records.npz
+# into the run directory.
+#
+# Off by default: the wrappers add a small per-call cost, so a timing run and a
+# production run should not be the same run. Turn it on here or with
+# `--audit` on the command line.
+audit:
+  enabled: false
+  # Relative-distance ladder the report buckets into. The near-duplicate search
+  # is exact up to ~1.0e-2; beyond that its counts are a lower bound.
+  tolerances: [1.0e-12, 1.0e-10, 1.0e-8, 1.0e-6, 1.0e-4, 1.0e-2]
+  # Also instrument the per-stencil kernels (_bend_stencil, psi_grad_hess, ...).
+  # They are called tens of millions of times, so the instrumentation itself
+  # becomes measurable -- worth it once, to see whether the Hessian assembly
+  # repeats the gradient's work.
+  trace_kernels: false
+  # Cap on inputs kept for the near-duplicate search, per kernel. Past it calls
+  # are still counted and timed, just not distance-checked.
+  max_indexed: 200000
+  # Dump the per-call table (timings, nearest-neighbour distance, epoch/step).
+  save_records: true
+  # Rewrite compute_audit.txt every N epochs (RHC: every N gradient steps) so a
+  # long run can be inspected while it is still running -- `tail`/`watch` the
+  # file in the run directory. 0 -> only write it once, at the end. The periodic
+  # write skips the per-call .npz, which is the slow part.
+  report_every: 0
