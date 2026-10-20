@@ -1,8 +1,10 @@
 # =============================================================================
 # Example 3D experiment WITH torsion.
 #
-#   python scripts/train_adjoint.py  --config configs/example_3d_twist.yaml
-#   python scripts/train_tracking.py --config configs/example_3d_twist.yaml
+# Point-to-point: drive the mid node to task.target_xyz.
+#
+#   python scripts/train_adjoint.py --config configs/example_3d_twist.yaml
+#   python scripts/train_cmaes.py   --config configs/example_3d_twist.yaml
 #
 # Validate the torsion model itself with:
 #   python scripts/check_twist.py
@@ -31,17 +33,13 @@ start:
   u_right_twist: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   init_yaw: 0.0
 
-# Which task runs depends on the script: train_adjoint.py / train_cmaes.py do
-# point-to-point, train_tracking.py does tracking. Both read target_xyz.
+# The task is picked by the script, not the config: train_adjoint.py /
+# train_cmaes.py run point-to-point toward target_xyz.
 task:
   target_xyz: [0.45, 0.15, 0.05]
-  tracking:
-    trajectory_type: helix         # a genuinely 3D curve, as a demonstration;
-                                   # `segment` is the better default (see README)
-    weight: 1.0
 
 train:
-  epochs: 100
+  epochs: 200
   lr: 0.005
 
 output:

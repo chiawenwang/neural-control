@@ -166,7 +166,8 @@ def _material_triads(q_traj, env, idx):
 
 def save_trajectory_gif(q_traj, env, target_pos, save_path='outputs',
                         filename='neural_control_animation.gif',
-                        fps=20, dpi=100, max_frames=200, title='DLO control rollout'):
+                        fps=20, dpi=100, max_frames=200, title='DLO control rollout',
+                        track_node=None, track_label='Midpoint', gripper_node=None):
     """Animate the full control rollout of the rod and write it out as a GIF.
 
     Parameters
@@ -176,6 +177,11 @@ def save_trajectory_gif(q_traj, env, target_pos, save_path='outputs',
     target_pos : the point-to-point target ``(dim,)``, or a tracking target
         trajectory ``(n_steps, dim)``; a trajectory is drawn as a dashed curve
         with the current target marked on it.
+    track_node : the node whose position and path are highlighted (default:
+        the mid node); ``track_label`` names it in the legend.
+    gripper_node : if given, that node's path is drawn as well (the gripper).
+
+    Rigid geometry the environment carries (``env.pipe``) is drawn underneath.
 
     Returns the path written, or ``None`` if there was nothing to animate.
     """
@@ -186,7 +192,7 @@ def save_trajectory_gif(q_traj, env, target_pos, save_path='outputs',
     dim = getattr(env, 'dim', 2)
     frames, src_idx = _as_frames(q_traj, dim, max_frames, env)
     n_frames = len(frames)
-    mid_idx = env.mid_node
+    mid_idx = env.mid_node if track_node is None else int(track_node)
     triad_data = _material_triads(q_traj, env, src_idx) if dim == 3 else None
 
     target = np.asarray(target_pos, dtype=float)
@@ -221,6 +227,9 @@ def save_trajectory_gif(q_traj, env, target_pos, save_path='outputs',
     ax.set_xlabel('x (m)', fontsize=11)
     ax.set_ylabel('y (m)', fontsize=11)
     ax.grid(True, alpha=0.3)
+    pipe = getattr(env, 'pipe', None)
+    if pipe is not None and dim == 2:
+        pipe.draw(ax)
 
     coords = lambda p: [p[..., c] for c in range(dim)]       # noqa: E731
 
@@ -236,9 +245,13 @@ def save_trajectory_gif(q_traj, env, target_pos, save_path='outputs',
     ends, = ax.plot([], [], *([[]] if dim == 3 else []), 'gs', markersize=9,
                     linestyle='None', label='Boundary')
     mid, = ax.plot([], [], *([[]] if dim == 3 else []), 'ro', markersize=9,
-                   linestyle='None', label='Midpoint', zorder=10)
+                   linestyle='None', label=track_label, zorder=10)
     trail, = ax.plot([], [], *([[]] if dim == 3 else []), 'r-', linewidth=1,
-                     alpha=0.5, label='Midpoint path')
+                     alpha=0.5, label=f'{track_label} path')
+    grip_trail = None
+    if gripper_node is not None:
+        grip_trail, = ax.plot([], [], *([[]] if dim == 3 else []), 'g-', linewidth=1.5,
+                              alpha=0.7, label='Gripper path')
     # Cross-section orientation at the two ends and the midpoint. Only a
     # twisting rod has one: without torsion the material frame is not a degree
     # of freedom and there would be nothing to show.
@@ -269,6 +282,9 @@ def save_trajectory_gif(q_traj, env, target_pos, save_path='outputs',
         _set(mid, pts[mid_idx])
         _set(trail, frames[:k + 1, mid_idx])
         artists = [rod, ends, mid, trail]
+        if grip_trail is not None:
+            _set(grip_trail, frames[:k + 1, gripper_node])
+            artists.append(grip_trail)
         if triad_data is not None:
             # quiver has no in-place update, so the arrows are rebuilt each frame
             while triad_artists:
@@ -301,7 +317,7 @@ def save_trajectory_gif(q_traj, env, target_pos, save_path='outputs',
 
 def maybe_save_trajectory_gif(cfg, q_traj, env, target_pos, save_path='outputs',
                               filename='neural_control_animation.gif',
-                              title='DLO control rollout'):
+                              title='DLO control rollout', **kwargs):
     """``save_trajectory_gif`` gated on the ``output.save_gif`` config switch."""
     out_cfg = cfg.get('output', {}) or {}
     if not out_cfg.get('save_gif', False):
@@ -311,5 +327,63 @@ def maybe_save_trajectory_gif(cfg, q_traj, env, target_pos, save_path='outputs',
         fps=out_cfg.get('gif_fps', 20),
         dpi=out_cfg.get('gif_dpi', 100),
         max_frames=out_cfg.get('gif_max_frames', 200),
-        title=title,
+        title=title, **kwargs,
     )
+
+
+def visualize_pipe_task(q_traj, env, target_pos, losses, tip_node=0, q_init=None,
+                        reference=None, metrics=None, save_path='outputs',
+                        filename='pipe_task_result.png', n_snapshots=6):
+    """Pipe-insertion summary figure (2D).
+
+    Left: the pipe, the initial rod, a few intermediate shapes, the final
+    shape, the gripper path, the tip trajectory, the reference path and the
+    target.  Right: the training loss.  ``metrics`` (a dict) is printed into
+    the title of the left panel.
+    """
+    pts = np.asarray([_positions(q, env, 2) for q in q_traj])
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6),
+                                   gridspec_kw={'width_ratios': [1.3, 1]})
+    if getattr(env, 'pipe', None) is not None:
+        env.pipe.draw(ax1)
+    if q_init is not None:
+        p0 = _positions(q_init, env, 2)
+        ax1.plot(p0[:, 0], p0[:, 1], '-', color='0.6', lw=2, label='Initial rod')
+    snap = np.unique(np.linspace(0, len(pts) - 1, n_snapshots + 2).round().astype(int))[1:-1]
+    for j, k in enumerate(snap):
+        ax1.plot(pts[k, :, 0], pts[k, :, 1], '-', color='tab:purple', lw=1,
+                 alpha=0.25 + 0.5 * j / max(len(snap), 1),
+                 label='Intermediate rods' if j == 0 else None)
+    ax1.plot(pts[-1, :, 0], pts[-1, :, 1], 'k.-', lw=2, ms=4, label='Final rod')
+    grip = pts[:, -1]
+    ax1.plot(grip[:, 0], grip[:, 1], 'g-', lw=2.5, label='Gripper path')
+    ax1.plot(grip[-1, 0], grip[-1, 1], 'gs', ms=9)
+    tip = pts[:, tip_node]
+    ax1.plot(tip[:, 0], tip[:, 1], 'r-', lw=1.5, label='Tip trajectory')
+    ax1.plot(tip[-1, 0], tip[-1, 1], 'ro', ms=7)
+    if reference is not None:
+        ref = np.asarray(reference)
+        ax1.plot(ref[:, 0], ref[:, 1], 'b:', lw=1.2, label='Reference path')
+    ax1.plot(target_pos[0], target_pos[1], 'bx', ms=14, mew=3, label='Target', zorder=10)
+    ax1.set_aspect('equal')
+    ax1.set_xlabel('x (m)')
+    ax1.set_ylabel('y (m)')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(fontsize=8, loc='lower right')
+    if metrics:
+        ax1.set_title('  '.join(f'{k}={v}' for k, v in metrics.items()), fontsize=9)
+
+    if losses:
+        ax2.semilogy(losses, lw=2, color='steelblue')
+    ax2.set_xlabel('Epoch')
+    ax2.set_ylabel('Loss (log scale)')
+    ax2.set_title('Training Progress', fontweight='bold')
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    os.makedirs(save_path, exist_ok=True)
+    out = os.path.join(save_path, filename)
+    plt.savefig(out, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved to {out}")
+    return out

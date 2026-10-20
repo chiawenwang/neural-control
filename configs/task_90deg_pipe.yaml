@@ -1,0 +1,120 @@
+# =============================================================================
+# 90-degree pipe insertion: the robot grips the right end of the rod, near the
+# pipe entrance, and pushes; the free left end (the tip, node 0) has to pass
+# the bend and reach target_xy in the second segment.
+#
+#   python scripts/train_pipe.py --config configs/task_90deg_pipe.yaml
+#   python scripts/check_pipe_contact.py          # Tests A-F
+#
+# Planar task on a table: gravity is normal to the plane, so in-plane gravity
+# is zero. Frictionless normal contact only (Version 1).
+#
+# Geometry, as laid out below (the rod starts straight from x=0 to x=1):
+#   entry face at x = 0.45, so 0.45 m of rod is already inside segment 1;
+#   sharp right-angle corner at (-0.15, 0), turning DOWN (-y); 0.2 m wide;
+#   target on the centerline 0.25 m below the corner.
+#   Tip travel along the centerline: 0.15 + 0.25 = 0.40 m, all of which must
+#   come from the gripper's feed -- the workspace allows 0.52 m.
+#   A straight push drives the tip head-on into the outer wall of the corner
+#   (a dead point); the gripper's y / theta can tilt the rod so it is deflected
+#   down instead.
+# =============================================================================
+
+env:
+  dim: 2
+  grasp_mode: right            # gripper holds the right end; node 0 is free
+
+rod:
+  # Nylon-like rod, E = 2 GPa, 6 mm diameter: EI = 0.127 N*m^2, EA = 5.7e4 N.
+  # Why this one: pushing only works if the free span between the gripper and
+  # the entry face does not buckle before the tip is forced round the turn.
+  # Frictionless, that takes about EI / (2 R_turn^2) of push, against an Euler
+  # load of ~2.05 pi^2 EI / L_free^2 (clamped at the gripper, roughly pinned at
+  # the entry). Both scale with EI, so stiffness alone does not decide it --
+  # the geometry does. A sharp corner forces a much tighter turn than an elbow,
+  # so check the reported bending strain (R * kappa) against the material's
+  # elastic limit. train_pipe.py prints these numbers for what is configured.
+  material: pp_rod             # springy plastic, 4 mm: EI = 0.019 N*m^2
+  nv: 51
+  dt: 0.01
+  total_time: 1.0              # -> 100 control steps
+  rod_length: 1.0
+  max_newton_iter: 200         # converging steps need < 40; bounds the cost of a failing one
+  gravity_2d: [0.0, 0.0]
+
+start:
+  u_left: [0.0, 0.0, 0.0]      # unused with grasp_mode: right (left end is free)
+  u_right: [1.0, 0.0, 0.0]     # gripper starts at the rod's right end
+
+pipe:
+  enabled: true
+  entry_position: [0.45, 0.0]
+  geometry_type: l_corner_2d   # sharp right angle, not a rounded elbow
+  entry_direction: [-1.0, 0.0]
+  exit_direction: [0.0, -1.0]  # second segment goes down
+  inner_radius: 0.100          # 0.2 m wide channel, 4 mm rod: 98 mm of lateral play
+  bend_radius: 0.15            # unused by l_corner_2d
+  first_segment_length: 0.6
+  second_segment_length: 0.4
+
+contact:
+  enabled: true
+  k_contact: 1.0e+7
+  smoothing: 1.0e-4
+  corner_smoothing: 5.0e-4
+  samples_per_edge: 16         # 1.25 mm apart: a sharp convex corner pokes between
+                               # sparser samples (4/edge let it in 1.3 mm)
+
+friction:
+  enabled: false
+
+# Inside the pipe the frictionless rod is multistable -- it can lie against
+# either wall and snaps between them -- and at such a snap a single Newton
+# solve from the previous state can stall (seen at 1000 iterations). Retrying
+# by continuation in the gripper motion follows the branch through it.
+newton:
+  max_substeps: 16
+  # Pushed head-on into the corner wall, a perfectly straight rod sits on an
+  # unstable (saddle) equilibrium that Newton would hold forever, driving it
+  # through the wall; this makes it buckle instead, like a real rod.
+  stability_check: true
+  stability_perturbation: 5.0e-3   # [m]; 1 mm was too small to leave the saddle in a 0.2 m channel
+
+workspace:
+  enabled: true
+  position_min: [0.48, -0.05]  # 3 cm short of the entry face, so the jaws stay out
+  position_max: [1.05, 0.05]
+  orientation_limits: [-0.35, 0.35]
+
+task:
+  target_xy: [-0.15, -0.25]    # on the centerline, 0.25 m below the corner
+  pipe:
+    tip_node: 0
+    success_tolerance: 0.01
+    max_penetration: 5.0e-4
+    contact_margin: 2.5e-4
+    workspace_tolerance: 1.0e-4
+    require_bend_crossing: true
+    require_workspace_feasibility: true
+    weights:
+      goal: 1.0
+      path: 0.1
+      contact: 1.0e+4          # the contact loss is a length-weighted mean, so a
+                               # lip penetration of a few mm is only ~1e-7 raw
+      control: 1.0e-3          # also keeps y/theta still unless the task needs them
+      workspace: 100.0
+
+train:
+  # Frictionless and quasi-static, so each equilibrium depends on the current
+  # gripper pose alone and the per-step adjoint is exact. `branch` credits early
+  # controls with the straight segment's lateral sensitivity and steers the
+  # gripper sideways for a target the walls decide (see default.yaml).
+  adjoint_mode: local
+  epochs: 60                   # short, for debugging
+  lr: 0.001                    # 0.01 and 0.003 overshoot: the gripper swings out
+                               # of the workspace and jams the rod at the entry face
+  device: cpu
+
+output:
+  experiment_name: pipe_90deg
+  save_gif: true

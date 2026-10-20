@@ -132,6 +132,7 @@ def compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets_s
     g_u_seq = multistep_adjoint_gradient(
         u_seq_np, J_list, free_index, fixed_index, env.deltaL, a_free_per_step,
         jac_reg=jac_reg, dim=dim, twist=twist,
+        boundary_rows=getattr(env, 'boundary_rows', None),
     )
     return g_u_seq, total_loss
 

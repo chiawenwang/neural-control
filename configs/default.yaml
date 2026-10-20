@@ -23,6 +23,13 @@
 # in 2D. Everything else (rod, energy, rhc, train, output) is shared.
 env:
   dim: 3                   # 2: 2D environment | 3: 3D environment
+  # Which rod ends the robot holds.
+  #   both   both ends clamped: the left at start.u_left (fixed), the right
+  #          driven by the policy. The original setup.
+  #   right  2D only. Only the right end is gripped (always the same material
+  #          point, the last two nodes); the left end is free, so node 0 is a
+  #          tip that moves only through the rod's own response.
+  grasp_mode: both
 
 # Material / cross-section presets for the rod.
 #
@@ -107,6 +114,17 @@ materials:
     rho_al: 1100
     poisson: 0.49
 
+  # Springy plastic rod (polypropylene-like, E ~ 1.5 GPa), 4 mm solid.
+  # EI = 1.88e-2 N*m^2 -- ~7x softer than soft_strip, so a 1 m rod bends
+  # visibly under the gripper and in contact, but still springs back and
+  # carries a push. Used by configs/task_90deg_pipe.yaml.
+  pp_rod:
+    R_outer: 0.002
+    r_inner: 0.0
+    E_al: 1.5e+9
+    rho_al: 900
+    poisson: 0.42
+
 # Physical / geometric parameters of the manipulated object (elastic rod).
 rod:
   material: soft_strip  # which entry of `materials:` above to use.
@@ -131,6 +149,9 @@ rod:
                               # [0.0, -9.81, 0.0] puts 3D's gravity back on 2D's
                               # axis and makes a planar 3D run reproduce a 2D one
                               # node for node. See README, "Which way is down".
+  gravity_2d: null            # 2D only: in-plane gravity [gx, gy]. null -> the
+                              # original [0.0, -9.81]. [0.0, 0.0] is a rod lying
+                              # on a table, gravity normal to the plane.
 
   # 3D only: torsion. false -> the rod bends in space but cannot twist, and each
   # gripper has 5 control DOFs (x, y, z, theta, phi). true -> every edge gains a
@@ -220,6 +241,96 @@ task:
     #   helix | figure8_3d        genuinely 3D, 3D only.
     trajectory_type: segment
     weight: 1.0                # per-step loss weight
+  # Read only by scripts/train_pipe.py: drive the free tip (2D, grasp_mode:
+  # right) through `pipe` to target_xy.
+  pipe:
+    tip_node: 0                # the free end
+    success_tolerance: 0.01    # [m] final |tip - target_xy|
+    max_penetration: 5.0e-4    # [m] deepest allowed wall penetration, any step
+    contact_margin: 2.5e-4     # [m] penetration the contact loss tolerates
+    workspace_tolerance: 1.0e-4   # [m]/[rad] allowed workspace violation
+    require_bend_crossing: true   # success needs the tip to pass the bend
+    require_workspace_feasibility: true   # refuse to train when the workspace
+                                          # cannot feed enough rod
+    # L = goal*|p_tip,T - target|^2 + path*mean_k (s_tip,k - s_ref,k)^2
+    #   + contact*sum_k L_contact,k + control*mean_k |u_dot_k|^2
+    #   + workspace*mean_k |violation_k|^2
+    # s is arc length along the pipe centerline; s_ref runs linearly from
+    # where the tip starts to the target.
+    weights:
+      goal: 1.0
+      path: 0.1
+      contact: 1.0e+4
+      control: 1.0e-4
+      workspace: 100.0
+
+# Rigid 90-degree L-shaped pipe (src/contact.py: LPipe2D). 2D only.
+#
+# A channel cut into a solid block: everything past the entry face is wall
+# except the channel itself, and in front of the face is free space for the
+# gripper and the not yet inserted rod. The centerline is
+#   straight (first_segment_length, along entry_direction)
+#   -> quarter arc of radius bend_radius
+#   -> straight (second_segment_length, along exit_direction), closed at the end.
+# The geometry is built once, at environment construction. With
+# `contact.enabled: false` the pipe is still built -- for the penetration
+# diagnostics and the drawing -- but exerts no force on the rod.
+pipe:
+  enabled: false
+  geometry_type: l_bend_2d       # l_bend_2d: rounded elbow of radius bend_radius
+                                 # l_corner_2d: sharp right-angle corner, two straight
+                                 #   bores meeting square (bend_radius unused)
+  entry_position: [0.45, 0.0]    # center of the opening in the entry face [m]
+  entry_direction: [-1.0, 0.0]   # into the pipe, along the first segment
+  exit_direction: [0.0, 1.0]     # along the second segment; must be perpendicular
+  inner_radius: 0.015            # half-width of the channel [m]; > rod radius
+  bend_radius: 0.15              # centerline radius of the bend [m]; > inner_radius
+  first_segment_length: 0.6      # entry face -> start of the bend [m]
+  second_segment_length: 0.3     # end of the bend -> closed far end [m]
+
+# Normal contact between the rod and rigid geometry (currently: `pipe`).
+#   E_c = k_contact/2 * sum_i w_i * [smoothing * softplus(-g_i/smoothing)]^2
+# over samples_per_edge points per edge, g_i the signed clearance. Its force
+# and exact Jacobian enter the Newton residual, so contact shapes the solved
+# state and, through the same Jacobian, the adjoint gradient.
+contact:
+  enabled: false
+  k_contact: 1.0e+7          # [N/m^2] line load per unit penetration. Raise it if
+                             # the reported max penetration is too deep; it only
+                             # makes the wall stiffer (more rigid), never softer.
+  smoothing: 1.0e-4          # [m] softplus width eps: the energy is ~0 once the
+                             # clearance exceeds a few eps
+  corner_smoothing: 5.0e-4   # [m] width of the C2 rounding at the two entry lips;
+                             # overestimates the clearance there by <= 3/16 of it
+  samples_per_edge: 4        # contact points per edge (node included), so an
+                             # edge cannot cut through a wall between two nodes
+
+# Friction along the walls. Reserved -- nothing is implemented yet, and
+# `enabled: true` raises rather than silently running frictionless.
+#   Version 2 (planned): smooth dynamic (Coulomb) friction on the incremental
+#     slip, regularized by velocity_regularization.
+#   Version 3 (planned): static friction / stick-slip with contact history.
+#     A smooth dynamic model cannot stand in for this: the path dependence of
+#     "same final gripper pose, different path, different shape" needs a
+#     stick state carried between steps.
+friction:
+  enabled: false
+  model: none                # none | dynamic (v2) | static (v3)
+  mu_static: 0.0
+  mu_dynamic: 0.0
+  velocity_regularization: 1.0e-3   # [m/s]
+
+# Gripper workspace (2D: limits on the right end's x, y, theta).
+# scripts/train_pipe.py projects every gripper command onto it before it is
+# executed (the robot cannot leave it), penalizes what the policy asks for
+# beyond it, and checks the executed trajectory against
+# task.pipe.workspace_tolerance at the end. Also used before training to check that the feed it allows along
+# the entry direction is enough to reach the target at all.
+workspace:
+  enabled: false
+  position_min: [0.48, -0.05]    # [m]
+  position_max: [1.05, 0.05]     # [m]
+  orientation_limits: [-0.35, 0.35]   # gripper theta [rad]
 
 # Receding-horizon control (RHC). When disabled, the whole horizon is
 # optimized as a single continuation segment (lambda in [0,1] over all N
@@ -257,6 +368,18 @@ newton:
                            # 0 -> regularize only when the line search stalls.
                            # Raise to ~1.0e-8 for a persistently stiff/unstable setup.
   verbose: false           # print a one-line diagnosis for each failed step
+  max_substeps: 0          # 2D, quasi-static only: retry a failed solve by moving
+                           # the clamped ends there in 2, 4, ... up to this many
+                           # increments (continuation along the equilibrium branch,
+                           # e.g. through a snap-through in contact). 0 -> off, the
+                           # original behaviour.
+  stability_check: false   # 2D, quasi-static only: if a converged state is an
+                           # unstable equilibrium (the free-DOF Hessian has a
+                           # negative eigenvalue -- e.g. a straight rod pushed past
+                           # its Euler load), nudge it along that mode and re-solve,
+                           # so the rod buckles as a real one would instead of
+                           # staying on the saddle. false -> the original behaviour.
+  stability_perturbation: 1.0e-3   # [m] size of that nudge at its largest node
 
 # Optimization / training.
 train:
@@ -267,6 +390,15 @@ train:
   seed: 42
   device: auto                 # auto | cpu | cuda | mps
   jac_reg: 1.0e-6               # equilibrium-Jacobian regularization for numerical stability
+  # How the multi-step adjoint spreads each step's loss over the controls
+  # (src/implicit_grad_tools.py: multistep_adjoint_gradient). Read by
+  # scripts/train_pipe.py; the other scripts always use `branch`.
+  #   branch  the original: a step's loss is carried back onto every earlier
+  #           control, assuming perturbations persist along the branch
+  #   local   a step's loss acts on that step's control only -- exact when each
+  #           equilibrium depends on the current control alone (quasi-static,
+  #           frictionless)
+  adjoint_mode: branch
 
 # Output / logging.
 output:

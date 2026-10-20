@@ -193,9 +193,16 @@ def build_env(cfg, **overrides):
         save_history=False,
     )
 
+    grasp_mode = str((cfg.get("env") or {}).get("grasp_mode", "both"))
     if dim == 2:
         from SimulatorEnv_2D import SimulatorEnv_2D as EnvCls
+        gravity = cfg.rod.get("gravity_2d")
+        if gravity is not None:
+            kwargs["gravity"] = tuple(float(g) for g in gravity)
+        kwargs["grasp_mode"] = grasp_mode
     else:
+        if grasp_mode != "both":
+            raise ValueError(f"env.grasp_mode: {grasp_mode} is 2D only; 3D clamps both ends")
         from SimulatorEnv_3D import SimulatorEnv_3D as EnvCls
         gravity = cfg.rod.get("gravity")
         if gravity is not None:
@@ -204,7 +211,72 @@ def build_env(cfg, **overrides):
         kwargs["poisson"] = poisson
 
     kwargs.update(overrides)
-    return EnvCls(**kwargs)
+    env = EnvCls(**kwargs)
+    attach_pipe(env, cfg)
+    return env
+
+
+def build_pipe(cfg, env):
+    """The ``pipe:`` geometry with the ``contact:`` parameters, for ``env``'s rod."""
+    from contact import LPipe2D
+    p = cfg.pipe
+    if env.dim != 2:
+        raise ValueError("pipe is implemented for env.dim: 2 only")
+    c = cfg.get("contact") or {}
+    return LPipe2D(
+        entry_position=p.entry_position,
+        entry_direction=p.entry_direction,
+        exit_direction=p.exit_direction,
+        inner_radius=p.inner_radius,
+        bend_radius=p.bend_radius,
+        first_segment_length=p.first_segment_length,
+        second_segment_length=p.second_segment_length,
+        rod_radius=env.R_outer,
+        nv=env.nv,
+        deltaL=env.deltaL,
+        k_contact=c.get("k_contact", 1.0e7),
+        smoothing=c.get("smoothing", 1.0e-4),
+        corner_smoothing=c.get("corner_smoothing", 5.0e-4),
+        samples_per_edge=c.get("samples_per_edge", 4),
+        geometry_type=p.get("geometry_type", "l_bend_2d"),
+    )
+
+
+def attach_pipe(env, cfg):
+    """Build ``pipe:`` into ``env`` and, with ``contact.enabled``, make it act.
+
+    The pipe is kept on ``env.pipe`` either way (diagnostics, drawing); only
+    when contact is on is it added to ``env.obstacles``, which is what the
+    equilibrium solve sees.  Fails loudly on settings that would otherwise be
+    silently ignored: friction (not implemented yet), contact with nothing to
+    touch, and a starting rod that is already inside a wall.
+    """
+    fr = cfg.get("friction") or {}
+    if fr.get("enabled", False):
+        raise NotImplementedError(
+            "friction.enabled: true -- friction is not implemented yet (only "
+            "frictionless normal contact, Version 1). Set friction.enabled: false.")
+    pipe_on = bool((cfg.get("pipe") or {}).get("enabled", False))
+    contact_on = bool((cfg.get("contact") or {}).get("enabled", False))
+    if contact_on and not pipe_on:
+        raise ValueError("contact.enabled: true but there is no geometry to touch "
+                         "(pipe.enabled: false)")
+    if not pipe_on:
+        return None
+
+    pipe = build_pipe(cfg, env)
+    env.pipe = pipe
+    if contact_on:
+        env.add_obstacle(pipe)
+
+    q0 = env.nodes.reshape(-1)
+    pen = pipe.detect_dlo_pipe_contact(q0)["max_penetration"]
+    if pen > 0.0:
+        raise ValueError(
+            f"The initial (straight) rod penetrates the pipe wall by {pen:.3g} m. "
+            "Move pipe.entry_position / entry_direction so the inserted part of "
+            "the rod lies inside the first segment.")
+    return pipe
 
 
 def reset_env(env, cfg):

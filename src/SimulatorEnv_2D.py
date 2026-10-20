@@ -338,7 +338,9 @@ def objfun(q_old, u_old, dt, tol, maximum_iter,
            control_node=None,
            use_inertia=False,
            obstacles=None,
-           newton_cfg=None):
+           newton_cfg=None,
+           fixed_index=None,
+           boundary_rows=None):
     """Single-step implicit time integration.
 
     Thin wrapper around :func:`newton.solve_equilibrium`: it only applies the
@@ -346,13 +348,20 @@ def objfun(q_old, u_old, dt, tol, maximum_iter,
     solver (line search + adaptive regularization, see src/newton.py).
     ``newton_cfg`` is the ``newton:`` block of the YAML config; with
     ``line_search: false`` this reproduces the original undamped iteration.
+
+    ``fixed_index`` / ``boundary_rows`` say which DOFs are clamped and which
+    entries of the 8D ``control_node`` they take; left out, both ends are
+    clamped (the original behaviour).
     """
     if control_node is None:
         raise ValueError("Control node position must be provided.")
 
     q_start = q_old.copy()
-    q_start[:4] = control_node[:4]  # left end nodes
-    q_start[-4:] = control_node[4:]  # right end nodes
+    if fixed_index is None:
+        q_start[:4] = control_node[:4]  # left end nodes
+        q_start[-4:] = control_node[4:]  # right end nodes
+    else:
+        q_start[fixed_index] = control_node[boundary_rows]
 
     cfg = dict(newton_cfg or {})
     q_new, flag, J, info = solve_equilibrium(
@@ -412,7 +421,9 @@ class SimulatorEnv_2D:
                  energy_cfg=None,
                  energy=None,
                  newton_cfg=None,
-                 warn_on_newton_failure=False):
+                 warn_on_newton_failure=False,
+                 gravity=(0.0, -9.81),
+                 grasp_mode="both"):
         self.nv = nv
         self.dt = dt
         self.rod_length = rod_length
@@ -458,16 +469,32 @@ class SimulatorEnv_2D:
             self.m[2 * k + 1] = m_node
         self.mMat = np.diag(self.m)
 
-        # Gravity
+        # Gravity (in-plane). The default is the original -y; a rod lying on a
+        # table, with gravity normal to the plane, uses (0, 0).
+        self.gravity = np.asarray(gravity, dtype=float).reshape(2)
         self.W = np.zeros(2 * nv)
-        self.W[1::2] = -9.81 * m_node
+        self.W[0::2] = self.gravity[0] * m_node
+        self.W[1::2] = self.gravity[1] * m_node
 
         # Newton iteration tolerance
         self.tol = self.energy.stiffness_scale / rod_length ** 2 * 1e-3
 
-        # Constrained DOFs
+        # Constrained DOFs.
+        #   both  -> both ends clamped (the original setup)
+        #   right -> only the right end is gripped; the left end is free, so
+        #            node 0 is a tip that moves only through the rod's response.
+        # boundary_rows picks the clamped entries of the 8D control_node, i.e.
+        # the rows of d(q_b)/d(u) that the adjoint must use.
         all_DOFs = np.arange(2 * nv)
-        self.fixed_index = np.array([0, 1, 2, 3, 2 * nv - 4, 2 * nv - 3, 2 * nv - 2, 2 * nv - 1])
+        self.grasp_mode = grasp_mode
+        if grasp_mode == "both":
+            self.fixed_index = np.array([0, 1, 2, 3, 2 * nv - 4, 2 * nv - 3, 2 * nv - 2, 2 * nv - 1])
+            self.boundary_rows = np.arange(8)
+        elif grasp_mode == "right":
+            self.fixed_index = np.array([2 * nv - 4, 2 * nv - 3, 2 * nv - 2, 2 * nv - 1])
+            self.boundary_rows = np.arange(4, 8)
+        else:
+            raise ValueError(f"grasp_mode must be 'both' or 'right', got {grasp_mode!r}")
         self.free_index = np.setdiff1d(all_DOFs, self.fixed_index)
 
         # Mid-node index
@@ -480,6 +507,10 @@ class SimulatorEnv_2D:
         self.dlamda = 1 / self.Nsteps
 
         self.obstacles = []
+        # Rigid environment geometry (e.g. contact.LPipe2D), kept for
+        # diagnostics and drawing even when its contact force is switched off;
+        # only what is in self.obstacles acts on the rod.
+        self.pipe = None
 
         # State variables (initialized in reset())
         self.q = None
@@ -622,7 +653,17 @@ class SimulatorEnv_2D:
             use_inertia=use_inertia,
             obstacles=self.obstacles,
             newton_cfg=self.newton_cfg,
+            fixed_index=self.fixed_index,
+            boundary_rows=self.boundary_rows,
         )
+
+        if flag < 0 and not use_inertia and self.newton_cfg.get("max_substeps", 0):
+            retry = self._substep_solve(control_node)
+            if retry is not None:
+                q_new, flag, J, ninfo = retry
+
+        if flag > 0 and not use_inertia and self.newton_cfg.get("stability_check", False):
+            q_new, flag, J, ninfo = self._stabilize(q_new, J, ninfo, control_node)
 
         if flag < 0:
             self.n_newton_failures += 1
@@ -668,6 +709,84 @@ class SimulatorEnv_2D:
             self.history["q3y"].append(self.q[2 * q3 + 1])
 
         return obs, done, info
+
+    def _substep_solve(self, control_node):
+        """Retry a failed quasi-static solve by continuation in the boundary motion.
+
+        Near a snap-through (e.g. a rod in a pipe flipping from one wall to the
+        other) the nearest equilibrium jumps and a single Newton solve from the
+        previous state can stall. Moving the clamped DOFs there in 2, 4, ...
+        (up to ``newton.max_substeps``) equal increments, each solved from the
+        last, follows the equilibrium branch instead. The final solve is at
+        exactly ``control_node``, so the state and Jacobian returned belong to
+        the requested control. Returns None when every split fails -- a
+        partial sequence ends at an intermediate pose, which must not be
+        mistaken for the requested one.
+        """
+        b0 = self.q[self.fixed_index]
+        b1 = control_node[self.boundary_rows]
+        max_sub = int(self.newton_cfg.get("max_substeps", 0))
+        n = 2
+        result = None
+        while n <= max_sub:
+            q = self.q
+            for j in range(1, n + 1):
+                cn = control_node.copy()
+                cn[self.boundary_rows] = b0 + (j / n) * (b1 - b0)
+                result = objfun(
+                    q_old=q, u_old=self.u, dt=self.dt, tol=self.tol,
+                    maximum_iter=self.max_newton_iter, m=self.m, mMat=self.mMat,
+                    energy=self.energy, W=self.W, deltaL=self.deltaL,
+                    free_index=self.free_index, control_node=cn, use_inertia=False,
+                    obstacles=self.obstacles, newton_cfg=self.newton_cfg,
+                    fixed_index=self.fixed_index, boundary_rows=self.boundary_rows,
+                )
+                q = result[0]
+                if result[1] < 0:
+                    break
+            if result[1] > 0:
+                result[3]["substeps"] = n
+                return result
+            n *= 2
+        return None
+
+    def _stabilize(self, q, J, info, control_node, max_tries=6):
+        """Keep the quasi-static state on a *stable* equilibrium.
+
+        Newton finds any root of the residual, saddles included. A straight
+        rod pushed axially past its Euler load is such a saddle: an exact
+        equilibrium that a real rod leaves by buckling, but which Newton holds
+        forever, so the push goes into axial compression (and, against a wall,
+        through it). Here a converged state whose free-DOF Hessian has a
+        negative eigenvalue is nudged along that unstable mode, by
+        ``newton.stability_perturbation`` [m] at its largest node, and solved
+        again -- which is how the rod would leave it.
+        """
+        free = self.free_index
+        amp = float(self.newton_cfg.get("stability_perturbation", 1.0e-3))
+        n_kicks = 0
+        for _ in range(max_tries):
+            H = J[np.ix_(free, free)]
+            w, V = np.linalg.eigh(0.5 * (H + H.T))
+            if w[0] >= -1e-9 * max(float(np.abs(np.diag(H)).max()), 1.0):
+                break
+            v = V[:, 0] * np.sign(V[np.argmax(np.abs(V[:, 0])), 0])   # deterministic sign
+            q_try = q.copy()
+            q_try[free] += amp * v / np.abs(v).max()
+            q_new, flag, J_new, info_new = objfun(
+                q_old=q_try, u_old=self.u, dt=self.dt, tol=self.tol,
+                maximum_iter=self.max_newton_iter, m=self.m, mMat=self.mMat,
+                energy=self.energy, W=self.W, deltaL=self.deltaL,
+                free_index=free, control_node=control_node, use_inertia=False,
+                obstacles=self.obstacles, newton_cfg=self.newton_cfg,
+                fixed_index=self.fixed_index, boundary_rows=self.boundary_rows,
+            )
+            if flag < 0:
+                break
+            q, J, info = q_new, J_new, info_new
+            n_kicks += 1
+        info["stability_kicks"] = n_kicks
+        return q, 1, J, info
 
     # ---------- RHC state checkpointing ----------
 
@@ -720,9 +839,13 @@ class SimulatorEnv_2D:
         ax.legend()
 
         for obs in self.obstacles:
+            if hasattr(obs, "draw"):
+                continue
             patch = Circle((obs.cx, obs.cy), obs.radius,
                            color='steelblue', alpha=0.55, zorder=5)
             ax.add_patch(patch)
+        if self.pipe is not None:
+            self.pipe.draw(ax)
 
         if saveimg:
             plt.savefig(f'imgs/render_{self.ctime:.3f}.png')

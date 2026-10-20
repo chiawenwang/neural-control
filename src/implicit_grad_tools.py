@@ -144,20 +144,27 @@ def boundary_node_jacobian_3d_twist(control_12d, deltaL):
     return J
 
 
-def _boundary_jacobian(control, deltaL, dim=2, twist=False):
-    """Dimension dispatch for the d(q_b)/d(u) map."""
+def _boundary_jacobian(control, deltaL, dim=2, twist=False, rows=None):
+    """Dimension dispatch for the d(q_b)/d(u) map.
+
+    ``rows`` keeps only the boundary DOFs that are actually clamped (the
+    environment's ``boundary_rows``), e.g. just the right end when the left
+    end is a free tip.  None -> all of them, the both-ends-clamped case.
+    """
     if dim == 2:
         if twist:
             raise ValueError("twist requires dim=3")
-        return boundary_node_jacobian(control, deltaL)
-    if dim == 3:
-        return (boundary_node_jacobian_3d_twist(control, deltaL) if twist
-                else boundary_node_jacobian_3d(control, deltaL))
-    raise ValueError(f"dim must be 2 or 3, got {dim}")
+        B = boundary_node_jacobian(control, deltaL)
+    elif dim == 3:
+        B = (boundary_node_jacobian_3d_twist(control, deltaL) if twist
+             else boundary_node_jacobian_3d(control, deltaL))
+    else:
+        raise ValueError(f"dim must be 2 or 3, got {dim}")
+    return B if rows is None else B[rows]
 
 
 def implicit_final_control_grad(J, free_index, fixed_index, a_free, control_6d, deltaL,
-                                 dim=2, twist=False):
+                                 dim=2, twist=False, boundary_rows=None):
     """
     Implicit gradient via the adjoint method (single/final step only).
     Given:
@@ -183,7 +190,7 @@ def implicit_final_control_grad(J, free_index, fixed_index, a_free, control_6d, 
     g_qb = - (J_fb.T @ v)
 
     # map boundary DOFs -> end-effector pose DOFs
-    J_map = _boundary_jacobian(control_6d, deltaL, dim, twist)   # (n_qb, n_u)
+    J_map = _boundary_jacobian(control_6d, deltaL, dim, twist, boundary_rows)   # (n_qb, n_u)
     g_u = J_map.T @ g_qb                                  # (n_u,)
 
     return g_u
@@ -214,7 +221,8 @@ def local_dxf_dxb(J, free_index, fixed_index, jac_reg=0.0):
 
 
 def multistep_adjoint_gradient(u_seq, J_list, free_index, fixed_index, deltaL,
-                                a_free_per_step, jac_reg=0.0, dim=2, twist=False):
+                                a_free_per_step, jac_reg=0.0, dim=2, twist=False,
+                                boundary_rows=None, accumulate=True):
     """
     Exact multi-step (receding-horizon) adjoint gradient: computes dL/du_k for
     every step k in the horizon, instead of computing it once at the final
@@ -271,6 +279,18 @@ def multistep_adjoint_gradient(u_seq, J_list, free_index, fixed_index, deltaL,
     twist : bool
         Whether the rod carries torsion, i.e. whether the control has a yaw
         per end and the boundary has a clamped twist angle per end.
+    boundary_rows : np.ndarray or None
+        Rows of d(q_b)/d(u) that correspond to ``fixed_index`` (the
+        environment's ``boundary_rows``). None -> both ends clamped.
+    accumulate : bool
+        True (default): the branch assumption above -- every later step's
+        loss is carried back onto step i through step i's Jacobian.
+        False: each step's loss acts only on that step's control,
+        ``g_u_i = B_i^T dxf_dxb_i^T a_free_i``. That is the exact gradient
+        when each equilibrium depends on the current control alone (a
+        quasi-static, frictionless, history-free model: dq_k/du_i = 0 for
+        i < k), where the branch sum instead credits early controls with
+        sensitivities the final state no longer has.
 
     Returns
     -------
@@ -285,10 +305,10 @@ def multistep_adjoint_gradient(u_seq, J_list, free_index, fixed_index, deltaL,
     lam_f_cum = np.zeros(len(free_index), dtype=float)
 
     for i in range(T - 1, -1, -1):
-        lam_f_cum = lam_f_cum + a_free_per_step[i]
+        lam_f_cum = (lam_f_cum if accumulate else 0.0) + a_free_per_step[i]
 
         dxf_dxb_i = local_dxf_dxb(J_list[i], free_index, fixed_index, jac_reg)
-        B_i = _boundary_jacobian(u_seq[i], deltaL, dim, twist)   # (n_qb, n_u)
+        B_i = _boundary_jacobian(u_seq[i], deltaL, dim, twist, boundary_rows)   # (n_qb, n_u)
 
         g_qb_i = dxf_dxb_i.T @ lam_f_cum                  # (4*dim,)
         g_u_seq[i] = B_i.T @ g_qb_i                        # (n_u,)

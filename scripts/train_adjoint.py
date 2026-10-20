@@ -97,11 +97,14 @@ def segment_lengths(N: int, num_segments: int):
     return [base + 1 if i < rem else base for i in range(num_segments)]
 
 
-def rollout_segment(env, net, u_start, T, dlam, device, jac_reg):
+def rollout_segment(env, net, u_start, T, dlam, device, jac_reg, project=None):
     """
     Roll out `T` steps of the (right-end) policy starting from the current
     env state, with the continuation parameter lambda reset to [0, 1] over
     this segment (matches the original adjoint_RHC_*.py convention).
+
+    ``project`` (optional) maps each accumulated control to the one actually
+    commanded, e.g. onto a robot workspace; None -> commanded as integrated.
 
     Returns u_list (torch, grad-tracking), q_list, J_list, converged (bool).
     """
@@ -117,6 +120,8 @@ def rollout_segment(env, net, u_start, T, dlam, device, jac_reg):
         lam = torch.tensor([[k / T]], dtype=torch.float32, device=device)
         u_dot_full = torch.cat([torch.zeros(n_left, device=device), net(lam).squeeze(0)])
         u = u + dlam * u_dot_full
+        if project is not None:
+            u = project(u)
         u_list.append(u)
 
         u_np = u.detach().cpu().numpy()
@@ -163,6 +168,7 @@ def optimize_segment(env, net, opt, u_start, T, dlam, device, target_xy, cfg,
         g_u_seq = multistep_adjoint_gradient(
             u_seq_np, J_list, free_index, fixed_index, env.deltaL,
             a_free_per_step, jac_reg=cfg.train.jac_reg, dim=dim, twist=twist,
+            boundary_rows=getattr(env, 'boundary_rows', None),
         )
 
         surrogate = torch.zeros((), device=device)
@@ -284,6 +290,7 @@ def main():
             g_u_seq = multistep_adjoint_gradient(
                 u_seq_np, J_list, free_index, fixed_index, env.deltaL,
                 a_free_per_step, jac_reg=cfg.train.jac_reg, dim=dim, twist=twist,
+                boundary_rows=getattr(env, 'boundary_rows', None),
             )
 
             surrogate = torch.zeros((), device=device)
