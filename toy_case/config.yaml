@@ -1,0 +1,75 @@
+# Toy DER (Bergou et al. 2008) - all tunable parameters.
+# Every experiment starts from the `base` block and deep-merges its own block
+# from `experiments` on top.  Override anything from the CLI, e.g.
+#   python run.py cantilever --set rod.n_nodes=61 rod.youngs=1e8
+# SI units throughout.
+
+base:
+  rod:
+    n_nodes: 31            # N = n+2 vertices -> n+1 edges, n interior vertices
+    length: 1.0            # rest length [m]
+    radius_a: 0.01         # cross-section semi-axis along m1 [m]
+    radius_b: 0.01         # cross-section semi-axis along m2 [m]  (a != b -> anisotropic B, Eq. 3)
+    youngs: 1.0e9          # E [Pa]  -> k_s = EA, B = diag(E I1, E I2)
+    poisson: 0.5           # ν       -> G = E / (2(1+ν)), β = G J
+    density: 1000.0        # ρ [kg/m^3] -> lumped vertex mass ρ A |D_i|
+    rest_curvature: 0.0    # κ̄ [1/m]: 0 = naturally straight; >0 = rest arc in x-y (ω̄ ≠ 0, Eq. 2-3)
+
+  energy:                  # switch terms on/off or scale them to see what each does
+    stretch: true
+    bend: true
+    twist: true
+    stretch_scale: 1.0     # multiplies k_s
+    bend_scale: 1.0        # multiplies B
+    twist_scale: 1.0       # multiplies β
+
+  bc:
+    start: clamp           # clamp | free      (clamp: x0, x1 fixed, θ^0 = 0)
+    end: free              # clamp | pin | free
+    end_twist: 0.0         # [rad] rotation of the clamped end's material frame about t^n
+    end_shift: [0.0, 0.0, 0.0]   # [m] displacement of the clamped/pinned end nodes
+
+  gravity: [0.0, 0.0, -9.81]
+
+  solver:
+    tol: 1.0e-10           # Newton stops when |Δz|∞ < tol
+    max_iter: 50
+    verbose: false
+
+  dynamics:
+    dt: 0.01               # backward-Euler step [s]
+    steps: 150
+    damping: 0.0           # mass-proportional damping c [1/s]
+
+experiments:
+  # FD check of autograd forces, and autograd vs. the paper's closed forms Eq. (7), (9)-(10)
+  gradcheck:
+    bc: {end: clamp, end_twist: 1.0}
+    rod: {n_nodes: 12, radius_b: 0.006}
+
+  # gravity sag of a clamped-free rod vs. Euler-Bernoulli  δ = qL⁴/(8EI)
+  cantilever:
+    mesh: [11, 21, 41, 81]  # mesh-convergence sweep (n_nodes)
+
+  # pure twist of a clamped-clamped straight rod: uniform twist (Eq. 5), E = βΦ²/(2L) (Eq. 6)
+  twist:
+    gravity: [0.0, 0.0, 0.0]
+    bc: {end: clamp}
+    phi: 3.14159           # end rotation Φ [rad]
+
+  # keep twisting a clamped-clamped rod until it buckles out of line (twist -> writhe).
+  # Classical result (Greenhill, clamped ends): M L / EI = 2.861π, i.e. Φ_c = 2.861π EI/GJ.
+  buckle:
+    gravity: [0.0, 0.0, 0.0]
+    rod: {n_nodes: 41}
+    bc: {end: clamp}
+    phi_max: 20.0          # [rad] phase 1: end rotation (> Φ_c ≈ 13.5 for ν = 0.5)
+    phi_steps: 25          # load steps of phase 1
+    slack: [-0.3, 0.0, 0.0]  # [m] phase 2: move the far end toward the base (≳0.35: rod passes through itself, no contact)
+    slack_steps: 24        # load steps of phase 2
+    perturb: 1.0e-4        # [m] lateral kick added before each solve, breaks the symmetry
+
+  # dynamic: horizontal cantilever released under gravity (inertia + all three energies)
+  swing:
+    rod: {youngs: 1.0e7}
+    dynamics: {dt: 0.01, steps: 150, damping: 0.0}
