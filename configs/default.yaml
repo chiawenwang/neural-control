@@ -320,17 +320,23 @@ friction:
   mu_dynamic: 0.0
   velocity_regularization: 1.0e-3   # [m/s]
 
-# Gripper workspace (2D: limits on the right end's x, y, theta).
+# Gripper workspace (2D: limits on the right end's x, y, theta; 3D: the *_3d
+# keys, limits on its x, y, z and tangent angles theta, phi).
 # scripts/train_pipe.py projects every gripper command onto it before it is
 # executed (the robot cannot leave it), penalizes what the policy asks for
 # beyond it, and checks the executed trajectory against
 # task.pipe.workspace_tolerance at the end. Also used before training to check that the feed it allows along
 # the entry direction is enough to reach the target at all.
+# In 3D, scripts/compare_global_local.py keeps both its RRT planner and the
+# neural control inside it, the latter projected and penalized the same way.
 workspace:
   enabled: false
   position_min: [0.48, -0.05]    # [m]
   position_max: [1.05, 0.05]     # [m]
   orientation_limits: [-0.35, 0.35]   # gripper theta [rad]
+  position_min_3d: [0.2, -0.4, -0.4]  # [m] x, y, z
+  position_max_3d: [1.0, 0.4, 0.4]    # [m]; the start pose (1, 0, 0) is inside
+  orientation_limits_3d: [[-1.5708, 1.5708], [-1.0472, 1.0472]]  # [rad] theta (+-90 deg), phi (+-60 deg)
 
 # Receding-horizon control (RHC). When disabled, the whole horizon is
 # optimized as a single continuation segment (lambda in [0,1] over all N

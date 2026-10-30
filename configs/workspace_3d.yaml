@@ -1,0 +1,17 @@
+# =============================================================================
+# 3D point-to-point with the right gripper confined to a workspace.
+#
+#   python scripts/compare_global_local.py run --config configs/workspace_3d.yaml ...
+#
+# The rod and task are configs/default.yaml's; only the workspace is switched
+# on. The box keeps the gripper at least 0.2 m in front of the fixed left
+# gripper and within 0.4 m of the rod's axis sideways and vertically; the angle
+# limits keep the rod entering the gripper from the fixed end's side
+# (|theta| <= 90 deg) and at most 60 deg out of the horizontal.
+# =============================================================================
+
+workspace:
+  enabled: true
+  position_min_3d: [0.2, -0.4, -0.4]  # [m] x, y, z
+  position_max_3d: [1.0, 0.4, 0.4]    # [m]
+  orientation_limits_3d: [[-1.5708, 1.5708], [-1.0472, 1.0472]]  # [rad] theta, phi
