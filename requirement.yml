@@ -1,4 +1,4 @@
-name: neural-control
+name: der
 channels:
   - pytorch
   - conda-forge
@@ -7,10 +7,5 @@ dependencies:
   - python>=3.9
   - numpy
   - matplotlib
-  - tqdm
   - pytorch
   - pyyaml
-  - pip
-  - pip:
-      - tensorboard
-      - cma
