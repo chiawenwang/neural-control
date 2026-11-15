@@ -49,6 +49,14 @@ def _deep_merge(base: dict, override: dict) -> dict:
 #: user-defined materials, and the kwargs forwarded to a custom energy class.
 _OPEN_SUBTREES = {("materials",), ("energy", "params")}
 
+#: Keys that were replaced, with what to write instead, so an old config says
+#: how to fix itself instead of getting a lookalike suggestion.
+_RENAMED = {
+    "train.adjoint_mode": "train.grad_method: `local` is now `state`; `branch` "
+                          "summed the future losses twice and is gone (`proxy` is "
+                          "what it meant to compute)",
+}
+
 
 def _unknown_keys(user, default, prefix=()):
     """Keys in the user config that configs/default.yaml does not define."""
@@ -66,6 +74,8 @@ def _unknown_keys(user, default, prefix=()):
 
 def _suggest(key, default):
     """Nearest defined key, so a typo says what was probably meant."""
+    if key in _RENAMED:
+        return f" (replaced by {_RENAMED[key]})"
     import difflib
     flat = []
 
@@ -81,12 +91,27 @@ def _suggest(key, default):
     return f" (did you mean {near[0]!r}?)" if near else ""
 
 
+def check_values(cfg) -> None:
+    """Raise on a value outside the set its key allows.
+
+    ``train.grad_method`` picks the adjoint gradient; anything but a known
+    method is an error rather than a silent fall-back to the default.  (The
+    scripts' ``--grad-method`` flag is checked by argparse's ``choices``.)
+    """
+    from implicit_grad_tools import GRAD_METHODS
+    value = (cfg.get("train") or {}).get("grad_method")
+    if value not in GRAD_METHODS:
+        raise ValueError(f"train.grad_method must be one of {', '.join(GRAD_METHODS)}, "
+                         f"got {value!r}")
+
+
 def load_config(path: Optional[Union[str, Path]] = None) -> ConfigNamespace:
     """Load configs/default.yaml, optionally deep-merged with a user config.
 
     A user config may only set keys the default file defines.  Anything else is
     a typo or a leftover from a renamed option, and silently ignoring it is how
     a run ends up not doing what its config appears to say -- so it raises.
+    So does a value outside its allowed set (:func:`check_values`).
     """
     with open(DEFAULT_CONFIG_PATH, "r") as f:
         cfg = yaml.safe_load(f) or {}
@@ -103,4 +128,5 @@ def load_config(path: Optional[Union[str, Path]] = None) -> ConfigNamespace:
             )
         cfg = _deep_merge(cfg, user_cfg)
 
+    check_values(cfg)
     return ConfigNamespace(cfg)

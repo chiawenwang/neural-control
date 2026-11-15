@@ -50,7 +50,6 @@ import matplotlib.pyplot as plt
 
 from contact import get_contact_forces
 from energy import build_energy
-from rodframes import RodFrames
 from newton import solve_equilibrium
 
 ############################
@@ -176,21 +175,19 @@ class SimulatorEnv_3D:
         # Elastic energy model. Defaults to the built-in 3D DER; `energy_cfg`
         # is the `energy:` block of the YAML config, and `energy` lets a caller
         # inject a RodEnergy instance directly (overrides energy_cfg).
-        # Material frames, only needed when the rod can twist.  They are state:
-        # carried from step to step by parallel transport, like the warm start.
-        self.frames = RodFrames(nv) if self.twist else None
-
         self.energy = energy if energy is not None else build_energy(
             energy_cfg, EI=self.EI, EA=self.EA, deltaL=self.deltaL, nv=nv, dim=3,
-            twist=self.twist, frames=self.frames, poisson=self.poisson)
+            twist=self.twist, poisson=self.poisson)
 
         # Node coordinates (initially a straight rod along +x)
         self.nodes = np.zeros((nv, 3))
         self.nodes[:, 0] = np.arange(nv) * self.deltaL
 
-        # DOF layout: positions first, then (with twist) one angle per edge.
+        # DOF layout: positions first, then (with twist) the angles the energy
+        # model carries -- the two gripper yaws, both clamped by the control
+        # (the material frame in between is quasistatic, see energy.py).
         self.n_pos = 3 * nv
-        self.n_twist = (nv - 1) if self.twist else 0
+        self.n_twist = int(getattr(self.energy, "n_twist", 0)) if self.twist else 0
         self.n_dof = self.n_pos + self.n_twist
 
         # Mass
@@ -207,11 +204,11 @@ class SimulatorEnv_3D:
         self.tol = self.energy.stiffness_scale / rod_length ** 2 * 1e-3
 
         # Constrained DOFs: the two nodes at each end are clamped by the
-        # control, and with twist so is each end edge's twist angle (the
-        # gripper yaw).
+        # control, and with twist so are the two gripper yaws.  Everything the
+        # Newton solve is free to move is then a node position.
         clamped = [np.arange(0, 6), np.arange(3 * nv - 6, 3 * nv)]
         if self.twist:
-            clamped.append(np.array([self.n_pos, self.n_pos + nv - 2]))
+            clamped.append(np.arange(self.n_pos, self.n_pos + self.n_twist))
         self.fixed_index = np.concatenate(clamped)
         self.free_index = np.setdiff1d(np.arange(self.n_dof), self.fixed_index)
 
@@ -273,14 +270,15 @@ class SimulatorEnv_3D:
         With twist each end gains a yaw (12D control)::
 
             [x_l, y_l, z_l, th_l, ph_l, yaw_l,  x_r, ..., yaw_r]
-            -> [node_0, node_1, node_{n-2}, node_{n-1}, theta^0, theta^{n-2}]  (14)
+            -> [node_0, node_1, node_{n-2}, node_{n-1}, yaw_l, yaw_r]       (14)
 
         ``yaw`` is the rotation of the gripper's cross-section about the rod
-        tangent, measured from that edge's reference director.  Because the
-        reference frame is carried by twist-free parallel transport, holding
-        yaw constant means applying no twist, and changing it twists the rod.
-        The two angle inputs ``th``/``ph`` fix where the tangent *points*; yaw
-        is the third rotational freedom, the spin about it.
+        tangent, measured from ``rodframes.gripper_director`` of that end --
+        the wrist angle, a property of the gripper and not of the rod's
+        history.  The two angle inputs ``th``/``ph`` fix where the tangent
+        *points*; yaw is the third rotational freedom, the spin about it.
+        Holding both yaws equal means applying no twist; the rod can still end
+        up twisted, because bending it changes the holonomy (see energy.py).
         """
         control_vec = np.asarray(control_vec, dtype=float)
         k = 6 if self.twist else 5
@@ -310,7 +308,7 @@ class SimulatorEnv_3D:
         return np.asarray(q, dtype=float)[:self.n_pos].reshape(-1, 3)
 
     def twist_angles(self, q=None):
-        """The per-edge twist angles, shape ``(nv - 1,)``; empty without twist."""
+        """The two gripper yaws ``(yaw_l, yaw_r)``; empty without twist."""
         q = self.q if q is None else q
         return np.asarray(q, dtype=float)[self.n_pos:]
 
@@ -359,10 +357,9 @@ class SimulatorEnv_3D:
         self.q = np.zeros(self.n_dof)
         self.q[:self.n_pos] = self.nodes.reshape(-1)
         if self.twist:
-            # A straight rod with a uniform twist angle carries no twist at
-            # all: only differences between adjacent edges cost energy.
+            # Both grippers at the same yaw is an untwisted rod: only the
+            # difference between the two ends costs energy.
             self.q[self.n_pos:] = init_yaw
-            self.frames.reset(self.nodes)
 
         self.u = np.zeros_like(self.q)
         self.ctime = 0.0
@@ -424,12 +421,6 @@ class SimulatorEnv_3D:
         # Update velocity and time
         u_new = (q_new - self.q) / self.dt
         self.q = q_new
-        if self.twist:
-            # Carry the reference directors onto the new configuration, by
-            # twist-free parallel transport. This is the frame counterpart of
-            # the warm start: it keeps the twist measured along one continuous
-            # branch instead of jumping between frame choices.
-            self.frames.advance(self.positions(q_new))
         self.u = u_new
         self.ctime += self.dt
         self.current_step += 1
@@ -471,10 +462,6 @@ class SimulatorEnv_3D:
             "current_step": self.current_step,
             "lamda": self.lamda,
         }
-        if self.twist:
-            # The material frames are state too -- restoring q without them
-            # would silently change what "zero twist" means.
-            state["frames"] = self.frames.get_state()
         return state
 
     def set_state(self, state):
@@ -484,8 +471,6 @@ class SimulatorEnv_3D:
         self.ctime = state["ctime"]
         self.current_step = state["current_step"]
         self.lamda = state["lamda"]
-        if self.twist and "frames" in state:
-            self.frames.set_state(state["frames"])
 
     def render(self, saveimg=False, show=True,
                xlim=None, ylim=None, zlim=None):

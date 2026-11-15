@@ -1,63 +1,87 @@
-"""Global planning + local neural control vs. neural control alone (point-to-point).
+"""Task 1: point-to-point boundary control of a deformable linear object.
 
-The idea comes from Yu et al., "Generalizable whole-body global manipulation of
-deformable linear objects by dual-arm robot in 3-D constrained environments"
-(reference/): a global planner on a *coarse* rod model finds a feasible path
-quickly, and a local controller on the real system refines it.  Here the
-planner is src/dlo_rrt.py (RRT on a 10-segment rod) and the local stage is the
-point-to-point neural control of scripts/train_adjoint.py, unchanged.
+The rod's mid node has to reach a target.  The controller is the adjoint
+neural control of :mod:`neural_control`: a network maps the continuation
+parameter lambda to the right gripper's control rate, the whole command
+trajectory is rolled out open loop, and the terminal loss is pushed back
+through every step's equilibrium Jacobian by the multi-step adjoint.
 
-Methods, one per ``run`` invocation:
+Two ways of starting it, both ending in that same training:
 
-  nc       train_adjoint.py's single-horizon training from a random init.
-  rrt_nc   plan with RRT -> resample the path to the N control steps -> fit the
-           policy to it (the warm start) -> the same adjoint training.
-           Also records the planned path executed open-loop on the fine rod,
-           which is the "RRT only" result.
+  nc       from a random policy -- neural control on its own.
+  rrt_nc   global planning first: an RRT on a coarse rod (src/dlo_rrt.py)
+           finds a feasible path, the path is resampled to the N control steps
+           and the policy is fitted to it, and training then refines it.  The
+           plan executed open loop on the fine rod is recorded as well, which
+           is the "RRT only" result.  The idea is Yu et al.'s (reference/
+           Generalizable whole-body global manipulation ...): plan globally on
+           a coarse model, refine locally on the real one.
 
-The training loop is train_adjoint.py's single-horizon loop, line for line,
-with recording added; rollout_segment / BoundaryVelocityNet /
-final_midpoint_loss are imported from it, so the two cannot drift apart.
+With ``workspace.enabled`` in the config the right gripper is confined to that
+box in both stages: the planner only grows the tree inside it, and the neural
+control projects every command onto it before executing it (the penalty acts
+on the unprojected command, so the policy is still pulled back in).
 
-With ``workspace.enabled`` in the config (e.g. configs/workspace_3d.yaml) the
-right gripper is confined to that workspace in both stages: the planner only
-grows the tree inside it, and the neural control handles it as
-train_pipe.py does (each command projected onto it before it is executed,
-plus a penalty on what the policy asks for beyond it).
+Receding horizon (``rhc.enabled``) splits the horizon into segments that are
+optimized and committed one at a time; it is the scheme of the original
+submission code.  Single-horizon training is the default and the one the
+comparison uses.
+
+``--grad-method`` (default ``train.grad_method``, ``state``) picks the adjoint
+gradient: ``state`` is exact, ``proxy`` the frozen-tangent rate formulation
+(see src/implicit_grad_tools.py).
 
 Usage
 -----
-    python scripts/compare_global_local.py run --target T0 --method nc --seed 42 --out DIR
-    python scripts/compare_global_local.py run --target T0 --method rrt_nc --seed 42 --rrt-seed 0 --out DIR
-    python scripts/compare_global_local.py report --out DIR
+    python scripts/train_point_to_point.py                      # the config's target
+    python scripts/train_point_to_point.py --grad-method proxy
+    python scripts/train_point_to_point.py --target T1 --method rrt_nc --out DIR
+    python scripts/train_point_to_point.py report --out DIR
 """
 import sys
 from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / 'src'))
-sys.path.insert(0, str(_ROOT / 'scripts'))
 
+# Must run before numpy is imported: OpenBLAS goes multithreaded at about
+# n = 100, and for the small dense solves here (94x94 in 2D, 141x141 in 3D)
+# the threading overhead costs ~2000x. See src/blas_threads.py.
 from blas_threads import limit_blas_threads
 limit_blas_threads()
 
 import argparse
 import copy
 import json
+import os
 import time
 
 import numpy as np
 import torch
 import torch.optim as optim
+import matplotlib.pyplot as plt
 
+from compute_audit import from_config as audit_from_config
 from config import load_config
 from dlo_rrt import (RRTPlanner, PlannerParams, path_length, resample_path,
-                     stable_step, min_stiffness_eig)
+                     min_stiffness_eig)
 from env_factory import (
-    build_env, reset_env, env_dim, env_twist, end_control_dim, initial_control,
-    task_target, dloss_dq_free_node, node_position,
+    build_env, reset_env, env_dim, env_twist, control_dim, end_control_dim,
+    initial_control, task_target, material_summary, node_tracking_loss,
+    dloss_dq_free_node, node_position,
 )
-from implicit_grad_tools import multistep_adjoint_gradient
-from train_adjoint import BoundaryVelocityNet, rollout_segment, final_midpoint_loss
+from neural_control import (
+    BoundaryVelocityNet, reinit_net_, resolve_device, segment_lengths,
+    rollout, execute_controls, adjoint_gradient, surrogate_loss, apply_update,
+    fit_policy, workspace_bounds, workspace_projection, workspace_penalty,
+    set_audit, GRAD_METHODS,
+)
+from runlog import RunLogger
+from utils import visualize_results, maybe_save_trajectory_gif
+
+#: Redundancy audit for the inner-loop kernels.  Disabled (and unpatched)
+#: unless `audit.enabled` is set in the config or --audit is passed.
+AUDIT = set_audit(audit_from_config({}))
+
 
 #: Mid-node targets.  T0 is configs/default.yaml's task.target_xyz; the others
 #: spread over the reachable set (|target| < L/2 = 0.5 from the fixed end),
@@ -81,37 +105,9 @@ def resolve_target(name, cfg):
     return np.array([float(v) for v in name.split(",")])
 
 
-def workspace_bounds(cfg, dim, k):
-    """(lo, hi) over the right gripper's ``k`` controls, or None when the
-    workspace is off.  3D reads the ``*_3d`` keys (x, y, z, theta, phi), 2D the
-    plain ones (x, y, theta) as train_pipe.py does; a control neither lists
-    (the twist yaw) is unbounded."""
-    ws = cfg.get("workspace") or {}
-    if not ws.get("enabled", False):
-        return None
-    sfx = "_3d" if dim == 3 else ""
-    ang = np.array(ws[f"orientation_limits{sfx}"], dtype=float).reshape(-1, 2)
-    lo, hi = np.full(k, -np.inf), np.full(k, np.inf)
-    lo[:dim], hi[:dim] = ws[f"position_min{sfx}"], ws[f"position_max{sfx}"]
-    lo[dim:dim + len(ang)], hi[dim:dim + len(ang)] = ang[:, 0], ang[:, 1]
-    return lo, hi
-
-
-def workspace_projection(bounds, u0, k):
-    """train_pipe.py's projection, for this control layout: clamp the right
-    gripper's command onto the workspace before it is executed.
-
-    Straight-through: the backward pass is the identity, so the task gradient
-    is not cut off at the boundary (the penalty in train_p2p, on the
-    unprojected command, pulls the policy back in).
-    """
-    if bounds is None:
-        return None
-    lo = torch.full_like(u0, -float("inf"))
-    hi = torch.full_like(u0, float("inf"))
-    lo[k:] = torch.tensor(bounds[0], dtype=u0.dtype)
-    hi[k:] = torch.tensor(bounds[1], dtype=u0.dtype)
-    return lambda u: u + (torch.clamp(u, lo, hi) - u).detach()
+def final_midpoint_loss(q, dim, mid_node, target):
+    """Squared distance of the mid node to the target. Returns (loss, position)."""
+    return node_tracking_loss(q, dim, mid_node, target)
 
 
 def rollout_record(env, q_list, u_list, dim):
@@ -120,31 +116,6 @@ def rollout_record(env, q_list, u_list, dim):
     mids = np.array([mid0] + [node_position(q, dim, env.mid_node) for q in q_list])
     U = np.array([u.detach().cpu().numpy() if torch.is_tensor(u) else u for u in u_list])
     return mids, U
-
-
-def execute_controls(env, checkpoint, U, stable=False, J_out=None):
-    """Open-loop: step the env through the given absolute controls.
-
-    ``stable=True`` steps with dlo_rrt.stable_step (the planner's own model of
-    the rod); the default is the plain env.step the controller trains on.
-    ``J_out`` (a list) collects the equilibrium Jacobians.
-    """
-    env.set_state(checkpoint)
-    q_list, ok = [], True
-    for u in U:
-        if stable:
-            info = stable_step(env, u)
-            conv = info["stable"]
-        else:
-            _, _, info = env.step(u, use_inertia=False)
-            conv = info["converged"]
-        q_list.append(info["q"])
-        if J_out is not None:
-            J_out.append(info["J"])
-        if not conv:
-            ok = False
-            break
-    return q_list, ok
 
 
 def path_metrics(env, u0, U, q_list, target, dim, k, J_list=None, bounds=None):
@@ -198,79 +169,54 @@ def path_metrics(env, u0, U, q_list, target, dim, k, J_list=None, bounds=None):
     }
 
 
-def fit_policy(net, u0, U_target, k, iters=3000, lr=1e-2):
-    """Warm start: make the policy's integrated control reproduce ``U_target``.
-
-    The rollout integrates ``u_j = u_0 + dlam * sum_{i<=j} net(i/N)`` (see
-    rollout_segment), so this fits that cumulative sum, not the rates: errors
-    in the rates would otherwise pile up along the path.
-    """
-    N = len(U_target)
-    dlam = 1.0 / N
-    lam = torch.arange(N, dtype=torch.float32).unsqueeze(1) / N
-    tgt = torch.tensor(U_target[:, k:], dtype=torch.float32)
-    base = u0[k:].detach()
-    opt = optim.Adam(net.parameters(), lr=lr)
-    sched = optim.lr_scheduler.CosineAnnealingLR(opt, iters, eta_min=lr * 1e-2)
-    for _ in range(iters):
-        opt.zero_grad(set_to_none=True)
-        u = base + dlam * torch.cumsum(net(lam), dim=0)
-        loss = ((u - tgt) ** 2).mean()
-        loss.backward()
-        opt.step()
-        sched.step()
-    with torch.no_grad():
-        u = base + dlam * torch.cumsum(net(lam), dim=0)
-        err = (u - tgt).abs()
-    return {"fit_mse": float(loss.detach()), "fit_max_pos": float(err[:, :3].max()),
-            "fit_max_ang": float(err[:, 3:].max())}
-
-
 # --------------------------------------------------------------- training
 
-def train_p2p(env, checkpoint, net, u0, target, cfg, epochs, device, lr, log_every=10, tag="",
-              track_ref=None, track_weight=0.0, bounds=None, ws_weight=0.0):
-    """train_adjoint.py, single-horizon mode, with per-epoch recording.
+def train_single_horizon(env, checkpoint, net, u0, target, cfg, epochs, device, lr,
+                         run=None, log_every=10, tag="", track_ref=None, track_weight=0.0,
+                         bounds=None, ws_weight=0.0):
+    """One continuation over the whole horizon, trained for ``epochs`` updates.
 
-    ``checkpoint`` is the rest state every rollout starts from (train_adjoint
-    takes it right after reset_env).  ``track_ref`` (N, dim) with
-    ``track_weight > 0`` adds the paper's path-tracking term,
-    ``track_weight * mean_k |mid_k - track_ref_k|^2``, to the terminal loss:
-    the local stage then follows the global plan instead of only its end.
-    The recorded error stays the terminal one.
+    ``checkpoint`` is the state every rollout starts from (taken right after
+    reset_env).  ``track_ref`` (N, dim) with ``track_weight > 0`` adds the
+    paper's path-tracking term, ``track_weight * mean_k |mid_k - track_ref_k|^2``,
+    to the terminal loss: the local stage then follows the global plan instead
+    of only its end.  The recorded error stays the terminal one.
 
-    Workspace ``bounds`` (see workspace_bounds) are handled as in
-    train_pipe.py: every command is projected onto the workspace before it is
-    executed, and ``ws_weight * mean_k |violation_k|^2`` of the unprojected
-    command joins the surrogate.
+    Workspace ``bounds`` are handled as in train_pipe.py: every command is
+    projected onto the workspace before it is executed, and
+    ``ws_weight * mean_k |violation_k|^2`` of the *unprojected* command joins
+    the surrogate.
     """
-    dim, twist = env.dim, getattr(env, "twist", False)
+    dim = env.dim
     opt = optim.Adam(net.parameters(), lr=lr)
     N = env.Nsteps
     dlam = 1.0 / N
     n_end = net.out_dim
     project = workspace_projection(bounds, u0, n_end)
-    if bounds is not None:
-        lo_t = torch.tensor(bounds[0], dtype=u0.dtype, device=device)
-        hi_t = torch.tensor(bounds[1], dtype=u0.dtype, device=device)
     hist = {"loss": [], "error": [], "converged": [], "time": [], "mid_paths": [], "u_paths": [],
             "ws_loss": []}
     t_start = time.time()
     for ep in range(epochs):
+        AUDIT.set_context(epoch=ep)
+        AUDIT.checkpoint_report(None if run is None else run.artifact_dir, ep)
         env.set_state(checkpoint)
         opt.zero_grad(set_to_none=True)
 
-        u_list, q_list, J_list, converged = rollout_segment(env, net, u0, N, dlam, device,
-                                                            cfg.train.jac_reg, project=project)
-        if not converged:
-            # train_adjoint skips the update on a failed rollout, so the next
-            # epoch replays the very same rollout and fails at the same step,
-            # and so on to the end: every later epoch is this one again.  Record
-            # them as failed without re-running them (minutes each).
+        u_list, r_list, q_list, J_list, conv = rollout(env, net, u0, N, dlam, device,
+                                                       project=project)
+        if not conv.all():
+            # A failed rollout gets no update, so the next epoch replays the very
+            # same rollout and fails at the same step, and so on to the end:
+            # every later epoch is this one again.  Record them as failed without
+            # re-running them (minutes each).
             hist["stuck"] = {"epoch": ep, "step": len(u_list)}
             print(f"[{tag} ep {ep:03d}] Newton failed at step {len(u_list)}/{N}; no update "
                   f"follows, so all {epochs - ep} remaining epochs repeat it -- recorded as failed",
                   flush=True)
+            if run is not None:
+                run.log(epoch=ep, converged=False, steps=len(u_list),
+                        newton_failures=env.n_newton_failures,
+                        note="rollout aborted, no gradient step")
             for _ in range(ep, epochs):
                 for key, v in (("loss", np.nan), ("error", np.nan), ("converged", False),
                                ("time", time.time() - t_start), ("ws_loss", np.nan)):
@@ -280,7 +226,7 @@ def train_p2p(env, checkpoint, net, u0, target, cfg, epochs, device, lr, log_eve
             break
 
         q_final = q_list[-1]
-        free_index, fixed_index = env.free_index, env.fixed_index
+        free_index = env.free_index
         L_np, mid_pos = final_midpoint_loss(q_final, dim, env.mid_node, target)
 
         a_free_per_step = np.zeros((len(q_list), len(free_index)), dtype=float)
@@ -291,35 +237,16 @@ def train_p2p(env, checkpoint, net, u0, target, cfg, epochs, device, lr, log_eve
                 a_free_per_step[kk] += w * dloss_dq_free_node(qk, free_index, dim, env.mid_node,
                                                               track_ref[kk])
 
-        u_seq_np = np.stack([u.detach().cpu().numpy() for u in u_list], axis=0)
-        g_u_seq = multistep_adjoint_gradient(
-            u_seq_np, J_list, free_index, fixed_index, env.deltaL,
-            a_free_per_step, jac_reg=cfg.train.jac_reg, dim=dim, twist=twist,
-            boundary_rows=getattr(env, 'boundary_rows', None),
-        )
+        g_seq = adjoint_gradient(env, u_list, J_list, a_free_per_step, cfg.train.jac_reg,
+                                 grad_method=cfg.train.grad_method)
+        surrogate = surrogate_loss(u_list, r_list, g_seq, dlam, device,
+                                   grad_method=cfg.train.grad_method)
+        L_ws_t = workspace_penalty(net, u0, u_list, n_end, bounds, ws_weight, device, dlam)
+        surrogate = surrogate + L_ws_t
+        L_ws = float(L_ws_t.detach()) if bounds is not None else np.nan
+        apply_update(net, opt, surrogate)
 
-        surrogate = torch.zeros((), device=device)
-        for k, u_k in enumerate(u_list):
-            g_k = torch.tensor(g_u_seq[k], dtype=u_k.dtype, device=device)
-            surrogate = surrogate + torch.dot(u_k, g_k)
-        L_ws = np.nan
-        if bounds is not None:
-            # train_pipe.py's control_losses: the violation of what the policy
-            # asks for -- the previous command plus this step's rate, before
-            # the projection -- so the penalty sees what the projection clipped.
-            lams = torch.arange(len(u_list), dtype=u0.dtype, device=device)[:, None] / N
-            prev = torch.stack([u0] + u_list[:-1])[:, n_end:]
-            raw = prev + dlam * net(lams)
-            viol = torch.relu(raw - hi_t) + torch.relu(lo_t - raw)
-            L_ws_t = ws_weight * (viol ** 2).sum(dim=1).mean()
-            surrogate = surrogate + L_ws_t
-            L_ws = float(L_ws_t.detach())
-
-        surrogate.backward()
-        torch.nn.utils.clip_grad_norm_([p for p in net.parameters() if p.requires_grad], 1.0)
-        opt.step()
-
-        mids, U = rollout_record(env, q_list, u_list, dim)
+        mids, u_seq_np = rollout_record(env, q_list, u_list, dim)
         hist["loss"].append(float(L_np))
         hist["error"].append(float(L_np ** 0.5))
         hist["converged"].append(True)
@@ -327,17 +254,92 @@ def train_p2p(env, checkpoint, net, u0, target, cfg, epochs, device, lr, log_eve
         hist["mid_paths"].append(mids)
         hist["u_paths"].append(u_seq_np)
         hist["ws_loss"].append(L_ws)
+        if run is not None:
+            run.log(epoch=ep, loss=float(L_np), error=float(L_np ** 0.5),
+                    midpoint=mid_pos, target=target, converged=True, steps=len(u_list),
+                    newton_failures=env.n_newton_failures,
+                    u_final=u_list[-1].detach().cpu().numpy())
         if ep % log_every == 0 or ep == epochs - 1:
             print(f"[{tag} ep {ep:03d}] err={L_np ** 0.5 * 1e3:7.2f} mm  "
                   + ("" if bounds is None else f"ws_pen={L_ws:.2e}  ")
                   + f"t={time.time() - t_start:7.1f}s", flush=True)
 
-    # Final policy (after the last update), as optimize_segment reports it.
+    # Final policy (after the last update).
     env.set_state(checkpoint)
     with torch.no_grad():
-        u_list, q_list, J_list, converged = rollout_segment(env, net, u0, N, dlam, device,
-                                                            cfg.train.jac_reg, project=project)
-    return hist, u_list, q_list, J_list, converged, time.time() - t_start
+        u_list, _, q_list, J_list, conv = rollout(env, net, u0, N, dlam, device,
+                                                  project=project)
+    return hist, u_list, q_list, J_list, bool(conv.all()), time.time() - t_start
+
+
+def train_rhc(env, checkpoint, net, u0, target, cfg, device, lr, run=None, bounds=None,
+              ws_weight=0.0):
+    """Receding horizon: optimize one segment, commit it, warm-start the next.
+
+    Each segment gets its own (optionally reinitialized) policy, is optimized
+    for ``train.iterations_per_segment`` gradient steps against the same
+    overall target, and the optimized rollout is then committed -- the
+    simulator state and the control carry over to the next segment.  Mirrors
+    the MPC loop of the original adjoint_RHC_any_node.py.
+    """
+    N = env.Nsteps
+    dim = env.dim
+    seg_lens = segment_lengths(N, cfg.rhc.num_segments)
+    n_end = net.out_dim
+    project = workspace_projection(bounds, u0, n_end)
+    u_current = u0.clone()
+    opt = optim.Adam(net.parameters(), lr=lr)
+    losses, q_traj, q_last = [], [], None
+    t_start = time.time()
+
+    for seg_idx, T_seg in enumerate(seg_lens):
+        if cfg.rhc.reinit_policy_each_segment:
+            reinit_net_(net)
+            opt = optim.Adam([p for p in net.parameters() if p.requires_grad], lr=lr)
+        AUDIT.set_context(seg=seg_idx)
+        dlam = 1.0 / T_seg
+        print(f"\n{'=' * 70}\nRHC segment {seg_idx + 1}/{len(seg_lens)}  (T={T_seg})\n{'=' * 70}")
+
+        best = float("inf")
+        for it in range(cfg.train.iterations_per_segment):
+            AUDIT.set_context(epoch=it)
+            env.set_state(checkpoint)
+            opt.zero_grad(set_to_none=True)
+            u_list, r_list, q_list, J_list, conv = rollout(env, net, u_current, T_seg, dlam,
+                                                           device, project=project)
+            if not conv.all():
+                continue
+            L, _ = final_midpoint_loss(q_list[-1], dim, env.mid_node, target)
+            a_free = np.zeros((len(q_list), len(env.free_index)), dtype=float)
+            a_free[-1] = dloss_dq_free_node(q_list[-1], env.free_index, dim, env.mid_node, target)
+            g_seq = adjoint_gradient(env, u_list, J_list, a_free, cfg.train.jac_reg,
+                                     grad_method=cfg.train.grad_method)
+            surrogate = surrogate_loss(u_list, r_list, g_seq, dlam, device,
+                                       grad_method=cfg.train.grad_method)
+            surrogate = surrogate + workspace_penalty(net, u_current, u_list, n_end, bounds,
+                                                      ws_weight, device, dlam)
+            apply_update(net, opt, surrogate)
+            best = min(best, L)
+
+        # Commit: advance the persistent simulator and control state.
+        env.set_state(checkpoint)
+        with torch.no_grad():
+            u_list, _, q_list, _, conv = rollout(env, net, u_current, T_seg, dlam, device,
+                                                 project=project)
+        checkpoint = env.get_state()
+        u_current = u_list[-1].detach().clone()
+        q_last = q_list[-1]
+        q_traj.extend(q_list)
+        losses.append(best)
+        mid_pos = node_position(q_last, dim, env.mid_node)
+        print(f"[segment {seg_idx}] best_loss={best:.6e}  "
+              f"midpoint=({','.join(f'{v:.3f}' for v in mid_pos)})")
+        if run is not None:
+            run.log(segment=seg_idx, horizon=int(T_seg), best_loss=float(best),
+                    error=float(best ** 0.5), midpoint=mid_pos, target=target,
+                    converged=bool(conv.all()), newton_failures=env.n_newton_failures,
+                    u_final=u_current.detach().cpu().numpy())
+    return losses, q_traj, q_last, time.time() - t_start
 
 
 def plan_once(cfg, args, rrt_seed, env, checkpoint, u0_np, target, bounds=None):
@@ -425,20 +427,31 @@ def plan_once(cfg, args, rrt_seed, env, checkpoint, u0_np, target, bounds=None):
 
 # ------------------------------------------------------------------- run
 
-def cmd_run(args):
+def cmd_train(args):
     cfg = load_config(args.config)
+    if args.grad_method is not None:        # the command line wins over the YAML
+        cfg["train"]["grad_method"] = args.grad_method
+    grad_method = cfg.train.grad_method
+    if args.audit:
+        cfg.setdefault("audit", {})["enabled"] = True
+    if args.audit_kernels:
+        cfg.setdefault("audit", {})["trace_kernels"] = True
     torch.set_num_threads(1)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
-    device = torch.device("cpu")
 
     dim, twist = env_dim(cfg), env_twist(cfg)
     k = end_control_dim(dim, twist)
     target = resolve_target(args.target, cfg)
     env = build_env(cfg)
     reset_env(env, cfg)
+
+    global AUDIT
+    AUDIT = set_audit(audit_from_config(cfg).install(env))
+
     checkpoint = env.get_state()
     N = env.Nsteps
+    device = resolve_device(cfg.train.device if args.device is None else args.device)
     u0_np = initial_control(cfg)
     u0 = torch.tensor(u0_np, dtype=torch.float32, device=device)
     net = BoundaryVelocityNet(hidden=cfg.train.hidden, out_dim=k).to(device)
@@ -446,16 +459,40 @@ def cmd_run(args):
     if bounds is not None and (np.any(u0_np[k:] < bounds[0]) or np.any(u0_np[k:] > bounds[1])):
         raise SystemExit(f"the initial gripper pose {u0_np[k:]} is outside the workspace")
 
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
     lr = cfg.train.lr if args.lr is None else args.lr
+    epochs = cfg.train.epochs if args.epochs is None else args.epochs
     name = (f"{args.target}_{args.method}_s{args.seed}"
             + (f"_r{args.rrt_seed}" + (f"k{args.rrt_k}" if args.rrt_k > 1 else "")
                if args.method == "rrt_nc" else "")
             + ("" if args.lr is None else f"_lr{args.lr:g}")
-            + (f"_trk{args.track_weight:g}" if args.track_weight > 0 else ""))
+            + (f"_trk{args.track_weight:g}" if args.track_weight > 0 else "")
+            + ("_proxy" if grad_method == "proxy" else ""))
+
+    # RunLogger owns the TensorBoard writer: every result goes through
+    # run.log(), so the JSON record and the scalars cannot drift apart.
+    run = RunLogger(cfg, env=env, root=_ROOT, tag=name,
+                    enabled=bool((cfg.get("output") or {}).get("run_log", True)))
+    out = Path(args.out) if args.out else Path(run.artifact_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    print(f"Task: point-to-point  (adjoint neural control, method {args.method})")
+    print(f"Adjoint gradient: {grad_method}  "
+          f"({'--grad-method' if args.grad_method else 'train.grad_method'})")
+    print(f"Environment: {type(env).__name__}  (dim={dim}, twist={twist}, "
+          f"control={control_dim(dim, twist)}D)")
+    print(f"Rod material: {material_summary(cfg)}")
+    budget = (f"receding horizon, {cfg.rhc.num_segments} segments x "
+              f"{cfg.train.iterations_per_segment} updates" if cfg.rhc.enabled
+              else f"single horizon, {epochs} epochs")
+    print(f"Target: {np.round(target, 4)}   device: {device}   lr {lr:g}")
+    print(f"Horizon: {N} steps, {budget}")
+    print(f"Workspace: {'off' if bounds is None else 'on, penalty ' + str(args.ws_weight)}")
+    if AUDIT.enabled:
+        print("Compute audit: ON  (instrumented kernels are wrapped; expect some overhead)")
+
     arrays, summary = {}, {"target_name": args.target, "target": target.tolist(),
-                           "method": args.method, "seed": args.seed, "epochs": args.epochs,
+                           "method": args.method, "grad_method": grad_method,
+                           "seed": args.seed, "epochs": epochs,
                            "nv": int(env.nv), "N": int(N), "lr": float(lr),
                            "lr_default": float(cfg.train.lr),
                            "track_weight": float(args.track_weight),
@@ -466,7 +503,7 @@ def cmd_run(args):
                             "weight": float(args.ws_weight)}}
 
     if args.method == "rrt_nc":
-        # ---- global: RRT on the coarse rod, K seeds, keep the shortest path
+        # ---- global: RRT on the coarse rod, K seeds, keep the best path
         plans = []
         for rs in range(args.rrt_seed, args.rrt_seed + args.rrt_k):
             ps, pa = plan_once(cfg, args, rs, env, checkpoint, u0_np, target, bounds)
@@ -482,6 +519,7 @@ def cmd_run(args):
         if not ok:
             summary["status"] = "plan_failed"
             json.dump(summary, open(out / f"{name}.json", "w"), indent=1, default=float)
+            run.finish(status="plan_failed", task="point_to_point", target=target)
             return
         if args.rrt_select == "open_loop":
             ps, pa = min(ok, key=lambda x: x[0]["open_loop"]["final_error"])
@@ -497,11 +535,10 @@ def cmd_run(args):
             for key, v in rs_pa.items():
                 arrays[f"{key}_seed{rs_ps['seed']}"] = v
         arrays.update(pa)
-        U_plan = pa["U_plan"]
 
         # ---- warm start
         t_fit = time.time()
-        summary["fit"] = fit_policy(net, u0, U_plan, k, iters=args.fit_iters)
+        summary["fit"] = fit_policy(net, u0, pa["U_plan"], k, dim=dim, iters=args.fit_iters)
         summary["fit"]["time"] = time.time() - t_fit
         print(f"[{name}] policy fit: {summary['fit']}", flush=True)
 
@@ -512,40 +549,93 @@ def cmd_run(args):
             raise ValueError("--track-weight needs a plan to track (--method rrt_nc)")
         track_ref = arrays["plan_mid_trace"][1:]           # the plan's mid path, step by step
     env.n_newton_failures = 0
-    hist, u_list, q_list, J_list, conv, t_train = train_p2p(env, checkpoint, net, u0, target, cfg,
-                                                    args.epochs, device, lr, tag=name,
-                                                    track_ref=track_ref,
-                                                    track_weight=args.track_weight,
-                                                    bounds=bounds, ws_weight=args.ws_weight)
+
+    if cfg.rhc.enabled:
+        losses, q_traj, q_last, t_train = train_rhc(env, checkpoint, net, u0, target, cfg,
+                                                    device, lr, run=run, bounds=bounds,
+                                                    ws_weight=args.ws_weight)
+        final_loss = losses[-1] if losses else None
+        summary["segment_loss"] = losses
+        summary["final_converged"] = q_last is not None
+        q_list = q_traj
+        results = {'final_q': q_last, 'all_losses': losses,
+                   'final_error': float(final_loss ** 0.5) if final_loss is not None else float('nan')}
+    else:
+        hist, u_list, q_list, J_list, conv, t_train = train_single_horizon(
+            env, checkpoint, net, u0, target, cfg, epochs, device, lr, run=run, tag=name,
+            track_ref=track_ref, track_weight=args.track_weight,
+            bounds=bounds, ws_weight=args.ws_weight)
+        losses = hist["loss"]
+        summary["epoch_error"] = hist["error"]
+        summary["epoch_time"] = hist["time"]
+        if bounds is not None:
+            summary["epoch_ws_loss"] = hist["ws_loss"]
+        summary["stuck"] = hist.get("stuck")
+        summary["final_converged"] = bool(conv)
+        if conv:
+            U_fin = np.array([u.detach().cpu().numpy() for u in u_list])
+            summary["final"] = path_metrics(env, u0_np, U_fin, q_list, target, dim, k, J_list,
+                                            bounds)
+            arrays["final_mid"] = rollout_record(env, q_list, [], dim)[0]
+            arrays["final_U"] = U_fin
+            arrays["final_shapes"] = np.array([np.asarray(q)[:dim * env.nv].reshape(-1, dim)
+                                               for q in q_list[::25] + [q_list[-1]]])
+        # first converged epoch = the starting point of the local stage
+        first = next((i for i, c in enumerate(hist["converged"]) if c), None)
+        if first is not None:
+            J0 = []
+            q0, ok0 = execute_controls(env, checkpoint, hist["u_paths"][first], J_out=J0)
+            if ok0:
+                summary["start"] = path_metrics(env, u0_np, hist["u_paths"][first], q0, target,
+                                                dim, k, J0, bounds)
+        arrays["epoch_mid_paths"] = np.array(hist["mid_paths"], dtype=np.float32)
+        arrays["epoch_u_paths"] = np.array(hist["u_paths"], dtype=np.float32)
+        final_loss = next((l for l in reversed(losses) if np.isfinite(l)), None)
+        results = {'final_q': q_list[-1] if q_list else None,
+                   'final_error': float(final_loss ** 0.5) if final_loss is not None else float('nan'),
+                   'all_losses': losses}
+
     summary["train_time"] = t_train
-    summary["epoch_error"] = hist["error"]
-    summary["epoch_time"] = hist["time"]
-    if bounds is not None:
-        summary["epoch_ws_loss"] = hist["ws_loss"]
-    summary["stuck"] = hist.get("stuck")
-    summary["final_converged"] = bool(conv)
     summary["newton_failures_total"] = int(env.n_newton_failures)
-    if conv:
-        U_fin = np.array([u.detach().cpu().numpy() for u in u_list])
-        summary["final"] = path_metrics(env, u0_np, U_fin, q_list, target, dim, k, J_list, bounds)
-        arrays["final_mid"] = rollout_record(env, q_list, [], dim)[0]
-        arrays["final_U"] = U_fin
-        arrays["final_shapes"] = np.array([np.asarray(q)[:dim * env.nv].reshape(-1, dim)
-                                           for q in q_list[::25] + [q_list[-1]]])
-    # first converged epoch = the starting point of the local stage
-    first = next((i for i, c in enumerate(hist["converged"]) if c), None)
-    if first is not None:
-        J0 = []
-        q0, ok0 = execute_controls(env, checkpoint, hist["u_paths"][first], J_out=J0)
-        if ok0:
-            summary["start"] = path_metrics(env, u0_np, hist["u_paths"][first], q0, target, dim, k,
-                                            J0, bounds)
-    arrays["epoch_mid_paths"] = np.array(hist["mid_paths"], dtype=np.float32)
-    arrays["epoch_u_paths"] = np.array(hist["u_paths"], dtype=np.float32)
     summary["status"] = "done"
     np.savez_compressed(out / f"{name}.npz", **arrays)
     json.dump(summary, open(out / f"{name}.json", "w"), indent=1, default=float)
-    fe = summary.get("final", {}).get("final_error", np.nan)
+
+    # Before any plotting, so the audit's wall time is the training's.
+    if AUDIT.enabled:
+        AUDIT.restore()
+        print()
+        print(AUDIT.save(run.artifact_dir,
+                         save_records=bool(cfg.audit.get("save_records", True))))
+        print("Compute audit written to: "
+              + os.path.join(run.artifact_dir, 'compute_audit.txt'))
+
+    if results['final_q'] is not None:
+        visualize_results(results, env, target, save_path=str(run.artifact_dir))
+        maybe_save_trajectory_gif(cfg, q_list, env, target, save_path=str(run.artifact_dir),
+                                  title='DLO point-to-point')
+    if losses:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.plot(np.arange(len(losses)), losses, linewidth=1.5, color="steelblue")
+        ax.set_xlabel("RHC segment" if cfg.rhc.enabled else "Epoch")
+        ax.set_ylabel("Loss")
+        ax.set_title("Training Loss Curve")
+        ax.grid(True, linestyle="--", alpha=0.5)
+        fig.tight_layout()
+        fig.savefig(os.path.join(run.artifact_dir, 'loss_curve.png'), dpi=150)
+        plt.close(fig)
+
+    run.finish(task="point_to_point",
+               mode="rhc" if cfg.rhc.enabled else "single_horizon",
+               method=args.method, grad_method=grad_method,
+               final_loss=None if final_loss is None else float(final_loss),
+               final_error=results['final_error'],
+               target=target, losses=[float(l) for l in losses],
+               best_loss=float(np.nanmin(losses)) if losses else None,
+               epochs_recorded=len(losses),
+               newton_failures_total=env.n_newton_failures,
+               device=str(device))
+    fe = summary.get("final", {}).get("final_error", results['final_error'])
     print(f"[{name}] done: final err={fe * 1e3:.2f} mm, train {t_train:.0f}s", flush=True)
 
 
@@ -593,7 +683,7 @@ def _first_below(err, thr):
 
 
 def _failed(r):
-    """Failed-epoch count, with where the run got stuck (see train_p2p)."""
+    """Failed-epoch count, with where the run got stuck (see train_single_horizon)."""
     n = sum(1 for c in r["epoch_error"] if c is None or not np.isfinite(c))
     st = r.get("stuck")
     return f"{n} (stuck ep {st['epoch']}, step {st['step']})" if st else str(n)
@@ -611,11 +701,22 @@ def _errors_mm(r):
 
 
 def load_runs(out):
+    """Every point-to-point job record in ``out``.
+
+    A job is recognised by its own fields, so a directory that also holds a
+    run's own files (summary.json, compute_audit.json, another task's job) is
+    read without tripping over them.
+    """
     runs = []
     for js in sorted(out.glob("*.json")):
-        if js.name.startswith("report"):
+        try:
+            s = json.load(open(js))
+        except (ValueError, OSError):
             continue
-        s = json.load(open(js))
+        if not (isinstance(s, dict) and {"target_name", "method"} <= set(s)):
+            continue
+        if s.get("status") == "done" and "epoch_error" not in s:
+            continue      # an RHC run: per-segment, so there is no epoch curve
         npz = js.with_suffix(".npz")
         s["_arrays"] = dict(np.load(npz)) if npz.exists() else {}
         s["_name"] = js.stem
@@ -677,7 +778,7 @@ def _style(ax):
     ax.tick_params(colors=INK2, labelsize=8)
 
 
-def report(out):
+def report(out, config=None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -719,7 +820,7 @@ def report(out):
     # checkpoint would keep): with branch jumps and Newton dead ends, the last
     # epoch often says little about what the method found.  Its controls are
     # re-simulated on the fine rod for the full metrics, and cached.
-    cfg = load_config(None)
+    cfg = load_config(config)      # the rod the jobs ran on, for the replays
     env = build_env(cfg)
     reset_env(env, cfg)
     checkpoint = env.get_state()
@@ -994,41 +1095,55 @@ def _tangent(angles):
 # ---------------------------------------------------------------- main
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run")
-    r.add_argument("--config", default=None)
-    r.add_argument("--target", default="T0", help="T0..T5 or 'x,y,z'")
-    r.add_argument("--method", choices=["nc", "rrt_nc"], required=True)
-    r.add_argument("--seed", type=int, default=42, help="policy init seed (train.seed)")
-    r.add_argument("--rrt-seed", type=int, default=0)
-    r.add_argument("--rrt-k", type=int, default=1,
-                   help="plan with seeds rrt_seed..rrt_seed+K-1 and keep one (--rrt-select)")
-    r.add_argument("--rrt-select", choices=["length", "open_loop"], default="length",
-                   help="length: the shortest plan; open_loop: of every plan's shortened and "
-                        "raw tree path, the one ending nearest the target on the fine rod")
-    r.add_argument("--epochs", type=int, default=None, help="default: train.epochs")
-    r.add_argument("--lr", type=float, default=None,
-                   help="learning rate of the adjoint stage (default: train.lr)")
-    r.add_argument("--fit-iters", type=int, default=5000, help="warm-start fitting iterations")
-    r.add_argument("--track-weight", type=float, default=0.0,
-                   help="rrt_nc: weight of the term tracking the planned mid-node path")
-    r.add_argument("--plan-nv", type=int, default=11, help="nodes of the planner's coarse rod")
-    r.add_argument("--plan-tol", type=float, default=0.02, help="[m] planner goal tolerance")
-    r.add_argument("--plan-time", type=float, default=600.0, help="[s] planner time limit")
-    r.add_argument("--plan-newton-iter", type=int, default=100)
-    r.add_argument("--ws-weight", type=float, default=100.0,
-                   help="workspace penalty weight (task.pipe.weights.workspace's default)")
-    r.add_argument("--out", required=True)
-    rp = sub.add_parser("report")
-    rp.add_argument("--out", required=True)
-    args = ap.parse_args()
-    if args.cmd == "run":
-        if args.epochs is None:
-            args.epochs = int(load_config(args.config).train.epochs)
-        cmd_run(args)
+    cmds = ("train", "report")
+    argv = sys.argv[1:]
+    cmd = argv.pop(0) if argv and argv[0] in cmds else "train"
+
+    ap = argparse.ArgumentParser(description=f"point-to-point neural control ({cmd})")
+    ap.add_argument("--config", default=None, help="YAML config over configs/default.yaml")
+    ap.add_argument("--out", default=None,
+                    help="directory the job's json/npz go to (default: the run directory); "
+                         "for `report`, the directory holding them")
+    if cmd == "train":
+        ap.add_argument("--method", choices=("nc", "rrt_nc"), default="nc")
+        ap.add_argument("--grad-method", choices=GRAD_METHODS, default=None,
+                        help="adjoint gradient: state (exact) or proxy (frozen tangent); "
+                             "default: train.grad_method")
+        ap.add_argument("--target", default="T0",
+                        help="a name from TARGETS, or 'x,y,z' (T0 = the config's target)")
+        ap.add_argument("--seed", type=int, default=0, help="policy seed")
+        ap.add_argument("--epochs", type=int, default=None, help="default: train.epochs")
+        ap.add_argument("--lr", type=float, default=None,
+                        help="default: train.lr; fine-tuning a plan wants ~1e-4")
+        ap.add_argument("--device", default=None, help="default: train.device")
+        ap.add_argument("--ws-weight", type=float, default=100.0,
+                        help="weight of the workspace-violation penalty")
+        ap.add_argument("--track-weight", type=float, default=0.0,
+                        help="weight of the term tracking the planned mid path (rrt_nc only)")
+        ap.add_argument("--rrt-seed", type=int, default=0, help="first planner seed")
+        ap.add_argument("--rrt-k", type=int, default=1, help="how many planner seeds to try")
+        ap.add_argument("--rrt-select", choices=("length", "open_loop"), default="length",
+                        help="pick the plan by path length, or by its open-loop error on the "
+                             "fine rod (which catches shortcuts that change branch)")
+        ap.add_argument("--plan-nv", type=int, default=11, help="nodes of the planner's rod")
+        ap.add_argument("--plan-tol", type=float, default=0.01, help="[m] planner goal tolerance")
+        ap.add_argument("--plan-time", type=float, default=600.0, help="[s] per planner seed")
+        ap.add_argument("--plan-newton-iter", type=int, default=200)
+        ap.add_argument("--fit-iters", type=int, default=3000,
+                        help="Adam iterations fitting the policy to the plan")
+        ap.add_argument("--audit", action="store_true",
+                        help="audit the inner-loop kernels for repeated computation "
+                             "(src/compute_audit.py)")
+        ap.add_argument("--audit-kernels", action="store_true",
+                        help="with --audit, also instrument the per-stencil kernels")
+    args = ap.parse_args(argv)
+
+    if cmd == "report":
+        if args.out is None:
+            raise SystemExit("report needs --out, the directory holding the job files")
+        report(Path(args.out), args.config)
     else:
-        report(Path(args.out))
+        cmd_train(args)
 
 
 if __name__ == "__main__":

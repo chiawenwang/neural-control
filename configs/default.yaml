@@ -106,7 +106,7 @@ materials:
   # deformable linear object such as a cable. EI = 2.45e-3 N*m^2, so gravity
   # dominates and the rod hangs in a large-deflection shape. That regime is
   # harder for the equilibrium solve than soft_strip is, not easier.
-  # (Nominal values; only smoke-tested with a short 2D CMA-ES run.)
+  # (Nominal values; only smoke-tested with a short 2D run.)
   silicone_cord:
     R_outer: 0.005
     r_inner: 0.0
@@ -154,11 +154,13 @@ rod:
                               # on a table, gravity normal to the plane.
 
   # 3D only: torsion. false -> the rod bends in space but cannot twist, and each
-  # gripper has 5 control DOFs (x, y, z, theta, phi). true -> every edge gains a
-  # twist angle (DOFs become 4*nv - 1) and each gripper gains a yaw, the spin
-  # about its own tangent, for 6 DOFs per end and a 12D control vector. Twisting
-  # couples back to the shape through the reference twist, so yaw is a real
-  # control input rather than a dead one. See src/rodframes.py.
+  # gripper has 5 control DOFs (x, y, z, theta, phi). true -> each gripper gains
+  # a yaw, the spin about its own tangent, for 6 DOFs per end and a 12D control
+  # vector; the two yaws are the only angles the DOF vector carries (DOFs become
+  # 3*nv + 2), since the material frame in between is quasistatic and its twist
+  # uniform. Twisting couples back to the shape through the Bishop frame's
+  # holonomy, so yaw is a real control input rather than a dead one.
+  # See src/rodframes.py (Bergou et al. 2008, reference/).
   #
   # The torsional stiffness GJ = EI / (1 + poisson) comes from the material
   # preset; validate the model itself with scripts/check_twist.py.
@@ -216,10 +218,11 @@ start:
 # Control task definition.
 # What the rod is asked to do.
 #
-# WHICH TASK RUNS IS DECIDED BY THE SCRIPT YOU RUN, not by anything in here:
-#   scripts/train_adjoint.py   point-to-point, adjoint-gradient MLP
-#   scripts/train_cmaes.py     point-to-point, CMA-ES polynomial
-#   scripts/train_tracking.py  trajectory tracking, adjoint-gradient MLP
+# WHICH TASK RUNS IS DECIDED BY THE SCRIPT YOU RUN, not by anything in here.
+# All three are the same adjoint neural control (src/neural_control.py):
+#   scripts/train_point_to_point.py  the mid node reaches a target
+#   scripts/train_tracking.py        the mid node follows a path
+#   scripts/train_pipe.py            a free tip is pushed through a pipe
 #
 # `target_*` is shared: point-to-point drives the mid node there, and the
 # default tracking path (`segment`) ends there. Keys that only one task reads
@@ -227,7 +230,7 @@ start:
 task:
   target_xy: [0.2, 0.4]          # 2D: target position for the mid node
   target_xyz: [0.35, 0.1, 0.1]   # 3D: target position for the mid node
-  # Read only by scripts/train_tracking.py; inert for point-to-point.
+  # Read only by scripts/train_tracking.py; inert for the other tasks.
   tracking:
     # Which path the mid node should follow.
     #   segment     a straight line from where the mid node actually starts to
@@ -238,7 +241,9 @@ task:
     #   circle | figure8 | line   fixed curves in the vertical plane (x-y in
     #               2D, x-z in 3D). They sit where they are defined regardless
     #               of the rod, so the run starts by travelling to reach step 0.
-    #   helix | figure8_3d        genuinely 3D, 3D only.
+    # Lines, sine waves and arcs that start at the mid node are named presets
+    # in scripts/train_tracking.py (--path), which is also what its RRT
+    # comparison verifies for feasibility.
     trajectory_type: segment
     weight: 1.0                # per-step loss weight
   # Read only by scripts/train_pipe.py: drive the free tip (2D, grasp_mode:
@@ -327,10 +332,13 @@ friction:
 # beyond it, and checks the executed trajectory against
 # task.pipe.workspace_tolerance at the end. Also used before training to check that the feed it allows along
 # the entry direction is enough to reach the target at all.
-# In 3D, scripts/compare_global_local.py keeps both its RRT planner and the
-# neural control inside it, the latter projected and penalized the same way.
+# All three task scripts read it: the gripper command is projected onto the
+# workspace before it is executed and the unprojected command is penalized,
+# and where an RRT plans first it grows its tree inside the same box.
+# On by default: experiments run in this bounded workspace unless a config
+# turns it off (configs/no_workspace.yaml).
 workspace:
-  enabled: false
+  enabled: true
   position_min: [0.48, -0.05]    # [m]
   position_max: [1.05, 0.05]     # [m]
   orientation_limits: [-0.35, 0.35]   # gripper theta [rad]
@@ -396,33 +404,35 @@ train:
   seed: 42
   device: auto                 # auto | cpu | cuda | mps
   jac_reg: 1.0e-6               # equilibrium-Jacobian regularization for numerical stability
-  # How the multi-step adjoint spreads each step's loss over the controls
-  # (src/implicit_grad_tools.py: multistep_adjoint_gradient). Read by
-  # scripts/train_pipe.py; the other scripts always use `branch`.
-  #   branch  the original: a step's loss is carried back onto every earlier
-  #           control, assuming perturbations persist along the branch
-  #   local   a step's loss acts on that step's control only -- exact when each
-  #           equilibrium depends on the current control alone (quasi-static,
-  #           frictionless)
-  adjoint_mode: branch
+  # How the multi-step adjoint turns the per-step losses into the policy's
+  # gradient (src/implicit_grad_tools.py: multistep_adjoint_gradient). All
+  # three task scripts read it; their --grad-method flag overrides it.
+  #   state  exact: each step's loss is projected by that step's own
+  #          sensitivity S_k and attached to the executed command u_k (on one
+  #          equilibrium branch the state depends only on the current boundary)
+  #   proxy  frozen tangent, the rate formulation: the future losses are summed
+  #          first, projected by the S_j of the step that applied the control,
+  #          and attached to the rate r_j; exact only while S stays constant
+  #          along the path, and finer steps do not remove the error
+  grad_method: state
 
 # Output / logging.
 output:
   experiment_name: dlo_final_shape
 
   # Per-run training log. Each run writes a self-contained directory under
-  # experiments/<experiment_name>/runs/<timestamp>/ holding the resolved
+  # experiments/<experiment_name>/runs/<timestamp>-<job>/ holding the resolved
   # config, the environment/git/device metadata, one JSON record per epoch or
   # segment (flushed as it goes, so a killed run keeps what it had), and a
   # final summary that also records how the run ended. Read one back with
   # src/runlog.py's load_run().
   run_log: true
 
-  # Animation of the final (committed) control rollout, written next to
-  # outputs/neural_control_result.png as outputs/neural_control_animation.gif.
+  # Animation of the final (committed) control rollout, written into the run's
+  # own directory next to its figures, as neural_control_animation.gif.
   # It shows the rod frame by frame over the whole horizon, plus the midpoint,
-  # its path so far, and the target. Rendering costs a few seconds, so it is
-  # off by default.
+  # its path so far, and the target. Rendering costs a few seconds per run;
+  # set it to false for sweeps.
   save_gif: true
   gif_fps: 20              # playback speed [frames/s]
   gif_dpi: 100             # resolution; 150+ gets large quickly

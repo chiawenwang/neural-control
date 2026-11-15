@@ -26,7 +26,7 @@ This module must be imported *before* NumPy, because the BLAS backend reads
 these variables when its shared library is loaded.  ``setdefault`` is used so
 a value already exported in the shell always wins::
 
-    OPENBLAS_NUM_THREADS=4 python scripts/train_adjoint.py
+    OPENBLAS_NUM_THREADS=4 python scripts/train_point_to_point.py
 """
 from __future__ import annotations
 

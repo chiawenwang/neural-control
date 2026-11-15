@@ -106,10 +106,10 @@ task:
 
 train:
   # Frictionless and quasi-static, so each equilibrium depends on the current
-  # gripper pose alone and the per-step adjoint is exact. `branch` credits early
-  # controls with the straight segment's lateral sensitivity and steers the
-  # gripper sideways for a target the walls decide (see default.yaml).
-  adjoint_mode: local
+  # gripper pose alone and the `state` adjoint is exact. The old `branch` mode
+  # (since removed) credited early controls with the straight segment's lateral
+  # sensitivity and steered the gripper sideways for a target the walls decide.
+  grad_method: state
   epochs: 60                   # short, for debugging
   lr: 0.001                    # 0.01 and 0.003 overshoot: the gripper swings out
                                # of the workspace and jams the rod at the entry face

@@ -603,7 +603,7 @@ def resample_path(U, N, k, dim, w_rot=0.2):
     equilibrium branch).
 
     Row ``j`` is the control of rollout step ``j``, i.e. at ``lambda = (j+1)/N``
-    (``train_adjoint.rollout_segment`` integrates before it steps), so the last
+    (``neural_control.rollout`` integrates before it steps), so the last
     row is the final waypoint and ``U[0]`` itself (the start) is not repeated.
     """
     U = np.array(U, dtype=float)

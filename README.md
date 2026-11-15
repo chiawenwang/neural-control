@@ -6,9 +6,10 @@ state is defined *implicitly* by an equilibrium condition (`G(x, z) = 0`)
 rather than an explicit forward dynamics model.
 
 This branch (`neural-control-core`) contains only the core method: the
-equilibrium simulator, the adjoint gradient tools, and the training scripts
-needed to reproduce the paper's point-to-point and trajectory-tracking
-tasks.
+equilibrium simulator, the adjoint gradient tools, and one training script per
+task — the paper's point-to-point and trajectory-tracking tasks, plus pipe
+insertion. All three are the same adjoint neural control under different
+losses.
 
 ## How it works
 
@@ -23,49 +24,68 @@ boundary-actuation controller with those gradients:
    jumping between them. Pick one with `env.dim` in the config (see
    [2D vs. 3D](#2d-vs-3d)).
 2. **`src/implicit_grad_tools.py`** — computes the adjoint gradient of the
-   loss w.r.t. the controls, and chains per-step sensitivities across the
-   whole horizon (`multistep_adjoint_gradient()`) so every control step gets
-   credit/blame proportional to its own equilibrium Jacobian.
-3. **Controller** — maps a continuation parameter `λ ∈ [0, 1]` (progress
-   through the control horizon) to boundary actuation rates. Two options:
-   - MLP, trained with adjoint gradients (`train_adjoint.py`, `train_tracking.py`)
-   - low-order polynomial, trained gradient-free with CMA-ES
-     (`train_cmaes.py`) — simpler and the recommended starting point.
+   loss w.r.t. the controls, chaining the per-step equilibrium sensitivities
+   across the whole horizon (`multistep_adjoint_gradient()`).
+   `train.grad_method` picks how: `state` (exact, the default) or `proxy`
+   (frozen tangent); see
+   [Adjoint gradient: state or proxy](#adjoint-gradient-state-or-proxy).
+3. **`src/neural_control.py`** — the controller and the training step, shared
+   by all three task scripts: an MLP maps a continuation parameter
+   `λ ∈ [0, 1]` (progress through the control horizon) to boundary actuation
+   rates, the rates are integrated into commands, and the adjoint gradient is
+   handed to autograd as a surrogate, attached to the commands (`state`) or
+   to the rates (`proxy`). The three tasks differ only in their loss.
 4. **Receding-horizon control (RHC)** — optional (`rhc.enabled` in
    `configs/default.yaml`). Splits the horizon into shorter segments,
    optimized and committed one at a time, warm-started from the previous
    segment's end state. Bounds error accumulation over long horizons.
-   `train_cmaes.py` always uses this scheme.
+5. **Global planning first** — optional (`--method rrt_nc`). An RRT on a
+   coarse rod (`src/dlo_rrt.py`) finds a feasible path, the policy is fitted
+   to it, and the same training refines it. Point-to-point and tracking both
+   offer it, with a `report` command that compares the two starts.
 
 ## Repository layout
 
 ```
 neural-control/
 ├── configs/
-│   └── default.yaml            # Global config: rod/task/start pose/RHC/training params
+│   ├── default.yaml            # Global config: rod/task/start pose/RHC/training params
+│   ├── example_3d.yaml         # Minimal 3D override (and example_3d_twist.yaml, with torsion)
+│   ├── task_90deg_pipe.yaml    # The pipe task
+│   └── workspace_3d.yaml       # Gripper workspace variants (and no_workspace.yaml)
 ├── src/
 │   ├── SimulatorEnv_2D.py      # Equilibrium (Newton-Raphson) rod simulator, 2D
 │   ├── SimulatorEnv_3D.py      # Equilibrium (Newton-Raphson) rod simulator, 3D
+│   ├── newton.py               # The globalized Newton solve both simulators share
 │   ├── energy.py               # Pluggable elastic-energy models (der, der3d, der3d_twist)
-│   ├── rodframes.py            # Material frames + reference twist (torsion)
-│   ├── contact.py              # Penalty-based obstacle contact forces (Circle/Sphere)
+│   ├── rodframes.py            # Bishop frame + twist holonomy (torsion)
+│   ├── contact.py              # Penalty-based obstacle contact forces (Circle/Sphere/pipe)
 │   ├── implicit_grad_tools.py  # Adjoint / implicit-gradient computation (2D and 3D)
+│   ├── neural_control.py       # The controller, the rollout and the adjoint update
+│   ├── dlo_rrt.py              # RRT on a coarse rod, for the global-planning start
 │   ├── env_factory.py          # dim-aware env/control/target construction
 │   ├── config.py               # YAML config loader (deep-merges onto configs/default.yaml)
+│   ├── blas_threads.py         # Pins BLAS to one thread (see Performance)
 │   ├── compute_audit.py        # Redundancy audit: how much inner-loop work is a repeat
+│   ├── runlog.py               # Per-run training log (JSONL + TensorBoard)
 │   ├── render_neurips.py       # DLO rendering utilities (2D)
 │   └── utils.py                # Result visualization
 ├── scripts/
-│   ├── train_cmaes.py          # Task 1: point-to-point, CMA-ES controller (recommended)
-│   ├── train_adjoint.py        # Task 1: point-to-point, adjoint-gradient MLP controller
-│   ├── train_tracking.py       # Task 2: trajectory tracking, adjoint-gradient MLP controller
+│   ├── train_point_to_point.py # Task 1: the mid node reaches a target
+│   ├── train_tracking.py       # Task 2: the mid node follows a path
+│   ├── train_pipe.py           # Task 3: a free tip is pushed through a 90-degree pipe
 │   ├── check_twist.py          # Finite-difference validation of the torsion model
+│   ├── check_pipe_contact.py   # Finite-difference validation of the pipe contact model
+│   ├── check_grad_method.py    # The two adjoint gradients vs finite differences / by hand
 │   ├── snapshot_overlay.py     # Multi-frame DLO configuration visualization
 │   └── test_gpu.py             # MPS/GPU availability check
 ├── img/                        # README figures
-└── outputs/                    # Generated figures (created at runtime)
-    ├── neural_control_result.png     # final shape + loss curve
-    └── neural_control_animation.gif  # rollout animation (output.save_gif: true)
+└── experiments/                # Created at runtime: one directory per run
+    └── <experiment_name>/runs/<timestamp>-<job>/
+        ├── config.yaml, meta.json, log.jsonl, summary.json
+        ├── <job>.json / <job>.npz        # the run's record, for `report`
+        ├── neural_control_result.png     # final shape + loss curve
+        └── neural_control_animation.gif  # rollout animation (output.save_gif: true)
 ```
 
 ## Choosing a rod material
@@ -120,7 +140,7 @@ conda activate neural-control
 ```
 
 or install directly with pip: `numpy`, `matplotlib`, `tqdm`, `torch`,
-`tensorboard`, `cma`, `pyyaml`.
+`tensorboard`, `pyyaml`.
 
 ## Configuration
 
@@ -129,11 +149,12 @@ All three training scripts are driven by a single YAML config,
 `--config path/to/your.yaml` with a file that only overrides the fields you
 care about (deep-merged onto the defaults). Key sections:
 
-**The script decides the task, not the config.** `train_adjoint.py` and
-`train_cmaes.py` always do point-to-point; `train_tracking.py` always does
-tracking. Each prints which one it is at startup. `task.target_*` is shared —
-point-to-point drives the mid node there, and the default tracking path ends
-there — while keys only one task reads are nested under it (`task.tracking:`).
+**The script decides the task, not the config.** `train_point_to_point.py`
+always does point-to-point, `train_tracking.py` always does tracking,
+`train_pipe.py` always does the pipe. Each prints which one it is at startup.
+`task.target_*` is shared — point-to-point drives the mid node there, and the
+default tracking path ends there — while keys only one task reads are nested
+under it (`task.tracking:`, `task.pipe:`).
 
 A user config may only set keys `configs/default.yaml` defines; anything else
 raises, with the nearest defined key suggested:
@@ -167,7 +188,7 @@ gradients, contact, and the plots follow it.
 |                     | `dim: 2`                 | `dim: 3`                       | `dim: 3` + `rod.twist`                |
 | ------------------- | ------------------------ | ------------------------------ | ------------------------------------- |
 | simulator           | `SimulatorEnv_2D`        | `SimulatorEnv_3D`              | `SimulatorEnv_3D`                     |
-| DOFs                | `2·nv`                   | `3·nv`                         | `4·nv − 1` (+1 twist angle per edge)  |
+| DOFs                | `2·nv`                   | `3·nv`                         | `3·nv + 2` (+ the two gripper yaws)   |
 | control per rod end | `(x, y, θ)`              | `(x, y, z, θ, φ)`              | `(x, y, z, θ, φ, yaw)`                |
 | full control vector | 6D                       | 10D                            | 12D                                   |
 | elastic energy      | `der`                    | `der3d`                        | `der3d_twist`                         |
@@ -209,11 +230,10 @@ That matters for the tracking curves. `circle`, `figure8` and `line` are meant
 to stand up in the *vertical* plane — a circle centred above the rod is a lift
 against gravity, not a horizontal sweep — so they follow whichever axis gravity
 is on: **x-y in 2D, x-z in 3D**. Their in-plane coordinates are identical
-between the two (verified exactly), only the plane differs. `helix` (a
-horizontal circle that climbs) and `figure8_3d` (the vertical figure-8 plus a
-lateral wobble) are genuinely three-dimensional and 3D-only. `segment` (the
-default, see [Tracking targets](#tracking-targets)) is anchored to the rod
-rather than to an axis, so the convention does not affect it.
+between the two (verified exactly), only the plane differs. `segment` (the
+default, see [Tracking targets](#tracking-targets)) and the named presets of
+`train_tracking.py` are anchored to the rod rather than to an axis, so the
+convention does not affect them.
 
 If you want the two simulators to agree node for node — useful for
 cross-checking them — set
@@ -256,7 +276,7 @@ The variables are set with `setdefault`, so the shell always wins if you want
 something else:
 
 ```bash
-OPENBLAS_NUM_THREADS=4 python scripts/train_adjoint.py --config configs/example_3d.yaml
+OPENBLAS_NUM_THREADS=4 python scripts/train_point_to_point.py --config configs/example_3d.yaml
 ```
 
 If you drive the simulator from your own script rather than `scripts/train_*.py`,
@@ -283,8 +303,8 @@ same input computed again, or one close enough that the previous result could
 have been reused. [`src/compute_audit.py`](src/compute_audit.py) answers that.
 
 ```bash
-python scripts/train_adjoint.py --config configs/example_3d_twist.yaml --audit
-python scripts/train_adjoint.py --config configs/example_3d_twist.yaml --audit --audit-kernels
+python scripts/train_point_to_point.py --config configs/example_3d_twist.yaml --audit
+python scripts/train_point_to_point.py --config configs/example_3d_twist.yaml --audit --audit-kernels
 ```
 
 It wraps the inner-loop kernels — `env.step`, the Newton solve, the
@@ -311,7 +331,7 @@ Three tables come out of it:
   question, answered with a number instead of a hunch.
 
 `--audit-kernels` additionally instruments the per-stencil kernels
-(`_bend_stencil`, `psi_grad_hess`, `RodFrames.reference_twist`). They are called
+(`_bend_stencil`, `psi_grad_hess`, `holonomy`). They are called
 millions of times in a full run, so the instrumentation itself becomes
 measurable; it is worth turning on once to see whether the Hessian assembly is
 repeating the gradient's work.
@@ -345,20 +365,20 @@ Measured over 8 epochs of the 3D twisting rod (nv=21, N=100):
 
 | kernel | calls | byte-identical to an earlier call |
 | ------ | ----- | --------------------------------- |
-| `psi_grad_hess`         | 301 785 | **64.4%** |
-| `RodFrames.reference_twist` | 15 891 | **64.4%** |
-| `_bend_stencil`         | 301 929 | **68.8%** |
-| `_stretch_stencil`      | 317 820 | **71.9%** |
-| `energy.gradient`       | 10 378  | **45.4%** |
+| `_stretch_stencil`      | 457 500 | **77.3%** |
+| `_bend_stencil`         | 434 625 | **74.8%** |
+| `psi_grad_hess`         | 430 825 | **74.6%** |
+| `holonomy`              | 22 875  | **71.3%** |
+| `energy.gradient`       | 14 821  | **55.6%** |
 
-Roughly two thirds of the stencil work is a literal recomputation, and it comes
-from two places that compound:
+About three quarters of the stencil work is a literal recomputation, and it
+comes from two places that compound:
 
 1. `RodEnergy.force_and_jacobian` is `(-gradient(q), -hessian(q))`, and for the
-   twisting rod both halves walk the same stencils — `reference_twist` once
-   each, `psi_grad_hess` once per interior node each — and `psi_grad_hess`
-   returns the gradient *and* the Hessian of `ψ` either way. So the Hessian
-   assembly recomputes everything the gradient assembly just computed.
+   twisting rod both halves walk the same stencils — the Bishop transport chain
+   once each, `psi_grad_hess` once per interior node each — and `psi_grad_hess`
+   returns the gradient *and* the Hessian of its stencil either way. So the
+   Hessian assembly recomputes everything the gradient assembly just computed.
 2. The Newton line search evaluates `force(q_try)`, and when that step is
    accepted the next iteration immediately calls `force_and_jacobian(q)` at the
    *same* `q` — hence `energy.gradient`'s 45%.
@@ -370,9 +390,9 @@ inside a single step.
 
 ## Tracking targets
 
-`task.trajectory_type` picks the path the mid node should follow. The default
+`task.tracking.trajectory_type` picks the path the mid node should follow. The default
 is **`segment`**: a straight line from where the mid node *actually starts* to
-`task.target_xy` / `target_xyz` — the same point the `point_to_point` task aims
+`task.target_xy` / `target_xyz` — the same point the point-to-point task aims
 at.
 
 That anchoring is the point. The fixed curves sit wherever their formula puts
@@ -382,7 +402,8 @@ configuration:
 | `trajectory_type` | distance from the rod at step 0 |
 | --- | --- |
 | `segment` | **0.000 m** |
-| `figure8_3d` | 0.004 m |
+| `figure8` | 0.004 m |
+| `line` | 0.196 m |
 | `circle` | 0.295 m |
 
 A run on `circle` therefore spends its first stretch travelling to reach step 0,
@@ -395,7 +416,7 @@ at the rod removes that. Same setup, 25 epochs, mean distance to the target:
 | `segment` | 0.173 m | **0.026 m** |
 | `circle` | 0.282 m | 0.148 m |
 
-`segment` also shares its endpoint with `point_to_point`, so the two tasks
+`segment` also shares its endpoint with point-to-point, so the two tasks
 become directly comparable on the same config: one asks only for the
 destination, the other for the whole path to it.
 
@@ -403,11 +424,21 @@ The starting point comes from `initial_midpoint(env, cfg)`, which takes one
 step with the initial control and reads the result — not `env.nodes[mid]`,
 because the rod sags as soon as the first equilibrium is solved, and a
 trajectory anchored at the undeformed midpoint would already be wrong on step
-0. The probe restores the environment afterwards, material frames included.
+0. The probe restores the environment afterwards.
 
-The fixed curves are still there for when you want a specific shape; they just
-ignore the rod's starting position. `configs/example_3d.yaml` (`helix`) and
-`configs/example_3d_twist.yaml` (`figure8_3d`) keep theirs as 3D demonstrations.
+The fixed curves (`circle`, `figure8`, `line`) are still there for when you
+want a specific shape; they just ignore the rod's starting position.
+
+Anchored paths with a shape of their own — straight lines, sine waves and
+circular arcs — are the named presets of `scripts/train_tracking.py`
+(`--path line_a`, `sine_a`, `arc_b`, ...). Those are the ones its RRT
+comparison verifies as feasible before any training, and the ones to reach for
+when the reference has to be reachable inside the gripper workspace:
+
+```bash
+python scripts/train_tracking.py verify --path sine_a --out experiments/tracking
+python scripts/train_tracking.py --path sine_a --method nc --out experiments/tracking
+```
 
 ## Newton convergence
 
@@ -454,57 +485,121 @@ is simply unreachable, so the policy drives the ends to extremes.
 
 ## Usage
 
-Run everything from the `neural-control/` directory.
+Run everything from the `neural-control/` directory. All three tasks are the
+same adjoint neural control; they differ in their loss.
 
 ```bash
-# Task 1: point-to-point boundary control (CMA-ES, recommended entry point)
-python scripts/train_cmaes.py
+# Task 1: point-to-point -- the mid node reaches task.target_*
+python scripts/train_point_to_point.py
 
-# Task 1: point-to-point, full adjoint-gradient training
-python scripts/train_adjoint.py
-
-# Task 2: trajectory tracking (circle/figure8/line, set in configs/default.yaml)
+# Task 2: path tracking -- the mid node follows task.tracking.trajectory_type
 python scripts/train_tracking.py
 
-# Any of the above in 3D: set `env: {dim: 3}` in your config
-python scripts/train_adjoint.py --config configs/my_3d_experiment.yaml
+# Task 3: pipe insertion -- a free tip is pushed round a 90-degree bend
+python scripts/train_pipe.py --config configs/task_90deg_pipe.yaml
 
-# Any of the above with a custom config
-python scripts/train_adjoint.py --config configs/my_experiment.yaml
+# Any of them with a custom config (2D or 3D, set env.dim there)
+python scripts/train_point_to_point.py --config configs/my_experiment.yaml
 
-# Visualize a resulting trajectory as overlaid snapshots
-python scripts/snapshot_overlay.py --traj circle
+# Visualize a scripted boundary motion as overlaid snapshots (2D)
+python scripts/snapshot_overlay.py --traj moving_forward
 ```
 
-Programmatic usage (mirrors `train_cmaes.py`):
+Each run writes a self-contained directory under
+`experiments/<experiment_name>/runs/<timestamp>-<job>/`: the resolved config,
+the per-epoch log, TensorBoard scalars, the figures, and a `<job>.json` /
+`<job>.npz` record of the run (see [Training logs](#training-logs)).
 
-```python
-import sys; sys.path.insert(0, 'src')
-import numpy as np
-from SimulatorEnv_2D import SimulatorEnv_2D
-from scripts.train_cmaes import NeuralControlAgent
+### Global planning first, local control second
 
-env = SimulatorEnv_2D(nv=15, dt=0.01, rod_length=1.0, total_time=1.0)
-agent = NeuralControlAgent(env, segment_horizon=6, degree=3)
-target_pos = np.array([0.5, 0.2])
+Point-to-point and tracking can start from an RRT plan on a coarse rod
+(`src/dlo_rrt.py`) instead of from a random policy: the plan is resampled to
+the control steps, the policy is fitted to it, and the same adjoint training
+refines it. `report` then compares the two starts over a directory of jobs,
+and writes `report.md` with the convergence tables and figures.
 
-results = agent.run_rhc(
-    target_pos=target_pos,
-    n_segments=4,
-    n_iterations_per_segment=25,
-)
+```bash
+# point-to-point: one job per (target, method, seed), then the comparison
+python scripts/train_point_to_point.py --target T1 --method nc     --seed 0 --out experiments/p2p
+python scripts/train_point_to_point.py --target T1 --method rrt_nc --lr 1e-4 --out experiments/p2p
+python scripts/train_point_to_point.py report --out experiments/p2p
+
+# tracking: check the path is feasible first, then the same two methods
+python scripts/train_tracking.py verify --path sine_a --out experiments/tracking
+python scripts/train_tracking.py jobs --out experiments/tracking    # the commands to run
+python scripts/train_tracking.py report --out experiments/tracking
 ```
 
-The same in 3D — only the env class, the control width and the target change:
+A fitted policy is already close, so fine-tuning wants a smaller learning rate
+than training from scratch (`--lr 1e-4`); at the default `1e-3` the first
+updates knock it off the plan. Tracking does this for `rrt_nc` by default.
 
-```python
-from SimulatorEnv_3D import SimulatorEnv_3D
+## Adjoint gradient: state or proxy
 
-env = SimulatorEnv_3D(nv=15, dt=0.01, rod_length=1.0, total_time=1.0)
-agent = NeuralControlAgent(env, segment_horizon=6, degree=3)   # picks up env.dim
-results = agent.run_rhc(target_pos=np.array([0.5, 0.2, 0.1]), n_segments=4,
-                        n_iterations_per_segment=25)
+The three task scripts share one adjoint, which can turn the per-step losses
+into the policy's gradient in two ways: `train.grad_method` in the config
+(default `state`), overridden by `--grad-method` on the command line.
+
+```bash
+python scripts/train_point_to_point.py                          # state, from the config
+python scripts/train_point_to_point.py --grad-method proxy
+python scripts/train_tracking.py --path sine_a --grad-method proxy --out experiments/trk_proxy
+python scripts/train_pipe.py --config configs/task_90deg_pipe.yaml --grad-method proxy
 ```
+
+Both use the same forward pass (the states the warm-started Newton solves
+actually reached), solve with each step's own equilibrium Jacobian, and give a
+gradient that is lower-triangular in time. Write `r_j` for the policy's rate
+at step `j`, `u_k = u_{k-1} + Δλ r_k` for the executed command,
+`S_k = −J_ff⁻¹ J_fb` for step `k`'s equilibrium sensitivity, `B_k = ∂q_b/∂u`
+at `u_k`, and `a_k = ∂ℓ_k/∂q_free` (zero on a step without a loss). The two
+methods differ only in which step's `S` projects a later step's loss:
+
+| | `state` (default) | `proxy` |
+|---|---|---|
+| `∂L/∂r_j` | `Δλ Σ_{k≥j} B_kᵀ S_kᵀ a_k` | `Δλ B_jᵀ S_jᵀ Σ_{k≥j} a_k` |
+| projected by | the `S_k` of the step whose loss it is | the `S_j` of the step that applied the control |
+| attached to | the executed command `u_k`; autograd sums it back over the integration | the rate `r_j` |
+| rests on | on one branch the equilibrium depends only on the current boundary, `x = X(x_b)`: the chain rule, no third derivatives | `x_f = x_f(0) + ∫ S B r dλ` differentiated with the `∂S/∂θ` term dropped (a frozen tangent, as if `∂x_{k+1}/∂x_k = I`) |
+| exact | yes, on the branch the rollout followed | only while `S` stays constant along the path; finer steps do not remove the error |
+| solves per update | one per step that carries a loss (a terminal loss: one) | one per step |
+
+`proxy` is the rate formulation of the original submission code, which put
+the same vectors on the network's rate output (`adjoint_RHC_any_node.py`).
+The method is printed at startup and recorded in the run's `config.yaml` and
+`summary.json`. Point-to-point and tracking also record it in `<job>.json` and
+give proxy jobs a `_proxy` suffix, so the two never overwrite each other, but
+`report` does not tell them apart: give each method its own `--out` directory.
+Pipe runs each get their own time-stamped directory.
+
+`python scripts/check_grad_method.py` checks both on 21-node rods in 2D, 3D
+and 3D + twist. `state` matches central differences of the rollout loss to
+1e-9 or better, and `proxy` matches its own formula assembled by hand from
+explicit `S_j` to ~1e-11. On those 8-step rollouts (a random policy, no
+workspace) the two gradients differ by 40–270%: their cosine is 0.88–0.99,
+except for a terminal loss in 3D and 3D + twist, where it drops to 0.18 and
+0.13. For a terminal loss `state` projects every `r_j` through the last
+step's `S_K B_K` and `proxy` through each step's own `S_j B_j`, so the gap is
+how much that changes along the path; with a different random policy
+(16 hidden units instead of 8) the cosine stays above 0.99. `--refine` keeps
+the policy and raises N from 25 to 800: in 3D the difference settles near 2.6
+instead of shrinking. It also prints which equilibrium each rollout ends on,
+because the step size can change it (in 2D, N = 25 and N = 800 end on
+different branches from the rest).
+
+**Before 2026-11-14** the switch was `train.adjoint_mode` (`branch` or
+`local`), and only `train_pipe.py` read it: point-to-point and tracking always
+ran `branch`. `local` is `state`, bit for bit. `branch` computed the proxy
+vectors but attached them to the executed command `u_k` instead of the rate,
+so autograd summed the future losses a second time,
+`∂L/∂r_j = Δλ Σ_{k≥j} B_kᵀ S_kᵀ Σ_{m≥k} a_m`. That is proxy scaled up, by
+about (N + 1)/2 for a terminal loss, with the early steps weighted more: on
+the 8-step check rollouts it was 2.6–4.4 times proxy's norm and nearly
+parallel to it (cosine ≥ 0.97). That mode is gone. The point-to-point and
+tracking experiments from before that date used it, so neither method
+reproduces their numbers. Adam is insensitive to a constant gradient scale,
+so how much their conclusions change is open until they are re-run. A config
+that still sets `adjoint_mode` is rejected with a pointer to `grad_method`.
 
 ## Training logs
 
@@ -517,11 +612,11 @@ tensorboard --logdir experiments
 ```
 
 Curves update while the run is still going: scalars are flushed on every
-record. The run selector shows `<experiment_name>/runs/<timestamp>`, so
+record. The run selector shows `<experiment_name>/runs/<timestamp>-<job>`, so
 several runs — or several experiments — overlay directly.
 
 ```
-experiments/<experiment_name>/runs/<timestamp>/
+experiments/<experiment_name>/runs/<timestamp>-<job>/
 ├── events.out.tfevents.*   TensorBoard scalars + the config under TEXT
 │                           + one HPARAMS row for comparing runs in a table
 ├── config.yaml             the fully resolved config, as actually used
@@ -530,9 +625,16 @@ experiments/<experiment_name>/runs/<timestamp>/
 │                           gravity, Newton tolerance
 ├── log.jsonl               one JSON record per epoch or segment
 ├── log.txt                 the same records as readable lines
+├── <job>.json / <job>.npz  the run's own record: per-epoch errors, the paths it
+│                           took, the plan it started from — what `report` reads
 ├── loss_curve.png          (and tracking_result.png for a tracking run)
+├── neural_control_result.png   final shape + loss curve
 └── summary.json            final results, and how the run ended
 ```
+
+`<job>` names the run (target/path, method, seed), so a sweep's directories are
+told apart at a glance. Pass `--out DIR` to collect the json/npz of several
+jobs in one directory, which is what the `report` commands read.
 
 `RunLogger.log()` is the single place a result goes — it writes the JSON
 record, the readable line *and* the scalars — so the three cannot drift apart.
@@ -580,19 +682,21 @@ Turn it off for throwaway runs with `output.run_log: false`.
 
 ## Example result
 
-Task 1 (point-to-point): elastic strip with 15 nodes, midpoint driven from
-`(0.50, 0.00)` to target `(0.50, 0.20)` via CMA-ES + RHC, 4 segments × 25
-iterations, final tracking error ≈ 0.0227 m.
+Task 1 (point-to-point): 2D elastic strip with 15 nodes, the mid node driven
+from `(0.50, 0.00)` towards the target `(0.50, 0.20)`.
 
 ![Neural Control result](img/neural_control_result.png)
 
+Every run writes this pair into its own directory — the final rod shape
+against the target, and the loss curve — plus the GIF below.
+
 ### Animating the rollout
 
-All three training scripts can additionally write the whole committed control
-rollout as a GIF, `outputs/neural_control_animation.gif` — the rod frame by
+All three training scripts also write the whole committed control rollout as a
+GIF, `neural_control_animation.gif` in the run's directory — the rod frame by
 frame over the full horizon, with the midpoint, the path it has traced so far
 and the target (for tracking, the target curve plus the current target point).
-It is off by default because rendering costs a few seconds; enable it in
+Rendering costs a few seconds per run, so turn it off for sweeps, in
 `configs/default.yaml`:
 
 ```yaml
@@ -608,12 +712,13 @@ the whole horizon rather than the last segment.
 
 ## Notes vs. the paper
 
-- `train_cmaes.py` uses CMA-ES rather than the paper's analytical adjoint —
-  simplest way to reproduce the qualitative result with no per-task gradient
-  derivation. `train_adjoint.py` and `train_tracking.py` use the actual
-  adjoint gradients.
+- All three tasks use the paper's analytical adjoint gradients, and nothing
+  else: the gradient-free CMA-ES controller this repository used to carry is
+  gone.
 - The demo simulator uses `nv` nodes (`configs/default.yaml`, `rod.nv`)
   rather than the paper's 101, for faster iteration.
+- The pipe task and the RRT global-planning start are additions, not part of
+  the paper.
 
 ## Torsion and gripper yaw
 
@@ -624,49 +729,77 @@ nowhere to live.
 
 ### What gets added
 
-Following the Discrete Elastic Rod construction (Bergou et al.; the same one
-[DEFORM](https://roahmlab.github.io/DEFORM/) uses), every edge carries a
-**material frame**, split into a *reference director* moved by twist-free
-parallel transport plus a scalar **twist angle** `θⁱ`. Those angles are real
-degrees of freedom, so the DOF vector grows:
+This follows the *original* Discrete Elastic Rods paper (Bergou et al. 2008,
+[`reference/Discrete elastic rods.pdf`](reference/)), not the time-parallel
+reference frames of the later Discrete Viscous Threads (2010). The difference
+is where the frame comes from:
+
+- **2008 (here).** The **Bishop frame** is rebuilt from the current positions:
+  one director on the first edge, then *parallel transport along the rod* onto
+  every later edge (§4.2.2). Each director is by definition the transport of
+  the previous one, so there is no per-node reference twist, and nothing is
+  carried between steps — the frame is a function of the configuration.
+- **2010.** Every edge keeps its own director, carried from the previous step
+  by parallel transport *in time*; the mismatch is a per-node reference twist
+  added to each local twist. That needs frame state, makes the rod's twist
+  depend on the path it took, and measures the gripper's yaw against a frame
+  that has itself been drifting.
+
+The material frame is then the Bishop frame rotated by an angle per edge, and
+§5 treats those angles as **quasistatic**: they minimise the energy for the
+given centreline and boundary conditions. For a naturally straight rod with
+isotropic bending — the only case modelled here — the minimiser is a *uniform*
+twist (eq. 5), so the angles are eliminated in closed form and the DOF vector
+grows by exactly two, the clamped gripper yaws:
 
 ```
-q = [ x₀ y₀ z₀ … x_{nv-1} y_{nv-1} z_{nv-1} | θ⁰ … θ^{nv-2} ]
-    \______________ 3·nv positions ________/ \__ nv−1 twists __/
+q = [ x₀ y₀ z₀ … x_{nv-1} y_{nv-1} z_{nv-1} | yaw_l yaw_r ]
+    \______________ 3·nv positions ________/ \_ 2 angles _/
 ```
 
-The energy gains a twisting term:
+The energy gains a twisting term, the paper's eq. 6:
 
 ```
-E = E_stretch(x) + E_bend(x) + E_twist(x, θ)
-E_twist = Σᵢ (GJ / 2ΔL) · mᵢ² ,   mᵢ = θⁱ − θⁱ⁻¹ + ψᵢ(x)
+E = E_stretch(x) + E_bend(x) + (GJ / 2 L_tw) · Φ²
+Φ = yaw_r − yaw_l − H(x) ,    L_tw = (nv − 2)·ΔL
 ```
 
 with `GJ = EI / (1 + ν)` for a circular cross-section. `ν` comes from the rod's
 material preset (see [Choosing a rod material](#choosing-a-rod-material)), so
 switching material changes bending and torsional stiffness together.
 
-### Why `ψ` is the whole point
+### Why the holonomy `H` is the whole point
 
-`ψᵢ` is the **reference twist**: parallel transport along the rod is not
-integrable, so carrying the director from edge `i−1` onto edge `i` does not
-land on edge `i`'s own director, and `ψᵢ` is the gap. It depends on the
-*positions*, and that is exactly what couples twisting to bending — the
-discrete form of link = twist + writhe.
+`Φ` is the rod's **total twist**, and `H(x)` is the **holonomy** of the Bishop
+frame (§6): transport along the rod is not integrable, so the frame arrives at
+the far end rotated against that end's own yaw reference, and the grippers have
+to make up the difference. It is zero for any planar configuration and grows
+with how much the rod writhes out of plane — the discrete form of
+link = twist + writhe.
 
-Drop it and `E_twist` would depend on `θ` alone: the rod would twist, its
-centreline would not move, and `dL/d(yaw)` for any position-based loss would be
-**identically zero** — a dead control input. With it, `dL/d(yaw)` is nonzero
-and the policy can actually learn to use yaw.
+`H` depends on the *positions*, and it is the only place they enter the
+twisting energy. Drop it and `E_twist` would depend on the two yaws alone: the
+rod would twist, its centreline would not move, and `dL/d(yaw)` for any
+position-based loss would be **identically zero** — a dead control input. With
+it, bending the rod twists it, `dL/d(yaw)` is nonzero, and the policy can
+actually learn to use yaw.
 
 ### Yaw
 
-Yaw is measured from that edge's reference director. Because the reference
-frame is carried by twist-free parallel transport between steps, holding yaw
-constant means applying no twist and changing it twists the rod — so the
-control maps onto the clamped twist angles directly, with no geometry in
-between (`boundary_node_jacobian_3d_twist` is the 12-row position map plus two
-rows that are a single `1`).
+A yaw command is a wrist angle, so it is measured from a reference that depends
+on the gripper's own orientation and not on the rod's history:
+`rodframes.gripper_director` — the direction perpendicular to that end's
+tangent in the vertical plane through it (`+z` for the straight rest pose). The
+first edge's Bishop director *is* the left gripper's reference, so the left yaw
+is that edge's material angle outright, and the right yaw is measured from the
+same reference at the far end, which is why `H` appears in `Φ`.
+
+That reference spins about the tangent as the tangent moves (by `sin φ · dθ` in
+the azimuth/elevation chart the controls use), which is what makes a gripper
+that only *tilts* still twist the rod. Both yaws stay clamped boundary DOFs, so
+the control still reaches the energy only through the boundary map —
+`boundary_node_jacobian_3d_twist` is the 12-row position map plus two rows that
+are a single `1`.
 
 ### Seeing it
 
@@ -678,47 +811,52 @@ way to tell twisting apart from bending: `m1`/`m2` spinning about a tangent
 that is not moving means pure torsion, while the rod buckling into an S means
 the twist has converted into writhe.
 
-The reference directors are simulator state rather than something `q` carries,
-so the plotting code replays them along the recorded configurations instead of
-requiring the training scripts to record them. Nothing is drawn without
-`rod.twist` — a twist-free rod has no material frame to show.
+The frames are a function of the recorded configuration and the two yaws, so
+the plotting code computes them from `q` alone — there is no frame state to
+replay. Nothing is drawn without `rod.twist`: a twist-free rod has no material
+frame to show.
 
 ### Correctness
 
 Everything the adjoint depends on is finite-difference checked by
-`python scripts/check_twist.py` (9/9 at the time of writing):
+`python scripts/check_twist.py` (12/12 at the time of writing):
 
 | check | error |
 | --- | --- |
-| `grad(ψ)` | 3.7e-09 |
-| `hess(ψ)` | 8.4e-07 |
-| twisting energy force / Jacobian | ~7e-11 |
+| `H = 0` on a straight and on a planar rod | exactly 0 |
+| `grad(H)` | 1.8e-10 |
+| `hess(H)` | 7.0e-07 |
+| twisting energy force / Jacobian | 1.6e-10 / 3.2e-10 |
 | `GJ = 0` reduces to `der3d` | exactly 0 |
 | boundary map `d(q_b)/d(u)`, 14×12 | 5.3e-10 |
-| adjoint `dL/du` incl. yaw | 6.8e-08 |
+| adjoint `dL/du` incl. yaw | 3.5e-09 |
+| adjoint `dL/du` after 3 steps | 3.5e-09 |
 
 Two things that cost real debugging time, recorded so they are not rediscovered:
 
-- **`hess(ψ)` is the *symmetric part* of the chain-rule matrix.** Differentiating
-  the `kb/2L` gradient expression directly gives a matrix carrying a spurious
-  antisymmetric piece; the raw version is off by >100%.
-- **`grad(ψ)` has a re-adaptation term** beyond the classical holonomy, from
-  carrying each stored director onto the current tangent. It vanishes when the
-  stored tangents equal the current ones, so it is invisible at the start of a
-  step and only appears once the Newton iterate has moved — dropping it costs
-  ~50% of the gradient.
+- **`hess(H)` is the *symmetric part* of the assembled chain-rule matrix.**
+  Each piece of `grad(H)` — the per-node `kb/2L` holonomy and the spin of the
+  reference frame at each end edge — is a one-form, not the gradient of a
+  function of its own; only their sum is exact. Differentiating them directly
+  gives a matrix carrying a spurious antisymmetric piece, and the raw version
+  is off by >10%.
+- **The two end terms are easy to miss.** They vanish for a gripper that only
+  translates, so the gradient looks right until an end starts to tilt, and they
+  are what carries `dL/dθ_r` through the twist energy at all.
 
-One approximation is left, and it is the same class the horizon adjoint already
-makes: the reference frames advance once a step is committed, so a perturbed
-control follows a slightly different frame path that the single-step implicit
-gradient does not see. `check_twist.py` measures it at ~6.5e-04 relative over a
-3-step rollout.
+The last row is the one the 2008 frame buys: with the 2010 reference frames the
+single-step implicit gradient was approximate over a multi-step rollout,
+because a perturbed control followed a slightly different frame path (~6.5e-04
+relative over 3 steps). There is no frame history now, so the same check is an
+equality.
 
 ### What is still not modelled
 
 Anisotropic bending (different stiffness about the two cross-section axes) and
-non-zero natural curvature or natural twist. Both would need the bending term
-rewritten against the material frame; the twist machinery is already in place.
+non-zero natural curvature or natural twist. Either would break the uniform
+twist of the special case, so the per-edge material angles would have to come
+back as degrees of freedom (the paper's general case, eq. 7); the Bishop frame
+and the holonomy derivatives are already in place.
 
 ## Limits of the 3D model
 

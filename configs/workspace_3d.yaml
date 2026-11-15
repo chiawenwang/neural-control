@@ -1,7 +1,7 @@
 # =============================================================================
 # 3D point-to-point with the right gripper confined to a workspace.
 #
-#   python scripts/compare_global_local.py run --config configs/workspace_3d.yaml ...
+#   python scripts/train_point_to_point.py --config configs/workspace_3d.yaml ...
 #
 # The rod and task are configs/default.yaml's; only the workspace is switched
 # on. The box keeps the gripper at least 0.2 m in front of the fixed left

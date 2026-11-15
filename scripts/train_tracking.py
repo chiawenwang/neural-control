@@ -1,364 +1,491 @@
+"""Task 2: path tracking -- the rod's mid node follows a reference path.
+
+The controller is the adjoint neural control of :mod:`neural_control`, the
+same one point-to-point uses; only the loss differs.  Here every step carries
+a term, ``mean_k |mid_k - ref_k|^2`` over the N steps of the horizon, so the
+adjoint pushes a gradient back from each of them rather than from the final
+pose alone.  A step whose Newton solve fails is masked out of the loss and the
+rollout continues; an epoch is *valid* only when all N steps converged.
+
+Where the reference comes from:
+
+  --path NAME   one of the named presets in ``PATHS`` below -- straight lines,
+                sine curves and circular arcs, all anchored at the mid node's
+                own starting position.  These are the paths the RRT comparison
+                uses, and the ones ``verify`` checks for feasibility.
+  (none)        the config's ``task.tracking.trajectory_type``
+                (src/env_factory.py: segment, line, circle, figure8).
+
+Methods, as in point-to-point:
+
+  nc       from a random policy.
+  rrt_nc   from a verified plan: ``verify`` plans the path segment by segment
+           with the RRT of src/dlo_rrt.py on a coarse rod, the policy is
+           fitted to the plan, and training fine-tunes it (at a smaller
+           learning rate -- NC's lr knocks a fitted warm start off).
+
+The rollouts start from a *ready pose*, not from the straight rod: the right
+gripper first moves ``--ready-dx`` towards the fixed end (stable steps), and
+gravity bows the rod downwards.  At the straight, taut rod the mid node's
+response to the gripper is singular (a millimetre of compression drops the
+sagging mid node by centimetres), so no path can be followed smoothly from
+there.  Both methods start from the same ready state.
+
+``verify`` is what keeps the comparison honest: each of ``--segments``
+segments is planned from where the previous one ended, resampled to its
+N/segments rollout steps, and replayed with stable steps; a segment is kept
+only if the mid node ends within ``--wp-tol`` of the waypoint and never
+strays more than ``--path-tol`` from the reference on the way.  A path is
+feasible if at least one planner seed gets through every segment.  The
+verified command sequence is also replayed open loop on the fine rod
+("RRT open loop").  With ``workspace.enabled`` the gripper is confined to
+that box throughout: the planner grows the tree inside it, and the neural
+control projects every command onto it (the penalty acts on the unprojected
+command).
+
+``--grad-method`` (default ``train.grad_method``, ``state``) picks the adjoint
+gradient: ``state`` is exact, ``proxy`` the frozen-tangent rate formulation
+(see src/implicit_grad_tools.py).
+
+Usage
+-----
+    python scripts/train_tracking.py                              # the config's curve
+    python scripts/train_tracking.py --grad-method proxy
+    python scripts/train_tracking.py verify --path line_a --out DIR
+    python scripts/train_tracking.py --path line_a --method nc --seed 0 --out DIR
+    python scripts/train_tracking.py --path line_a --method rrt_nc --plan-seed 0 --out DIR
+    python scripts/train_tracking.py jobs --out DIR      # the commands for a sweep
+    python scripts/train_tracking.py report --out DIR
+"""
 import sys
 from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / 'src'))
 
-# Must run before numpy is imported: OpenBLAS goes multithreaded at about
-# n = 100, and for the small dense solves here (94x94 in 2D, 141x141 in 3D)
-# the threading overhead costs ~2000x. See src/blas_threads.py.
 from blas_threads import limit_blas_threads
 limit_blas_threads()
 
-import numpy as np
-import os
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from tqdm import tqdm
-import matplotlib.pyplot as plt
 import argparse
+import copy
+import json
+import os
+import time
 
-from implicit_grad_tools import multistep_adjoint_gradient
+import numpy as np
+import torch
+import torch.optim as optim
+import matplotlib.pyplot as plt
+
 from config import load_config
+from dlo_rrt import RRTPlanner, PlannerParams, resample_path, stable_step
+from env_factory import (
+    build_env, reset_env, env_dim, env_twist, control_dim, end_control_dim,
+    initial_control, make_target_trajectory, material_summary, node_position,
+    task_target, dloss_dq_free_node,
+)
+from neural_control import (
+    BoundaryVelocityNet, reinit_net_, resolve_device, segment_lengths,
+    rollout, execute_controls, adjoint_gradient, surrogate_loss, apply_update,
+    fit_policy, workspace_bounds, workspace_projection, workspace_penalty,
+    GRAD_METHODS,
+)
 from runlog import RunLogger
 from utils import maybe_save_trajectory_gif
-from env_factory import (
-    build_env,
-    reset_env,
-    env_dim,
-    env_twist,
-    control_dim,
-    end_control_dim,
-    initial_control,
-    material_summary,
-    make_target_trajectory,
-    initial_midpoint,
-    task_target,
-    node_tracking_loss,
-    node_position,
-    dloss_dq_free_node,
-)
 
 
-# ─────────────────────────────────────────────
-# Network architecture
-# ─────────────────────────────────────────────
-class BoundaryVelocityNet(nn.Module):
-    """lambda -> control rate of the right end (3 DOFs in 2D, 5 in 3D)."""
-
-    def __init__(self, hidden=64, out_dim=3):
-        super().__init__()
-        self.out_dim = out_dim
-        self.mlp = nn.Sequential(
-            nn.Linear(1, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, out_dim),   # controls the right end's DOFs
-        )
-
-    def forward(self, lam):
-        return self.mlp(lam)
-
-
-def reinit_net_(net: nn.Module):
-    def _init(m):
-        if isinstance(m, nn.Linear):
-            nn.init.kaiming_uniform_(m.weight, a=5 ** 0.5)
-            nn.init.zeros_(m.bias)
-    net.apply(_init)
-
-
-def resolve_device(name: str) -> torch.device:
-    if name == "auto":
-        if torch.backends.mps.is_available():
-            return torch.device("mps")
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        return torch.device("cpu")
-    return torch.device(name)
+#: Candidate reference paths, all starting at the mid node's position m0 in
+#: the ready pose, (0.495, 0, -0.0626) m.  For a bowed rod the mid node sits
+#: near the surface x ~ 0.5 - 1.43 (y^2 + z^2) (fitted on the coarse rod):
+#: moving it sideways or up and down along that surface is easy, moving it
+#: off the surface along x needs large gripper motions.  The line and sine
+#: end points lie on the surface, and their chords stay within ~5 mm of it;
+#: the arcs turn the bow plane about the rod axis (arc_a, arc_b) or run in a
+#: plane tilted towards the fixed end (arc_c).
+#:   line  m0 -> end
+#:   sine  the line m0 -> end plus amp * sin(2 pi periods t) along `normal`
+#:   arc   circle through m0 with centre m0 - radius * e1, turning towards e2
+#:         by `angle` degrees
+PATHS = {
+    "line_a": ("line", {"end": (0.481, 0.10, -0.06)}),
+    "line_b": ("line", {"end": (0.490, -0.08, 0.02)}),
+    "line_c": ("line", {"end": (0.467, 0.06, -0.14)}),
+    "sine_a": ("sine", {"end": (0.481, 0.10, -0.06), "normal": (0.0, 0.0, 1.0),
+                        "amp": 0.025, "periods": 1.0}),
+    "sine_b": ("sine", {"end": (0.467, 0.06, -0.14), "normal": (0.0, 0.79, 0.61),
+                        "amp": 0.025, "periods": 1.0}),
+    "sine_c": ("sine", {"end": (0.481, -0.10, -0.06), "normal": (0.0, 0.0, 1.0),
+                        "amp": 0.025, "periods": 1.0}),
+    "arc_a": ("arc", {"e1": (0.0, 0.0, -1.0), "e2": (0.0, 1.0, 0.0),
+                      "radius": 0.0626, "angle": 120.0}),
+    "arc_b": ("arc", {"e1": (0.0, 0.0, -1.0), "e2": (0.0, -1.0, 0.0),
+                      "radius": 0.0626, "angle": 180.0}),
+    "arc_c": ("arc", {"e1": (0.0, 0.0, -1.0), "e2": (-0.12, 0.99, 0.0),
+                      "radius": 0.09, "angle": 90.0}),
+}
 
 
-def segment_lengths(N: int, num_segments: int):
-    base, rem = divmod(N, num_segments)
-    return [base + 1 if i < rem else base for i in range(num_segments)]
+def ready_pose(env, cfg, dx, steps=20):
+    """Move the right gripper ``dx`` towards the fixed end with stable steps.
+
+    Leaves ``env`` in the ready state and returns the ready control.
+    """
+    u0 = initial_control(cfg)
+    k = end_control_dim(env.dim, env_twist(cfg))
+    u_r = u0.copy()
+    u_r[k] -= dx
+    for j in range(1, steps + 1):
+        info = stable_step(env, u0 + (u_r - u0) * j / steps)
+        if not info["stable"]:
+            raise RuntimeError(f"the ready motion fails at step {j}")
+    return u_r
 
 
+def reference_path(name, m0, N):
+    """m_ref at lambda_k = k/N, k = 0..N; shape (N+1, 3), row 0 = m0."""
+    kind, spec = PATHS[name]
+    t = np.arange(N + 1)[:, None] / N
+    m0 = np.asarray(m0, dtype=float)
+    if kind in ("line", "sine"):
+        ref = m0 + t * (np.asarray(spec["end"], float) - m0)
+        if kind == "sine":
+            n = np.asarray(spec["normal"], float)
+            ref = ref + spec["amp"] * np.sin(2 * np.pi * spec["periods"] * t) * n / np.linalg.norm(n)
+        return ref
+    e1 = np.asarray(spec["e1"], float)
+    e1 /= np.linalg.norm(e1)
+    e2 = np.asarray(spec["e2"], float)
+    e2 = e2 - (e2 @ e1) * e1
+    e2 /= np.linalg.norm(e2)
+    R, th = spec["radius"], np.deg2rad(spec["angle"]) * t
+    return m0 - R * e1 + R * (np.cos(th) * e1 + np.sin(th) * e2)
 
 
-def rollout_segment(env, net, u_start, targets_seg, dlam, device, track_w):
-    """Roll out len(targets_seg) steps, lambda reset to [0,1] over this segment.
-    Returns per-step data needed for the exact multi-step adjoint gradient."""
-    T = len(targets_seg)
-    u_list, q_list, J_list = [], [], []
-    converged_mask = np.zeros(T, dtype=bool)
-
-    u = u_start.clone()
-    n_left = net.out_dim          # left end is held fixed -> zero rate
-    for k in range(T):
-        lam = torch.tensor([[k / T]], dtype=torch.float32, device=device)
-        u_dot_full = torch.cat([torch.zeros(n_left, device=device), net(lam).squeeze(0)])
-        u = u + dlam * u_dot_full
-        u_list.append(u)
-
-        u_np = u.detach().cpu().numpy()
-        obs, done, info = env.step(u_np, use_inertia=False)
-        q_list.append(info["q"])
-        J_list.append(info["J"])
-        converged_mask[k] = info["converged"]
-
-    return u_list, q_list, J_list, converged_mask
+def mid_of(env, q):
+    return np.asarray(node_position(q, env.dim, env.mid_node), dtype=float)
 
 
-def compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets_seg, track_w, jac_reg):
-    free_index, fixed_index = env.free_index, env.fixed_index
-    dim = env.dim
-    twist = getattr(env, 'twist', False)
-    T = len(q_list)
-
-    total_loss = 0.0
-    a_free_per_step = np.zeros((T, len(free_index)), dtype=float)
-    for k in range(T):
-        if not converged_mask[k]:
-            continue
-        L_k, _ = node_tracking_loss(q_list[k], dim, env.mid_node, targets_seg[k])
-        total_loss += track_w * L_k
-        a_free_per_step[k] = track_w * dloss_dq_free_node(q_list[k], free_index, dim, env.mid_node, targets_seg[k])
-
-    if not converged_mask.any():
-        return None, total_loss
-
-    u_seq_np = np.stack([u.detach().cpu().numpy() for u in u_list], axis=0)
-    g_u_seq = multistep_adjoint_gradient(
-        u_seq_np, J_list, free_index, fixed_index, env.deltaL, a_free_per_step,
-        jac_reg=jac_reg, dim=dim, twist=twist,
-        boundary_rows=getattr(env, 'boundary_rows', None),
-    )
-    return g_u_seq, total_loss
+def coarse_config(cfg, nv):
+    cfg_c = copy.deepcopy(cfg)
+    cfg_c["rod"]["nv"] = nv
+    return cfg_c
 
 
-def optimize_segment(env, net, opt, u_start, targets_seg, dlam, device, cfg, n_iterations, checkpoint):
-    best_loss = float("inf")
-    q_list = None
+# ------------------------------------------------------------- verification
 
-    for it in range(n_iterations):
-        env.set_state(checkpoint)
-        opt.zero_grad(set_to_none=True)
+class TrackingRRT(RRTPlanner):
+    """RRTPlanner with a damped, backtracking task-space extension.
 
-        u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u_start, targets_seg, dlam, device, cfg.task.tracking.weight)
-        g_u_seq, total_loss = compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets_seg, cfg.task.tracking.weight, cfg.train.jac_reg)
-        if g_u_seq is None:
-            continue
+    The base planner's greedy step (damping 1e-4) explodes along the mid
+    node's weak direction, whose singular value is ~0.016 in the ready pose:
+    an 8 mm request becomes a 20 cm gripper move, the step fails, and the tree
+    falls back to random detours.  Here the damping scales with the largest
+    singular value (Levenberg-Marquardt), and a step that does not reduce the
+    error is halved, then retried with less damping, before it is given up.
+    """
 
-        surrogate = torch.zeros((), device=device)
-        for k, u_k in enumerate(u_list):
-            g_k = torch.tensor(g_u_seq[k], dtype=u_k.dtype, device=device)
-            surrogate = surrogate + torch.dot(u_k, g_k)
+    lm_damps = (0.03, 0.01)
 
-        surrogate.backward()
-        torch.nn.utils.clip_grad_norm_([p for p in net.parameters() if p.requires_grad], 1.0)
-        opt.step()
+    def _extend_task(self, m_rand, toward_goal=False):
+        i = self._nearest_mid(m_rand, exclude=self.dead if toward_goal else ())
+        if i is None:
+            return 0
+        first, n_before = i, len(self.nodes)
+        S = np.ones(self.k)
+        S[self.dim:] = 1.0 / self.p.w_rot
+        for _ in range(self.p.greedy_steps):
+            nd = self.nodes[i]
+            e = m_rand - nd.mid
+            if np.linalg.norm(e) < 1e-3:
+                break
+            G = self.mid_jacobian(nd) * S
+            s_max = np.linalg.svd(G, compute_uv=False)[0]
+            new = None
+            for damp in self.lm_damps:
+                du = S * (G.T @ np.linalg.solve(G @ G.T + (damp * s_max) ** 2 * np.eye(self.dim), e))
+                for frac in (1.0, 0.5, 0.25, 0.125):
+                    u_to = nd.u.copy()
+                    u_to[self.k:2 * self.k] += frac * du
+                    cand = self._steer(i, u_to)
+                    if cand is not None and np.linalg.norm(m_rand - cand.mid) < np.linalg.norm(e):
+                        new = cand
+                        break
+                if new is not None:
+                    break
+            if new is None:
+                break
+            i = self._add(new)
+            if self._goal_reached(i):
+                break
+        if toward_goal and not self._goal_reached(i):
+            self.dead.add(first)
+            self.dead.update(range(n_before, len(self.nodes)))
+        return i
 
-        best_loss = min(best_loss, total_loss)
 
-    env.set_state(checkpoint)
-    with torch.no_grad():
-        u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u_start, targets_seg, dlam, device, cfg.task.tracking.weight)
+def chain_plan(cfg, bounds, ref, seed, args):
+    """Follow ``ref`` on the coarse rod, one RRT-planned segment at a time.
 
-    return {"best_loss": best_loss, "q_list": q_list, "u_final": u_list[-1], "converged_mask": converged_mask}
+    Returns (summary, arrays).  ``arrays["U_plan"]`` (N, n_u) is the rollout
+    command sequence (row j = command of step j+1) when the chain succeeds.
+    """
+    cfg_c = coarse_config(cfg, args.plan_nv)
+    env = build_env(cfg_c, max_newton_iter=args.plan_newton_iter)
+    reset_env(env, cfg_c)
+    dim, k = env.dim, end_control_dim(env.dim, env_twist(cfg_c))
+    N = len(ref) - 1
+    steps = N // args.segments
+    if steps * args.segments != N:
+        raise ValueError(f"--segments must divide N = {N}")
+    u_cur = ready_pose(env, cfg_c, args.ready_dx)
+    state = env.get_state()
+    U_rows, mids, seg_log = [], [], []
+    t0 = time.time()
+    for j in range(1, args.segments + 1):
+        target = ref[j * steps]
+        ref_seg = ref[(j - 1) * steps + 1:j * steps + 1]
+        done = False
+        for attempt in range(args.seg_tries):
+            p = PlannerParams(seed=seed * 100003 + j * 101 + attempt, goal_tol=args.wp_tol,
+                              time_limit=args.seg_time, max_iter=args.seg_iter,
+                              p_ts=0.9, p_goal=0.9, shortcut_iters=args.shortcuts)
+            n_ang = int(np.sum(np.isfinite(bounds[0][dim:])))
+            p.box_min, p.box_max = tuple(bounds[0][:dim]), tuple(bounds[1][:dim])
+            p.ang_min = tuple(bounds[0][dim:dim + n_ang])
+            p.ang_max = tuple(bounds[1][dim:dim + n_ang])
+            planner = TrackingRRT(env, u_cur, target, p)
+            res = planner.plan(state)
+            if not res["success"]:
+                continue
+            U_seg = resample_path(res["U"], steps, k, dim, p.w_rot)
+            # Replay the resampled segment exactly as the full plan will be replayed.
+            env.set_state(state)
+            seg_mids, ok = [], True
+            for u in U_seg:
+                inf = stable_step(env, u)
+                if not inf["stable"]:
+                    ok = False
+                    break
+                seg_mids.append(mid_of(env, inf["q"]))
+            if not ok:
+                continue
+            err = np.linalg.norm(np.array(seg_mids) - ref_seg, axis=1)
+            if err[-1] > args.wp_tol + 0.003 or err.max() > args.path_tol:
+                continue
+            state, u_cur = env.get_state(), U_seg[-1].copy()
+            U_rows.append(U_seg)
+            mids.extend(seg_mids)
+            seg_log.append({"segment": j, "attempt": attempt, "iterations": res["iterations"],
+                            "nodes": res["nodes"], "max_err": float(err.max()),
+                            "end_err": float(err[-1])})
+            done = True
+            break
+        if not done:
+            return ({"seed": seed, "success": False, "failed_segment": j,
+                     "time": time.time() - t0, "segments": seg_log}, {})
+    U_plan = np.concatenate(U_rows)
+    mids = np.array(mids)
+    err = np.linalg.norm(mids - ref[1:], axis=1)
+    summ = {"seed": seed, "success": True, "time": time.time() - t0, "segments": seg_log,
+            "coarse_rms": float(np.sqrt(np.mean(err ** 2))), "coarse_max": float(err.max())}
+    return summ, {"U_plan": U_plan, "coarse_mid": mids}
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default=None,
-                        help="Path to a YAML config overriding configs/default.yaml")
-    args = parser.parse_args()
+def cmd_verify(args):
     cfg = load_config(args.config)
-
-    torch.manual_seed(cfg.train.seed)
-    np.random.seed(cfg.train.seed)
-
-    dim = env_dim(cfg)
-    twist = env_twist(cfg)
+    dim, k = env_dim(cfg), end_control_dim(env_dim(cfg), env_twist(cfg))
+    bounds = workspace_bounds(cfg, dim, k)
+    if bounds is None:
+        raise SystemExit("path tracking runs in the bounded workspace; enable workspace in the config")
     env = build_env(cfg)
     reset_env(env, cfg)
+    ready_pose(env, cfg, args.ready_dx)
+    checkpoint = env.get_state()
+    m0 = mid_of(env, checkpoint["q"])
+    ref = reference_path(args.path, m0, env.Nsteps)
+    out = Path(args.out) / "plans"
+    out.mkdir(parents=True, exist_ok=True)
+    length = float(np.sum(np.linalg.norm(np.diff(ref, axis=0), axis=1)))
+    print(f"[verify {args.path}] {PATHS[args.path][0]}, length {length:.3f} m, "
+          f"start {np.round(ref[0], 4)}, end {np.round(ref[-1], 4)}", flush=True)
+    results = []
+    for seed in args.plan_seeds:
+        summ, arrs = chain_plan(cfg, bounds, ref, seed, args)
+        if summ["success"]:
+            # the plan on the fine rod, open loop, with the controller's own stepping
+            q_list, ok = execute_controls(env, checkpoint, arrs["U_plan"])
+            summ["fine_converged"] = bool(ok)
+            fine_mid = np.array([mid_of(env, q) for q in q_list])
+            arrs["fine_mid"] = fine_mid
+            if ok:
+                e = np.linalg.norm(fine_mid - ref[1:], axis=1)
+                summ["fine_rms"], summ["fine_max"] = float(np.sqrt(np.mean(e ** 2))), float(e.max())
+            np.savez_compressed(out / f"{args.path}_p{seed}.npz", ref=ref, **arrs)
+            print(f"[verify {args.path}] seed {seed}: feasible on the coarse rod in "
+                  f"{summ['time']:.0f}s, rms {summ['coarse_rms'] * 1e3:.1f} mm, max "
+                  f"{summ['coarse_max'] * 1e3:.1f} mm; fine rod open loop: "
+                  + (f"rms {summ['fine_rms'] * 1e3:.1f} mm, max {summ['fine_max'] * 1e3:.1f} mm"
+                     if ok else f"solver failed at step {len(q_list)}"), flush=True)
+        else:
+            print(f"[verify {args.path}] seed {seed}: no chain past segment "
+                  f"{summ['failed_segment']} ({summ['time']:.0f}s)", flush=True)
+        results.append(summ)
+    verdict = {"path": args.path, "kind": PATHS[args.path][0], "spec": PATHS[args.path][1],
+               "length": length, "m0": ref[0].tolist(), "end": ref[-1].tolist(),
+               "feasible": any(r["success"] for r in results), "plans": results,
+               "settings": {"segments": args.segments, "wp_tol": args.wp_tol,
+                            "path_tol": args.path_tol, "plan_nv": args.plan_nv,
+                            "ready_dx": args.ready_dx}}
+    json.dump(verdict, open(out / f"{args.path}_verify.json", "w"), indent=1, default=float)
+    print(f"[verify {args.path}] feasible: {verdict['feasible']}", flush=True)
 
+
+# ----------------------------------------------------------------- training
+
+def tracking_loss_terms(env, q_list, conv, ref, N):
+    """``(per-step error, loss, dL/dq_free per step)`` for the mid node.
+
+    The loss is the mean squared mid-node error over the horizon; a step whose
+    solve failed contributes nothing and gets no adjoint source.
+    """
+    dim = env.dim
+    mids = np.array([mid_of(env, q) for q in q_list])
+    err = np.linalg.norm(mids - ref[1:len(q_list) + 1], axis=1)
+    loss = float(np.sum(err[conv[:len(q_list)]] ** 2) / N)
+    a_free = np.zeros((len(q_list), len(env.free_index)), dtype=float)
+    for i in np.where(conv[:len(q_list)])[0]:
+        a_free[i] = dloss_dq_free_node(q_list[i], env.free_index, dim, env.mid_node,
+                                       ref[i + 1]) / N
+    return err, loss, a_free, mids
+
+
+def train_track(env, checkpoint, net, u0, ref, cfg, epochs, device, lr, bounds, ws_weight,
+                run=None, log_every=10, tag=""):
+    """Mean squared tracking error of the mid node, adjoint gradients, Adam."""
     N = env.Nsteps
-    # `segment` runs from where the mid node actually starts to the
-    # point-to-point target, so step 0 begins with ~no error; the other curves
-    # ignore both and sit wherever they are defined.
-    targets = make_target_trajectory(
-        N, env.rod_length, traj_type=cfg.task.tracking.trajectory_type, dim=dim,
-        start=initial_midpoint(env, cfg), end=task_target(cfg))
+    n_end = net.out_dim
+    dlam = 1.0 / N
+    opt = optim.Adam(net.parameters(), lr=lr)
+    project = workspace_projection(bounds, u0, n_end)
+    hist = {k: [] for k in ("loss", "rms", "max", "n_conv", "valid", "ws_loss", "time",
+                            "mid_paths", "u_paths")}
+    t_start = time.time()
+    for ep in range(epochs):
+        env.set_state(checkpoint)
+        opt.zero_grad(set_to_none=True)
+        u_list, r_list, q_list, J_list, conv = rollout(env, net, u0, N, dlam, device,
+                                                       project=project, stop_on_failure=False)
+        err, loss, a_free, mids = tracking_loss_terms(env, q_list, conv, ref, N)
+        L_ws_t = workspace_penalty(net, u0, u_list, n_end, bounds, ws_weight, device, dlam)
+        if conv.any():
+            g_seq = adjoint_gradient(env, u_list, J_list, a_free, cfg.train.jac_reg,
+                                     grad_method=cfg.train.grad_method)
+            apply_update(net, opt, surrogate_loss(u_list, r_list, g_seq, dlam, device,
+                                                  grad_method=cfg.train.grad_method) + L_ws_t)
+        valid = bool(conv.all())
+        u_seq = np.stack([u.detach().cpu().numpy() for u in u_list])
+        hist["loss"].append(loss)
+        hist["rms"].append(float(np.sqrt(np.mean(err ** 2))) if valid else float("nan"))
+        hist["max"].append(float(err.max()) if valid else float("nan"))
+        hist["n_conv"].append(int(conv.sum()))
+        hist["valid"].append(valid)
+        hist["ws_loss"].append(float(L_ws_t.detach()))
+        hist["time"].append(time.time() - t_start)
+        hist["mid_paths"].append(np.vstack([ref[:1], mids]))
+        hist["u_paths"].append(u_seq)
+        if run is not None:
+            run.log(epoch=ep, total_loss=loss, mean_track_error=float(err.mean()),
+                    max_track_error=float(err.max()), converged_ratio=float(conv.mean()),
+                    newton_failures=env.n_newton_failures)
+        if ep % log_every == 0 or ep == epochs - 1:
+            print(f"[{tag} ep {ep:03d}] rms={hist['rms'][-1] * 1e3:7.2f} mm  "
+                  f"converged {conv.sum()}/{N}  ws_pen={hist['ws_loss'][-1]:.2e}  "
+                  f"t={hist['time'][-1]:7.1f}s", flush=True)
+    # the policy after the last update
+    env.set_state(checkpoint)
+    with torch.no_grad():
+        u_list, _, q_list, _, conv = rollout(env, net, u0, N, dlam, device, project=project,
+                                             stop_on_failure=False)
+    err, _, _, mids = tracking_loss_terms(env, q_list, conv, ref, N)
+    final = {"valid": bool(conv.all()), "n_conv": int(conv.sum()),
+             "rms": float(np.sqrt(np.mean(err ** 2))), "max": float(err.max()),
+             "end_err": float(err[-1])}
+    final_U = np.stack([u.detach().cpu().numpy() for u in u_list])
+    return (hist, final, np.vstack([ref[:1], mids]), final_U, q_list,
+            time.time() - t_start)
 
-    device = resolve_device(cfg.train.device)
-    u0 = torch.tensor(initial_control(cfg), dtype=torch.float32, device=device)
 
-    net = BoundaryVelocityNet(hidden=cfg.train.hidden, out_dim=end_control_dim(dim, twist)).to(device)
-    opt = optim.Adam(net.parameters(), lr=cfg.train.lr)
+def train_track_rhc(env, checkpoint, net, u0, ref, cfg, device, lr, bounds, ws_weight,
+                    run=None):
+    """Receding horizon: optimize one segment of the path, commit it, move on.
 
-    # RunLogger owns the TensorBoard writer: every result goes through
-    # run.log(), so the JSON record and the scalars cannot drift apart.
-    run = RunLogger(cfg, env=env, root=_ROOT,
-                    enabled=bool((cfg.get("output") or {}).get("run_log", True)))
+    Each segment is trained against its own slice of the reference and then
+    rolled out once more to be committed, so the next segment warm-starts from
+    the state the committed one ended in.
+    """
+    N = env.Nsteps
+    seg_lens = segment_lengths(N, cfg.rhc.num_segments)
+    seg_bounds = np.cumsum([0] + seg_lens)
+    n_end = net.out_dim
+    project = workspace_projection(bounds, u0, n_end)
+    u_current = u0.clone()
+    opt = optim.Adam(net.parameters(), lr=lr)
+    losses, q_traj = [], []
+    t_start = time.time()
 
-    print("Network structure:")
-    print(net)
-    print(f"Task: trajectory tracking  (adjoint gradients)  -- fixed by this script, not by the config")
-    print(f"Environment: {type(env).__name__}  (dim={dim}, twist={twist}, control={control_dim(dim, twist)}D)")
-    print(f"Rod material: {material_summary(cfg)}")
-    print(f"Device: {device}")
-    print(f"Trajectory type: {cfg.task.tracking.trajectory_type}")
-    print(f"RHC: {'enabled (' + str(cfg.rhc.num_segments) + ' segments)' if cfg.rhc.enabled else 'disabled (single horizon)'}")
+    for seg_idx, T_seg in enumerate(seg_lens):
+        if cfg.rhc.reinit_policy_each_segment:
+            reinit_net_(net)
+            opt = optim.Adam([p for p in net.parameters() if p.requires_grad], lr=lr)
+        dlam = 1.0 / T_seg
+        ref_seg = ref[seg_bounds[seg_idx]:seg_bounds[seg_idx + 1] + 1]
+        print(f"\n{'=' * 70}\nRHC segment {seg_idx + 1}/{len(seg_lens)}  (T={T_seg})\n{'=' * 70}")
 
-    loss_history = []
-
-    if not cfg.rhc.enabled:
-        dlam = 1.0 / N
-        checkpoint = env.get_state()
-
-        pbar = tqdm(range(cfg.train.epochs), desc="Training", dynamic_ncols=True)
-        for ep in pbar:
+        best = float("inf")
+        for it in range(cfg.train.iterations_per_segment):
             env.set_state(checkpoint)
             opt.zero_grad(set_to_none=True)
-
-            u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u0, targets, dlam, device, cfg.task.tracking.weight)
-            g_u_seq, total_loss = compute_loss_and_grad(env, u_list, q_list, J_list, converged_mask, targets, cfg.task.tracking.weight, cfg.train.jac_reg)
-
-            converged_ratio = converged_mask.mean()
-
-            if g_u_seq is None:
-                pbar.set_postfix({"status": "Newton failed all steps"})
-                run.log(epoch=ep, converged_ratio=float(converged_ratio),
-                        newton_failures=env.n_newton_failures,
-                        note="no converged step, no gradient step")
+            u_list, r_list, q_list, J_list, conv = rollout(env, net, u_current, T_seg, dlam,
+                                                           device, project=project,
+                                                           stop_on_failure=False)
+            _, loss, a_free, _ = tracking_loss_terms(env, q_list, conv, ref_seg, T_seg)
+            if not conv.any():
                 continue
+            g_seq = adjoint_gradient(env, u_list, J_list, a_free, cfg.train.jac_reg,
+                                     grad_method=cfg.train.grad_method)
+            L_ws = workspace_penalty(net, u_current, u_list, n_end, bounds, ws_weight, device,
+                                     dlam)
+            apply_update(net, opt, surrogate_loss(u_list, r_list, g_seq, dlam, device,
+                                                  grad_method=cfg.train.grad_method) + L_ws)
+            best = min(best, loss)
 
-            surrogate = torch.zeros((), device=device)
-            for k, u_k in enumerate(u_list):
-                g_k = torch.tensor(g_u_seq[k], dtype=u_k.dtype, device=device)
-                surrogate = surrogate + torch.dot(u_k, g_k)
-
-            surrogate.backward()
-            torch.nn.utils.clip_grad_norm_([p for p in net.parameters() if p.requires_grad], 1.0)
-            opt.step()
-
-            loss_history.append((ep, total_loss))
-
-            pbar.set_postfix({"total_loss": f"{total_loss:.4f}", "conv%": f"{converged_ratio*100:.0f}"})
-            # Mean per-step distance to the target is the number to read; the
-            # total loss is a sum of squares and scales with the horizon.
-            errs = [float(np.linalg.norm(node_position(q, dim, env.mid_node) - targets[k]))
-                    for k, q in enumerate(q_list) if converged_mask[k]]
-            run.log(epoch=ep, total_loss=float(total_loss),
-                    mean_track_error=float(np.mean(errs)) if errs else None,
-                    max_track_error=float(np.max(errs)) if errs else None,
-                    converged_ratio=float(converged_ratio),
-                    newton_failures=env.n_newton_failures)
-            if ep % 20 == 0:
-                print(f"[ep {ep:04d}]  total_loss={total_loss:.6f}  converged={converged_ratio*100:.0f}%")
-
-    else:
-        seg_lens = segment_lengths(N, cfg.rhc.num_segments)
-        seg_bounds = np.cumsum([0] + seg_lens)
+        env.set_state(checkpoint)
+        with torch.no_grad():
+            u_list, _, q_list, _, conv = rollout(env, net, u_current, T_seg, dlam, device,
+                                                 project=project, stop_on_failure=False)
         checkpoint = env.get_state()
-        u_current = u0.clone()
-
-        for seg_idx, T_seg in enumerate(seg_lens):
-            if cfg.rhc.reinit_policy_each_segment:
-                reinit_net_(net)
-                opt = optim.Adam([p for p in net.parameters() if p.requires_grad], lr=cfg.train.lr)
-
-            targets_seg = targets[seg_bounds[seg_idx]:seg_bounds[seg_idx + 1]]
-            dlam = 1.0 / T_seg
-            print(f"\n{'='*70}\nRHC segment {seg_idx + 1}/{len(seg_lens)}  (T={T_seg})\n{'='*70}")
-
-            result = optimize_segment(env, net, opt, u_current, targets_seg, dlam, device, cfg,
-                                       n_iterations=cfg.train.iterations_per_segment, checkpoint=checkpoint)
-
-            env.set_state(checkpoint)
-            with torch.no_grad():
-                u_list, q_list, J_list, converged_mask = rollout_segment(env, net, u_current, targets_seg, dlam, device, cfg.task.tracking.weight)
-            checkpoint = env.get_state()
-            u_current = u_list[-1].detach().clone()
-
-            loss_history.append((seg_idx, result["best_loss"]))
-            print(f"[segment {seg_idx}] best_loss={result['best_loss']:.6e}")
-            run.log(segment=seg_idx, horizon=int(T_seg),
-                    best_loss=float(result["best_loss"]),
-                    converged_ratio=float(result["converged_mask"].mean()),
+        u_current = u_list[-1].detach().clone()
+        q_traj.extend(q_list)
+        losses.append(best)
+        print(f"[segment {seg_idx}] best_loss={best:.6e}  converged {conv.sum()}/{T_seg}")
+        if run is not None:
+            run.log(segment=seg_idx, horizon=int(T_seg), best_loss=float(best),
+                    converged_ratio=float(conv.mean()),
                     newton_failures=env.n_newton_failures)
-
-    if loss_history:
-        eps, losses = zip(*loss_history)
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.plot(eps, losses, linewidth=1.5, color="steelblue")
-        ax.set_xlabel("Epoch" if not cfg.rhc.enabled else "RHC segment")
-        ax.set_ylabel("Total Tracking Loss")
-        ax.set_title(f"Tracking Loss ({cfg.task.tracking.trajectory_type})")
-        ax.grid(True, linestyle="--", alpha=0.5)
-        fig.tight_layout()
-        out = os.path.join(run.artifact_dir, 'loss_curve.png')
-        fig.savefig(out, dpi=150)
-        plt.close(fig)
-        print(f"Loss curve → {out}")
-
-    _visualize_tracking(env, net, u0, N, targets, device, cfg, run.artifact_dir)
-
-    run.finish(
-        task="tracking",
-        trajectory=cfg.task.tracking.trajectory_type,
-        mode="rhc" if cfg.rhc.enabled else "single_horizon",
-        final_loss=(loss_history[-1][1] if loss_history else None),
-        best_loss=(min(l for _, l in loss_history) if loss_history else None),
-        losses=[l for _, l in loss_history],
-        epochs_recorded=len(loss_history),
-        newton_failures_total=env.n_newton_failures,
-        device=str(device),
-    )
+    return losses, q_traj, time.time() - t_start
 
 
-def _visualize_tracking(env, net, u0, N, targets, device, cfg, out_dir):
-    reset_env(env, cfg)
-    dim = env.dim
-    twist = getattr(env, 'twist', False)
-    actual = []
-    q_traj = []       # full configuration per step, for the animation
-
-    if cfg.rhc.enabled:
-        seg_lens = segment_lengths(N, cfg.rhc.num_segments)
-    else:
-        seg_lens = [N]
-
-    u = u0.clone()
-    n_left = net.out_dim
-    with torch.no_grad():
-        for T_seg in seg_lens:
-            for k in range(T_seg):
-                lam = torch.tensor([[k / T_seg]], dtype=torch.float32, device=device)
-                u_dot_full = torch.cat([torch.zeros(n_left, device=device), net(lam).squeeze(0)])
-                u = u + (1.0 / T_seg) * u_dot_full
-                u_np = u.cpu().numpy()
-                obs, done, info = env.step(u_np, use_inertia=False)
-                if info["converged"]:
-                    a = dim * env.mid_node
-                    actual.append(info["q"][a:a + dim])
-                    q_traj.append(info["q"].copy())
-    actual = np.array(actual).reshape(-1, dim)
-
+def plot_tracking(ref, mids, dim, title, path):
+    """Reference against what the mid node actually did."""
     fig = plt.figure(figsize=(6, 6))
     if dim == 2:
         ax = fig.add_subplot(111)
-        ax.plot(targets[:, 0], targets[:, 1], 'b--', linewidth=2, label="Target trajectory")
-        ax.plot(actual[:, 0], actual[:, 1], 'r-o', markersize=3, linewidth=1.5,
-                label="Actual midpoint")
+        ax.plot(ref[:, 0], ref[:, 1], 'b--', linewidth=2, label="Reference")
+        ax.plot(mids[:, 0], mids[:, 1], 'r-', linewidth=1.5, label="Mid node")
         ax.set_aspect('equal')
     else:
         ax = fig.add_subplot(111, projection='3d')
-        ax.plot(targets[:, 0], targets[:, 1], targets[:, 2], 'b--', linewidth=2,
-                label="Target trajectory")
-        ax.plot(actual[:, 0], actual[:, 1], actual[:, 2], 'r-o', markersize=3,
-                linewidth=1.5, label="Actual midpoint")
+        ax.plot(ref[:, 0], ref[:, 1], ref[:, 2], 'b--', linewidth=2, label="Reference")
+        ax.plot(mids[:, 0], mids[:, 1], mids[:, 2], 'r-', linewidth=1.5, label="Mid node")
         ax.set_zlabel("z")
         try:
             ax.set_box_aspect((1, 1, 1))
@@ -366,18 +493,474 @@ def _visualize_tracking(env, net, u0, N, targets, device, cfg, out_dir):
             pass
     ax.set_xlabel("x")
     ax.set_ylabel("y")
-    ax.set_title(f"Midpoint Tracking ({cfg.task.tracking.trajectory_type})")
+    ax.set_title(title)
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.4)
     fig.tight_layout()
-    out = os.path.join(out_dir, 'tracking_result.png')
-    fig.savefig(out, dpi=150)
+    fig.savefig(path, dpi=150)
     plt.close(fig)
-    print(f"Tracking result → {out}")
 
-    maybe_save_trajectory_gif(cfg, q_traj, env, targets,
-                              save_path=str(_ROOT / 'outputs'),
-                              title=f'DLO tracking ({cfg.task.tracking.trajectory_type})')
+
+def build_reference(cfg, env, args, m0):
+    """``(ref (N+1, dim), name)``: row 0 is where the mid node starts.
+
+    A named preset is anchored at ``m0``; otherwise the config's curve is used
+    and ``m0`` is prepended, so row ``k+1`` is step ``k``'s target either way.
+    """
+    N = env.Nsteps
+    if args.path:
+        return reference_path(args.path, m0, N), args.path
+    kind = cfg.task.tracking.trajectory_type
+    curve = make_target_trajectory(N, env.rod_length, traj_type=kind, dim=env.dim,
+                                   start=m0, end=task_target(cfg))
+    return np.vstack([m0, curve]), kind
+
+
+def cmd_train(args):
+    cfg = load_config(args.config)
+    if args.grad_method is not None:        # the command line wins over the YAML
+        cfg["train"]["grad_method"] = args.grad_method
+    grad_method = cfg.train.grad_method
+    torch.set_num_threads(1)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    dim, twist = env_dim(cfg), env_twist(cfg)
+    k = end_control_dim(dim, twist)
+    bounds = workspace_bounds(cfg, dim, k)
+    if args.method == "rrt_nc" and bounds is None:
+        raise SystemExit("rrt_nc plans inside the gripper workspace; enable workspace in the config")
+    env = build_env(cfg)
+    reset_env(env, cfg)
+    u0_np = ready_pose(env, cfg, args.ready_dx) if args.ready_dx else initial_control(cfg)
+    checkpoint = env.get_state()
+    N = env.Nsteps
+    m0 = mid_of(env, checkpoint["q"])
+    ref, ref_name = build_reference(cfg, env, args, m0)
+    u0 = torch.tensor(u0_np, dtype=torch.float32, device=torch.device("cpu"))
+    device = resolve_device(cfg.train.device if args.device is None else args.device)
+    u0 = u0.to(device)
+    net = BoundaryVelocityNet(hidden=cfg.train.hidden, out_dim=k).to(device)
+
+    lr = args.lr if args.lr is not None else (cfg.train.lr if args.method == "nc" else 1e-4)
+    epochs = cfg.train.epochs if args.epochs is None else args.epochs
+    name = (f"{ref_name}_{args.method}_s{args.seed}"
+            + (f"_p{args.plan_seed}" if args.method == "rrt_nc" else "")
+            + (f"_lr{lr:g}" if args.method == "nc" and lr != cfg.train.lr else "")
+            + ("_proxy" if grad_method == "proxy" else ""))
+    run = RunLogger(cfg, env=env, root=_ROOT, tag=name,
+                    enabled=bool((cfg.get("output") or {}).get("run_log", True)))
+    out = Path(args.out) if args.out else Path(run.artifact_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    print(f"Task: path tracking  (adjoint neural control, method {args.method})")
+    print(f"Adjoint gradient: {grad_method}  "
+          f"({'--grad-method' if args.grad_method else 'train.grad_method'})")
+    print(f"Environment: {type(env).__name__}  (dim={dim}, twist={twist}, "
+          f"control={control_dim(dim, twist)}D)")
+    print(f"Rod material: {material_summary(cfg)}")
+    budget = (f"receding horizon, {cfg.rhc.num_segments} segments x "
+              f"{cfg.train.iterations_per_segment} updates" if cfg.rhc.enabled
+              else f"single horizon, {epochs} epochs")
+    print(f"Reference: {ref_name}, {N} steps from {np.round(ref[0], 4)} to "
+          f"{np.round(ref[-1], 4)}   device: {device}   lr {lr:g}")
+    print(f"Horizon: {N} steps, {budget}")
+    print(f"Workspace: {'off' if bounds is None else 'on, penalty ' + str(args.ws_weight)}")
+
+    summary = {"path": ref_name, "method": args.method, "grad_method": grad_method,
+               "seed": args.seed, "lr": float(lr),
+               "lr_default": float(cfg.train.lr), "epochs": epochs, "N": int(N),
+               "nv": int(env.nv), "ready_dx": float(args.ready_dx),
+               "plan_seed": args.plan_seed if args.method == "rrt_nc" else None,
+               "workspace": None if bounds is None else
+               {"lo": bounds[0].tolist(), "hi": bounds[1].tolist(),
+                "weight": float(args.ws_weight)}}
+    arrays = {"ref": ref}
+
+    if args.method == "rrt_nc":
+        # ---- global: the verified plan for this path and planner seed
+        plans_dir = out / "plans"
+        verdict = json.load(open(plans_dir / f"{args.path}_verify.json"))
+        if abs(verdict["settings"]["ready_dx"] - args.ready_dx) > 1e-12:
+            raise SystemExit("--ready-dx differs from the one the plan was verified with")
+        plan = next((p for p in verdict["plans"] if p["seed"] == args.plan_seed), None)
+        if plan is None or not plan["success"]:
+            raise SystemExit(f"no verified plan for {args.path} with planner seed {args.plan_seed}")
+        pz = np.load(plans_dir / f"{args.path}_p{args.plan_seed}.npz")
+        summary["plan"] = plan
+        arrays.update({"U_plan": pz["U_plan"], "plan_coarse_mid": pz["coarse_mid"],
+                       "plan_fine_mid": pz["fine_mid"]})
+        # ---- warm start
+        t_fit = time.time()
+        summary["fit"] = fit_policy(net, u0, pz["U_plan"], k, dim=dim, iters=args.fit_iters)
+        summary["fit"]["time"] = time.time() - t_fit
+        print(f"[{name}] policy fit: {summary['fit']}", flush=True)
+
+    env.n_newton_failures = 0
+    if cfg.rhc.enabled:
+        losses, q_traj, t_train = train_track_rhc(env, checkpoint, net, u0, ref, cfg, device,
+                                                  lr, bounds, args.ws_weight, run=run)
+        mids = np.vstack([ref[:1], np.array([mid_of(env, q) for q in q_traj])])
+        err = np.linalg.norm(mids[1:] - ref[1:len(mids)], axis=1)
+        final = {"valid": True, "n_conv": len(q_traj),
+                 "rms": float(np.sqrt(np.mean(err ** 2))), "max": float(err.max()),
+                 "end_err": float(err[-1])}
+        summary["segment_loss"] = losses
+        arrays["final_mid"] = mids
+    else:
+        hist, final, mids, final_U, q_traj, t_train = train_track(
+            env, checkpoint, net, u0, ref, cfg, epochs, device, lr, bounds, args.ws_weight,
+            run=run, tag=name)
+        losses = hist["loss"]
+        for key in ("loss", "rms", "max", "n_conv", "valid", "ws_loss", "time"):
+            summary[f"epoch_{key}"] = hist[key]
+        arrays.update({"final_mid": mids, "final_U": final_U,
+                       "epoch_mid_paths": np.array(hist["mid_paths"], dtype=np.float32),
+                       "epoch_u_paths": np.array(hist["u_paths"], dtype=np.float32)})
+
+    summary.update({"train_time": t_train, "final": final, "status": "done",
+                    "newton_failures_total": int(env.n_newton_failures)})
+    np.savez_compressed(out / f"{name}.npz", **arrays)
+    json.dump(summary, open(out / f"{name}.json", "w"), indent=1, default=float)
+
+    plot_tracking(ref, arrays["final_mid"], dim, f"Mid-node tracking ({ref_name})",
+                  os.path.join(run.artifact_dir, "tracking_result.png"))
+    if losses:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.plot(np.arange(len(losses)), losses, linewidth=1.5, color="steelblue")
+        ax.set_xlabel("RHC segment" if cfg.rhc.enabled else "Epoch")
+        ax.set_ylabel("Tracking loss")
+        ax.set_title(f"Tracking loss ({ref_name})")
+        ax.grid(True, linestyle="--", alpha=0.5)
+        fig.tight_layout()
+        fig.savefig(os.path.join(run.artifact_dir, "loss_curve.png"), dpi=150)
+        plt.close(fig)
+    maybe_save_trajectory_gif(cfg, q_traj, env, ref[1:], save_path=str(run.artifact_dir),
+                              title=f'DLO tracking ({ref_name})')
+
+    run.finish(task="tracking", trajectory=ref_name, method=args.method,
+               grad_method=grad_method,
+               mode="rhc" if cfg.rhc.enabled else "single_horizon",
+               final_loss=float(losses[-1]) if losses else None,
+               best_loss=float(np.nanmin(losses)) if losses else None,
+               losses=[float(l) for l in losses], epochs_recorded=len(losses),
+               final_error=final["rms"], newton_failures_total=env.n_newton_failures,
+               device=str(device))
+    print(f"[{name}] done: final rms {final['rms'] * 1e3:.2f} mm (valid={final['valid']}), "
+          f"train {t_train:.0f}s", flush=True)
+
+
+# ------------------------------------------------------------------- report
+
+COLORS = {"nc": "#2a78d6", "nc_lr": "#2a78d6", "rrt": "#eb6834", "rrt_nc": "#1baf7a"}
+LABELS = {"nc": "NC (direct)", "nc_lr": "NC (direct), fine-tune lr",
+          "rrt_nc": "RRT + NC", "rrt": "RRT open loop (fine rod)"}
+
+
+def _variant(r):
+    if r["method"] == "rrt_nc":
+        return "rrt_nc"
+    return "nc" if abs(r["lr"] - r["lr_default"]) < 1e-12 else "nc_lr"
+
+
+def _first_below(x, thr):
+    idx = np.where(np.asarray(x) <= thr)[0]
+    return int(idx[0]) if len(idx) else None
+
+
+def _fmt(v, scale=1e3, nd=1):
+    return "-" if v is None or not np.isfinite(v) else f"{v * scale:.{nd}f}"
+
+
+def _fisher_greater(a, n_a, b, n_b):
+    """One-sided Fisher exact p for 'success rate of a > that of b'."""
+    from math import comb
+    total, succ = n_a + n_b, a + b
+
+    def p_table(x):
+        return comb(n_a, x) * comb(n_b, succ - x) / comb(total, succ)
+    return sum(p_table(x) for x in range(a, min(n_a, succ) + 1))
+
+
+def report(out):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    verdicts = {p: json.load(open(out / "plans" / f"{p}_verify.json"))
+                for p in PATHS if (out / "plans" / f"{p}_verify.json").exists()}
+    runs = [json.load(open(f)) for f in sorted(out.glob("*.json"))]
+    # A job is recognised by its own fields, so a directory that also holds a
+    # run's own files (summary.json, another task's job) is read regardless.
+    runs = [r for r in runs if isinstance(r, dict) and r.get("status") == "done"
+            and {"path", "method", "epoch_rms"} <= set(r)]
+    for r in runs:
+        r["_v"] = _variant(r)
+        rms = np.array(r["epoch_rms"], dtype=float)
+        r["_best"] = float(np.nanmin(rms)) if np.isfinite(rms).any() else np.nan
+        r["_best_ep"] = int(np.nanargmin(rms)) if np.isfinite(rms).any() else None
+        r["_n_valid"] = int(np.sum(r["epoch_valid"]))
+    n_steps = int(runs[0]["N"]) if runs else 0
+    n_nodes = int(runs[0]["nv"]) if runs else 0
+    L = ["# Path tracking in the bounded workspace: RRT + NC versus NC", ""]
+    L.append("Errors are mid-node distances to the reference at the same continuation step, "
+             f"on the fine rod. RMS over the {n_steps} steps; *valid* = all {n_steps} Newton "
+             "solves converged (invalid rollouts are excluded from every result). 'best' = "
+             "best valid epoch; 'final' = the policy after the last update.")
+    L.append("")
+    L.append("## Paths and their feasibility check")
+    L.append("")
+    L.append("Coarse rod (planner model) following the path with chained RRT segments; "
+             f"fine rod = the same commands executed open loop on the {n_nodes}-node rod.")
+    L.append("")
+    L.append("| path | shape | length [m] | end point [m] | planner seeds feasible | coarse rms / max [mm] | fine open-loop rms / max [mm] |")
+    L.append("|---|---|---|---|---|---|---|")
+    for p, v in verdicts.items():
+        ok = [q for q in v["plans"] if q["success"]]
+        co = ", ".join(f"{_fmt(q['coarse_rms'])} / {_fmt(q['coarse_max'])}" for q in ok) or "-"
+        fi = ", ".join((f"{_fmt(q.get('fine_rms'))} / {_fmt(q.get('fine_max'))}"
+                        if q.get("fine_converged") else "solver fails") for q in ok) or "-"
+        L.append(f"| {p} | {v['kind']} | {v['length']:.3f} | {np.round(v['end'], 3).tolist()} | "
+                 f"{len(ok)}/{len(v['plans'])} | {co} | {fi} |")
+    L.append("")
+    paths = [p for p in verdicts
+             if verdicts[p]["feasible"] and any(r["path"] == p for r in runs)]
+    thr = (0.005, 0.010)
+    agg = {v: {"n": 0, "best": [0, 0], "final": [0, 0], "valid_final": 0}
+           for v in ("nc", "nc_lr", "rrt_nc")}
+    L.append("## Runs")
+    L.append("")
+    L.append("| path | method | run | start rms | best rms (epoch) | final rms | final valid | "
+             "epochs to 10 / 5 mm | valid epochs |")
+    L.append("|---|---|---|---|---|---|---|---|---|")
+    for p in paths:
+        for r in sorted([r for r in runs if r["path"] == p],
+                        key=lambda r: (r["_v"], r.get("plan_seed") or 0, r["seed"])):
+            rms = np.array(r["epoch_rms"], dtype=float)
+            e10, e5 = _first_below(np.nan_to_num(rms, nan=9.9), 0.010), \
+                _first_below(np.nan_to_num(rms, nan=9.9), 0.005)
+            run = (f"plan {r['plan_seed']}, seed {r['seed']}" if r["_v"] == "rrt_nc"
+                   else f"seed {r['seed']}")
+            fin = r["final"]
+            L.append(f"| {p} | {LABELS[r['_v']]} | {run} | {_fmt(rms[0])} | "
+                     f"{_fmt(r['_best'])} ({r['_best_ep']}) | {_fmt(fin['rms'])} | "
+                     f"{'yes' if fin['valid'] else 'no'} | {e10 if e10 is not None else '-'} / "
+                     f"{e5 if e5 is not None else '-'} | {r['_n_valid']}/{len(rms)} |")
+            a = agg[r["_v"]]
+            a["n"] += 1
+            for i, t in enumerate(thr):
+                a["best"][i] += int(np.isfinite(r["_best"]) and r["_best"] <= t)
+                a["final"][i] += int(fin["valid"] and fin["rms"] <= t)
+            a["valid_final"] += int(fin["valid"])
+    L.append("")
+    L.append("## Final rms per path [mm]")
+    L.append("")
+    L.append("Final policy, sorted; '-' marks a final rollout with a failed Newton step.")
+    L.append("")
+    L.append(f"| path | {LABELS['rrt_nc']} | {LABELS['nc']} | {LABELS['nc_lr']} |")
+    L.append("|---|---|---|---|")
+    for p in paths:
+        cells = []
+        for v in ("rrt_nc", "nc", "nc_lr"):
+            fin = sorted((r["final"]["rms"] if r["final"]["valid"] else np.inf)
+                         for r in runs if r["path"] == p and r["_v"] == v)
+            cells.append(", ".join(_fmt(x) if np.isfinite(x) else "-" for x in fin) or "")
+        L.append(f"| {p} | " + " | ".join(cells) + " |")
+    L.append("")
+    L.append("## Success rates over all runs")
+    L.append("")
+    L.append("One-sided Fisher exact test of RRT + NC against each NC variant.")
+    L.append("")
+    L.append("| criterion | RRT + NC | NC (direct) | p | NC, fine-tune lr | p |")
+    L.append("|---|---|---|---|---|---|")
+    g, n, nl = agg["rrt_nc"], agg["nc"], agg["nc_lr"]
+    for i, t in enumerate(thr):
+        for key, lab in (("best", "best valid rms"), ("final", "final policy rms")):
+            pv, pl = (_fisher_greater(g[key][i], g["n"], b[key][i], b["n"])
+                      if g["n"] and b["n"] else np.nan for b in (n, nl))
+            L.append(f"| {lab} <= {t * 1e3:.0f} mm | {g[key][i]}/{g['n']} | {n[key][i]}/{n['n']} | "
+                     f"{pv:.3f} | {nl[key][i]}/{nl['n']} | {pl:.3f} |")
+    L.append(f"| final rollout valid | {g['valid_final']}/{g['n']} | {n['valid_final']}/{n['n']} | - | "
+             f"{nl['valid_final']}/{nl['n']} | - |")
+    L.append("")
+    # ---- figures
+    if paths:
+        nc_ = len(paths)
+        cols = min(3, nc_)
+        rows = int(np.ceil(nc_ / cols))
+        fig, axes = plt.subplots(rows, cols, figsize=(6.2 * cols, 4.2 * rows), squeeze=False)
+        for ax, p in zip(axes.flat, paths):
+            for r in [r for r in runs if r["path"] == p]:
+                rms = np.array(r["epoch_rms"], dtype=float) * 1e3
+                ax.plot(rms, color=COLORS[r["_v"]], lw=1.4,
+                        ls="--" if r["_v"] == "nc_lr" else "-", alpha=0.85)
+            ok = [q for q in verdicts[p]["plans"] if q["success"] and q.get("fine_converged")]
+            for q in ok:
+                ax.axhline(q["fine_rms"] * 1e3, color=COLORS["rrt"], ls="-.", lw=1.0, alpha=0.7)
+            ax.set_yscale("log")
+            ax.set_title(f"{p}  ({verdicts[p]['kind']})")
+            ax.set_xlabel("epoch")
+            ax.set_ylabel("rms tracking error [mm]")
+            ax.grid(alpha=0.3)
+        for ax in list(axes.flat)[nc_:]:
+            ax.axis("off")
+        handles = [plt.Line2D([], [], color=COLORS[v], ls=s, label=LABELS[v])
+                   for v, s in (("nc", "-"), ("nc_lr", "--"), ("rrt_nc", "-"), ("rrt", "-."))]
+        fig.legend(handles=handles, loc="lower center", ncol=4, frameon=False)
+        fig.tight_layout(rect=(0, 0.05, 1, 1))
+        fig.savefig(out / "convergence_all.png", dpi=110)
+        plt.close(fig)
+        L.append("![convergence](convergence_all.png)")
+        L.append("")
+        for p in paths:
+            fig, axes = plt.subplots(1, 3, figsize=(15, 4.6))
+            ref = None
+            best = {}
+            for r in [r for r in runs if r["path"] == p]:
+                if r["_best_ep"] is None:
+                    continue
+                cur = best.get(r["_v"])
+                if cur is None or r["_best"] < cur["_best"]:
+                    best[r["_v"]] = r
+            z = None
+            for v, r in best.items():
+                stem = out / (f"{p}_{r['method']}_s{r['seed']}"
+                              + (f"_p{r['plan_seed']}" if v == "rrt_nc" else "")
+                              + (f"_lr{r['lr']:g}" if v == "nc_lr" else ""))
+                z = np.load(f"{stem}.npz")
+                ref = z["ref"]
+                mp = z["epoch_mid_paths"][r["_best_ep"]]
+                for ax, (i, j) in zip(axes, ((0, 1), (0, 2), (1, 2))):
+                    ax.plot(mp[:, i], mp[:, j], color=COLORS[v], lw=1.6,
+                            ls="--" if v == "nc_lr" else "-",
+                            label=f"{LABELS[v]} (best, {r['_best'] * 1e3:.1f} mm)")
+            pz = sorted((out / "plans").glob(f"{p}_p*.npz"))
+            if pz:
+                zz = np.load(pz[0])
+                ref = zz["ref"]
+                fm = np.vstack([ref[:1], zz["fine_mid"]])
+                for ax, (i, j) in zip(axes, ((0, 1), (0, 2), (1, 2))):
+                    ax.plot(fm[:, i], fm[:, j], color=COLORS["rrt"], ls="-.", lw=1.2,
+                            label=LABELS["rrt"] + f" ({pz[0].stem.split('_')[-1]})")
+            if ref is not None:
+                for ax, (i, j), nm in zip(axes, ((0, 1), (0, 2), (1, 2)), ("x-y", "x-z", "y-z")):
+                    ax.plot(ref[:, i], ref[:, j], color="black", lw=2.2, alpha=0.5,
+                            label="reference")
+                    ax.plot(ref[0, i], ref[0, j], "ko", ms=5)
+                    ax.set_title(nm)
+                    ax.set_aspect("equal", adjustable="datalim")
+                    ax.grid(alpha=0.3)
+            axes[0].legend(fontsize=8, loc="best")
+            fig.suptitle(f"{p}: mid-node path, best valid epoch per method")
+            fig.tight_layout()
+            fig.savefig(out / f"paths_{p}.png", dpi=100)
+            plt.close(fig)
+            L.append(f"![{p}](paths_{p}.png)")
+            L.append("")
+    (out / "report.md").write_text("\n".join(L))
+    print(f"wrote {out / 'report.md'}")
+
+
+# --------------------------------------------------------------------- jobs
+
+def cmd_jobs(args):
+    """Training commands for the verified paths, one per line.
+
+    Per path: NC from ``--nc-seeds``; RRT + NC once per *distinct* verified
+    plan (planner seeds that produce the same commands count once), topped up
+    with further policy seeds on the first plan until there are as many RRT +
+    NC runs as NC runs; and NC at the fine-tuning learning rate from
+    ``--nc-lr-seeds`` (the same-lr control: lr 1e-3 makes NC oscillate).
+    """
+    out = Path(args.out)
+    run = f"python scripts/train_tracking.py --out {out}"
+    for p in (args.paths or PATHS):
+        f = out / "plans" / f"{p}_verify.json"
+        if not f.exists() or not json.load(open(f))["feasible"]:
+            continue
+        v = json.load(open(f))
+        for s in args.nc_seeds:
+            print(f"{run} --path {p} --method nc --seed {s} > {out}/logs/{p}_nc_s{s}.log 2>&1")
+        plans = []
+        for q in v["plans"]:
+            if q["success"] and q.get("fine_converged"):
+                U = np.load(out / "plans" / f"{p}_p{q['seed']}.npz")["U_plan"]
+                if all(np.max(np.abs(U - U2)) > 1e-6 for _, U2 in plans):
+                    plans.append((q["seed"], U))
+        gl = [(ps, 42) for ps, _ in plans]
+        extra = [s for s in args.nc_seeds if s != 42]
+        while plans and len(gl) < len(args.nc_seeds) and extra:
+            gl.append((plans[0][0], extra.pop(0)))
+        for ps, s in gl:
+            print(f"{run} --path {p} --method rrt_nc --plan-seed {ps} --seed {s} "
+                  f"> {out}/logs/{p}_rrt_nc_s{s}_p{ps}.log 2>&1")
+        for s in args.nc_lr_seeds:
+            print(f"{run} --path {p} --method nc --seed {s} --lr 0.0001 "
+                  f"> {out}/logs/{p}_nc_s{s}_lr.log 2>&1")
+
+
+def main():
+    cmds = ("train", "verify", "jobs", "report")
+    argv = sys.argv[1:]
+    cmd = argv.pop(0) if argv and argv[0] in cmds else "train"
+
+    ap = argparse.ArgumentParser(description=f"path tracking by neural control ({cmd})")
+    ap.add_argument("--out", default=None,
+                    help="directory the job's json/npz (and plans/) live in; "
+                         "default for training: the run directory")
+    if cmd in ("train", "verify"):
+        ap.add_argument("--config", default=None, help="YAML config over configs/default.yaml")
+        ap.add_argument("--path", choices=sorted(PATHS), default=None,
+                        help="a named preset; default: the config's trajectory_type")
+        ap.add_argument("--ready-dx", type=float, default=0.01,
+                        help="[m] gripper move towards the fixed end before tracking starts")
+    if cmd == "train":
+        ap.add_argument("--method", choices=("nc", "rrt_nc"), default="nc")
+        ap.add_argument("--grad-method", choices=GRAD_METHODS, default=None,
+                        help="adjoint gradient: state (exact) or proxy (frozen tangent); "
+                             "default: train.grad_method")
+        ap.add_argument("--seed", type=int, default=42, help="policy init seed")
+        ap.add_argument("--plan-seed", type=int, default=0, help="rrt_nc: which verified plan")
+        ap.add_argument("--epochs", type=int, default=None, help="default: train.epochs")
+        ap.add_argument("--lr", type=float, default=None,
+                        help="default: train.lr for nc, 1e-4 for rrt_nc")
+        ap.add_argument("--device", default=None, help="default: train.device")
+        ap.add_argument("--fit-iters", type=int, default=5000)
+        ap.add_argument("--ws-weight", type=float, default=100.0)
+    if cmd == "verify":
+        ap.add_argument("--plan-seeds", type=int, nargs="+", default=[0, 1, 2])
+        ap.add_argument("--segments", type=int, default=20, help="waypoints along the path")
+        ap.add_argument("--wp-tol", type=float, default=0.005, help="[m] waypoint tolerance")
+        ap.add_argument("--path-tol", type=float, default=0.015,
+                        help="[m] largest allowed distance to the reference within a segment")
+        ap.add_argument("--seg-time", type=float, default=60.0, help="[s] planner time per segment")
+        ap.add_argument("--seg-iter", type=int, default=2000)
+        ap.add_argument("--seg-tries", type=int, default=4, help="planner restarts per segment")
+        ap.add_argument("--shortcuts", type=int, default=10)
+        ap.add_argument("--plan-nv", type=int, default=11)
+        ap.add_argument("--plan-newton-iter", type=int, default=100)
+    if cmd == "jobs":
+        ap.add_argument("--paths", nargs="+", choices=sorted(PATHS), default=None,
+                        help="default: every verified path")
+        ap.add_argument("--nc-seeds", type=int, nargs="+", default=[0, 1, 42])
+        ap.add_argument("--nc-lr-seeds", type=int, nargs="*", default=[0, 1, 42],
+                        help="NC runs per path at the fine-tuning lr (control); none to skip")
+    args = ap.parse_args(argv)
+
+    if cmd in ("verify", "jobs", "report") and args.out is None:
+        raise SystemExit(f"{cmd} needs --out, the experiment directory")
+    if cmd == "verify":
+        if args.path is None:
+            raise SystemExit("verify needs --path, one of the named presets")
+        cmd_verify(args)
+    elif cmd == "jobs":
+        cmd_jobs(args)
+    elif cmd == "report":
+        report(Path(args.out))
+    else:
+        if args.method == "rrt_nc" and args.path is None:
+            raise SystemExit("rrt_nc needs --path: the plan is verified per named path")
+        if args.method == "rrt_nc" and args.out is None:
+            raise SystemExit("rrt_nc needs --out, the directory `verify` wrote plans/ into")
+        cmd_train(args)
 
 
 if __name__ == "__main__":

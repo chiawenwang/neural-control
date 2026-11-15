@@ -1,7 +1,7 @@
 """Result plotting helpers shared by the training scripts.
 
-* ``visualize_results``  -> outputs/neural_control_result.png (final shape + loss curve)
-* ``save_trajectory_gif`` -> outputs/<name>.gif (the whole control rollout, frame by frame)
+* ``visualize_results``  -> neural_control_result.png in the run directory (final shape + loss curve)
+* ``save_trajectory_gif`` -> <name>.gif there too (the whole control rollout, frame by frame)
 * ``maybe_save_trajectory_gif`` -> the same, but only if ``output.save_gif`` is on
 """
 import os
@@ -82,7 +82,7 @@ def visualize_results(results, env, target_pos, save_path='img'):
 def _positions(q, env, dim):
     """Node coordinates out of a DOF vector, ``(nv, dim)``.
 
-    With torsion the DOF vector carries per-edge twist angles after the
+    With torsion the DOF vector carries the two gripper yaws after the
     positions, so a plain ``reshape(-1, dim)`` would be wrong; the environment
     knows the split.
     """
@@ -124,41 +124,32 @@ def _material_triads(q_traj, env, idx):
     ``(n_frames, 3, 3, 3)`` -- three locations, and for each a ``(tangent, m1,
     m2)`` triad -- or ``None`` when the rod has no torsion.
 
-    The reference directors are simulator *state*, not something ``q`` carries,
-    so they are replayed here: seeded exactly as ``env.reset()`` does and then
-    parallel transported along the recorded configurations.  Replaying is
-    deterministic given the positions, so this reproduces the directors the
-    solver actually used, without the training scripts having to record them.
+    The frames are a function of the recorded configuration alone (the Bishop
+    frame is rebuilt from the positions and the twist is uniform; see
+    :mod:`rodframes`), so nothing has to be replayed and nothing the training
+    scripts did not record is missing.
     """
     if not getattr(env, "twist", False):
         return None
-    from rodframes import RodFrames, tangents
+    from rodframes import material_frames, tangents
 
     nv = env.nv
     # Edges whose cross-section we show, anchored at the node we draw them from.
     edges = (0, min(max(env.mid_node, 0), nv - 2), nv - 2)
     nodes = (0, env.mid_node, nv - 1)
 
-    frames_state = RodFrames(nv)
-    frames_state.reset(env.nodes)
-
-    keep = set(int(k) for k in idx)
     anchors, triads = [], []
-    for k, q in enumerate(q_traj):
+    for k in idx:
+        q = q_traj[int(k)]
         pos = env.positions(q)
-        frames_state.advance(pos)
-        if k not in keep:
-            continue
-        theta = env.twist_angles(q)
+        yaw_l, yaw_r = env.twist_angles(q)
+        m1, m2 = material_frames(pos, yaw_l, yaw_r)
         t = tangents(pos)
-        u = frames_state.directors
         tri = np.empty((3, 3, 3))
         for j, e in enumerate(edges):
-            v = np.cross(t[e], u[e])
-            c, sn = np.cos(theta[e]), np.sin(theta[e])
             tri[j, 0] = t[e]
-            tri[j, 1] = c * u[e] + sn * v          # material axis m1
-            tri[j, 2] = -sn * u[e] + c * v         # material axis m2
+            tri[j, 1] = m1[e]
+            tri[j, 2] = m2[e]
         anchors.append(pos[list(nodes)])
         triads.append(tri)
     return np.asarray(anchors), np.asarray(triads)

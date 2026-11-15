@@ -1,60 +1,100 @@
 # -*- coding: utf-8 -*-
-"""Material frames and the reference twist, for the 3D rod with torsion.
+"""Bishop frames and the twist holonomy, for the 3D rod with torsion.
 
-Background
-----------
-A rod that can twist needs more than node positions: each edge carries a
-*material frame* describing how its cross-section is oriented about the edge
-tangent.  Following the Discrete Elastic Rods formulation (Bergou et al. 2008;
-the same construction DEFORM uses), the frame is split into
+This follows the *original* Discrete Elastic Rods formulation (Bergou et al.,
+SIGGRAPH 2008 -- ``reference/Discrete elastic rods.pdf``), not the
+time-parallel reference frames of the later Discrete Viscous Threads (2010).
+The difference is where the frame comes from:
 
-* a **reference director** ``u^i`` per edge, perpendicular to that edge's
-  tangent, carried along by *parallel transport* -- a rotation that adds no
-  twist, so the reference frame itself is twist-free by construction; and
-* a scalar **twist angle** ``theta^i`` per edge, the rotation of the material
-  frame away from the reference director about the tangent.
+* **2008 (here).**  The Bishop frame is rebuilt from the *current* positions:
+  one director ``u^0`` on the first edge, then *parallel transport along the
+  rod* onto every later edge (sec. 4.2.2).  Because each director is by
+  definition the transport of the previous one, the per-node reference twist
+  vanishes identically; the twist of the rod is the angle between the
+  *material* frames at its two ends, and the centreline enters through the
+  **holonomy** of that transport chain (sec. 6).  The frame is a function of
+  the configuration -- there is nothing to carry between steps.
+* **2010.**  Every edge keeps its own director, carried from the previous step
+  by parallel transport *in time*; the mismatch between the two is a per-node
+  reference twist ``psi_i`` added to each local twist.  That needs frame state,
+  makes the twist depend on the path the rod took, and measures the gripper's
+  yaw against a frame that has itself been drifting.
 
-``theta`` is a genuine degree of freedom, solved for alongside the positions.
-The reference directors are *state*: they are stored between steps and carried
-to the new configuration by parallel transport, exactly like the warm start
-that keeps the position solve on one equilibrium branch.
+Material frame and the quasistatic twist
+----------------------------------------
+Each edge's material frame is the Bishop director rotated by an angle
+``theta^i`` about the edge tangent.  Section 5 treats those angles as
+quasistatic: they minimise the elastic energy for the given centreline and
+boundary conditions.  For a naturally straight rod with isotropic bending --
+the only case this repository models -- the minimiser is *uniform* twist
+(eq. 5), so the angles can be eliminated in closed form and the whole twisting
+energy collapses onto a single scalar (eq. 6)::
 
-The reference twist
--------------------
-Parallel transport along the rod is not integrable: carrying ``u^{i-1}`` from
-edge ``i-1`` onto edge ``i`` does not in general land on ``u^i``.  The angle
-between them is the **reference twist** ``psi_i``, and the material twist at
-interior node ``i`` is
+    E_twist = (GJ / 2 L_tw) * Phi^2 ,     L_tw = sum of the Voronoi lengths
 
-    m_i = theta^i - theta^{i-1} + psi_i
+where ``Phi`` is the total twist of the rod: the angle between the material
+frames the two grippers prescribe, *measured in the Bishop frame*::
 
-``psi_i`` depends on the *positions*, which is precisely what couples twisting
-to bending: this is the discrete form of the Calugareanu-White-Fuller relation
-(link = twist + writhe).  Without it, yaw at the gripper would be a dead input
--- the rod would twist but its centreline would not move, and the gradient of
-any position-based loss with respect to yaw would be exactly zero.
+    Phi = yaw_r - yaw_l - H(x)
+
+``H`` is the holonomy of the transport chain (:func:`holonomy`).  That is the
+one and only place the centreline enters the twisting energy, and it is what
+couples twisting to bending: hold the yaws fixed and bend the rod, and the
+rod twists.  Without it the energy would depend on the yaws alone, the
+centreline would not respond to them, and the gradient of a position-based
+loss with respect to yaw would be identically zero.
+
+Where the gripper's yaw is measured from
+----------------------------------------
+A yaw command is an angle of the wrist, so it is measured from a frame that
+depends on the gripper's own orientation, not on the rod's history:
+:func:`gripper_director` gives that reference direction for an end tangent,
+the vector perpendicular to the tangent in the vertical plane through it (it
+is ``+z`` for the rod's straight rest pose).  Both ends use it: the first
+edge's Bishop director *is* the left gripper's reference direction, so the
+left yaw is ``theta^0`` outright, and the right yaw is measured from the same
+reference at the far end -- which is why ``H`` appears in ``Phi`` above.
+
+That frame spins about the tangent as the tangent moves (by ``sin(phi) dtheta``
+in the azimuth/elevation chart the controls use), and :func:`director_spin`
+is that rate.  It is the end-edge counterpart of the per-node holonomy, and it
+is what makes a gripper that only *tilts* still twist the rod.
 
 Derivatives
 -----------
-``psi_grad_hess`` gives the exact first and second derivatives of ``psi_i``
-with respect to the three nodes of its stencil.  The gradient has the
-classical holonomy part plus a re-adaptation part (see that function's
-docstring); both have the same ``kb / 2L`` shape.  Everything here is checked
-against finite differences of a direct parallel-transport evaluation of
-``psi`` by ``scripts/check_twist.py``.
+:func:`holonomy_grad_hess` returns ``H`` with its exact gradient and Hessian
+with respect to every node.  The gradient has three parts: the classical
+per-node holonomy ``kb / 2L`` of the transport chain (:func:`psi_grad_hess`,
+eq. 9), and the spin of the reference frame at each of the two end edges.
+Everything here is checked against finite differences of a direct
+parallel-transport evaluation by ``scripts/check_twist.py``.
 
 One subtlety, and it matters: differentiating the ``kb/(2L)`` expression once
 more does **not** by itself give the Hessian -- the naive Jacobian of that
 expression carries a spurious antisymmetric part and is off by more than 100%.
-The true Hessian is its **symmetric part**.  ``psi_hess`` returns that, and
-``scripts/check_twist.py`` verifies it against a second-difference Hessian of
-``psi``, which is symmetric by construction.
+The true Hessian is its **symmetric part**.  ``psi_grad_hess`` returns that,
+and ``scripts/check_twist.py`` verifies the assembled Hessian of ``H`` against
+a second-difference Hessian, which is symmetric by construction.
+
+Limits
+------
+``H`` is an angle, returned on the branch ``(-pi, pi]``.  A rod wound past a
+half turn of holonomy (a looped, writhing configuration) would wrap, and the
+energy would jump while its gradient stayed continuous.  The configurations
+these tasks reach stay far from that.  The reference frame is singular where
+the azimuth/elevation chart of the controls is, i.e. for an end edge pointing
+straight up or down.
 """
 from __future__ import annotations
 
 import numpy as np
 
 _EPS = 1e-12
+
+#: Axis the gripper's yaw reference is built from; also the chart axis of the
+#: (azimuth, elevation) control angles, and so singular for an end edge along
+#: it.  z-up, matching SimulatorEnv_3D's gravity convention.
+_UP = np.array([0.0, 0.0, 1.0])
 
 
 # --------------------------------------------------------------- primitives
@@ -71,7 +111,7 @@ def parallel_transport(u, t_from, t_to):
 
     This is the rotation about ``t_from x t_to`` taking one tangent to the
     other; it is the unique rotation doing so that adds no twist about the
-    tangent, which is what makes the reference frame twist-free.
+    tangent, which is what makes the Bishop frame twist-free.
     """
     b = np.cross(t_from, t_to)
     nb = np.linalg.norm(b)
@@ -107,188 +147,239 @@ def curvature_binormal(te, tf):
     return 2.0 * np.cross(te, tf) / (1.0 + float(np.dot(te, tf)))
 
 
-# -------------------------------------------------------- reference frame state
+# ------------------------------------------------- the gripper's yaw reference
 
-class RodFrames:
-    """The reference directors of every edge, and the tangents they belong to.
+def gripper_director(t):
+    """Unit vector perpendicular to ``t``, the zero of that end's yaw.
 
-    ``directors[i]`` is a unit vector perpendicular to ``stored_tangents[i]``.
-    Both are state carried between control steps: :meth:`advance` parallel
-    transports the directors onto a new configuration, and :meth:`adapt`
-    produces directors for an arbitrary configuration *without* mutating the
-    state, which is what the energy evaluation needs during a Newton solve.
+    ``t x normalize(z x t)``: the direction perpendicular to the tangent in the
+    vertical plane through it -- "up, as far as the tangent allows".  For the
+    straight rest pose (``t = +x``) it is ``+z``.  Singular for a vertical
+    tangent, where the control's own elevation angle is singular too.
     """
-
-    def __init__(self, nv, seed_director=(0.0, 0.0, 1.0)):
-        self.nv = int(nv)
-        self.n_edges = self.nv - 1
-        self._seed = np.asarray(seed_director, dtype=float)
-        self.directors = None
-        self.stored_tangents = None
-
-    # ---------- lifecycle ----------
-
-    def reset(self, pos):
-        """Initialise the frame on the configuration ``pos`` (nv, 3).
-
-        The first edge's director is the seed vector projected perpendicular to
-        its tangent; every later edge is obtained by parallel transport *along
-        the rod*, which makes the initial reference twist exactly zero.
-        """
-        t = tangents(np.asarray(pos, dtype=float))
-        u = np.zeros((self.n_edges, 3))
-
-        seed = self._seed
-        if abs(float(np.dot(seed, t[0]))) > 1.0 - 1e-6:   # seed parallel to t0
-            seed = np.array([0.0, 1.0, 0.0])
-            if abs(float(np.dot(seed, t[0]))) > 1.0 - 1e-6:
-                seed = np.array([1.0, 0.0, 0.0])
-        u0 = seed - float(np.dot(seed, t[0])) * t[0]
-        u[0] = u0 / max(np.linalg.norm(u0), _EPS)
-        for i in range(1, self.n_edges):
-            u[i] = parallel_transport(u[i - 1], t[i - 1], t[i])
-
-        self.directors = u
-        self.stored_tangents = t.copy()
-
-    def advance(self, pos):
-        """Carry the stored directors onto the configuration ``pos`` and keep them.
-
-        Called once per committed control step -- the frame analogue of the
-        warm start that keeps the position solve on one equilibrium branch.
-        """
-        self.directors = self.adapt(pos)
-        self.stored_tangents = tangents(np.asarray(pos, dtype=float))
-
-    def adapt(self, pos):
-        """Stored directors parallel transported onto ``pos``; state untouched."""
-        t = tangents(np.asarray(pos, dtype=float))
-        u = np.empty_like(self.directors)
-        for i in range(self.n_edges):
-            u[i] = parallel_transport(self.directors[i], self.stored_tangents[i], t[i])
-        return u
-
-    # ---------- checkpointing (RHC segments rewind the simulator) ----------
-
-    def get_state(self):
-        return {"directors": self.directors.copy(),
-                "stored_tangents": self.stored_tangents.copy()}
-
-    def set_state(self, state):
-        self.directors = state["directors"].copy()
-        self.stored_tangents = state["stored_tangents"].copy()
-
-    # ---------- the reference twist ----------
-
-    def reference_twist(self, pos):
-        """``psi`` at every interior node, shape (nv - 2,)."""
-        pos = np.asarray(pos, dtype=float)
-        t = tangents(pos)
-        u = self.adapt(pos)
-        psi = np.zeros(self.nv - 2)
-        for i in range(1, self.n_edges):
-            carried = parallel_transport(u[i - 1], t[i - 1], t[i])
-            psi[i - 1] = signed_angle(carried, u[i], t[i])
-        return psi
+    t = np.asarray(t, dtype=float)
+    a = np.cross(_UP, t)
+    na = np.linalg.norm(a)
+    if na < _EPS:
+        raise ValueError("gripper_director: tangent is vertical, the yaw "
+                         "reference (and the control's elevation angle) is "
+                         "singular there")
+    return np.cross(t, a / na)
 
 
-# ------------------------------------------------- derivatives of psi (exact)
+def director_spin(t):
+    """``omega`` with ``d(angle of gripper_director)/d t = omega . dt``.
 
-def _kb_and_jac(a, edge, n_edge):
-    """``kb(a, t)`` for a FIXED first argument ``a``, plus ``d(kb)/d(edge)``.
+    The angle is measured about ``t`` and against parallel transport, so this
+    is how much the yaw reference itself spins when the gripper only tilts.
+    In the azimuth/elevation chart of the controls it is exactly
+    ``sin(phi) dtheta``; in the components of ``t``::
 
-    ``t = edge / n_edge``.  Used for the re-adaptation legs of the transport.
+        omega = t_z * (-t_y, t_x, 0) / (t_x^2 + t_y^2)
     """
-    t = edge / n_edge
-    chi = 1.0 + float(np.dot(a, t))
-    if chi < _EPS:
-        return np.zeros(3), np.zeros((3, 3))
-    kb = 2.0 * np.cross(a, t) / chi
-    P = (np.eye(3) - np.outer(t, t)) / n_edge          # dt/d(edge)
-    dkb = (2.0 / chi) * (hat(a) @ P) - (1.0 / chi) * np.outer(kb, P @ a)
-    return kb, dkb
+    t = np.asarray(t, dtype=float)
+    s = t[0] * t[0] + t[1] * t[1]
+    if s < _EPS:
+        raise ValueError("director_spin: tangent is vertical (see "
+                         "gripper_director)")
+    return t[2] * np.array([-t[1], t[0], 0.0]) / s
 
 
-def psi_grad_hess(p0, p1, p2, tbar_e, tbar_f):
-    """``(grad(9,), hess(9, 9))`` of psi -- both exact.
+def director_spin_jac(t):
+    """``d(omega)/dt``, shape (3, 3), for :func:`director_spin`."""
+    t = np.asarray(t, dtype=float)
+    s = t[0] * t[0] + t[1] * t[1]
+    if s < _EPS:
+        raise ValueError("director_spin_jac: tangent is vertical")
+    c = np.array([-t[1], t[0], 0.0])
+    J = np.empty((3, 3))
+    J[:, 0] = t[2] * (np.array([0.0, 1.0, 0.0]) / s - 2.0 * t[0] * c / s ** 2)
+    J[:, 1] = t[2] * (np.array([-1.0, 0.0, 0.0]) / s - 2.0 * t[1] * c / s ** 2)
+    J[:, 2] = c / s
+    return J
 
-    ``psi`` is measured between directors carried from the *stored* tangents
-    ``tbar_e``/``tbar_f`` onto the current ones, so its derivative has two
-    parts:
 
-    * the classical **holonomy** of the along-the-rod leg ``t_e -> t_f``::
+def _spin_grad_jac(p_a, p_b):
+    """Gradient and Jacobian of the yaw reference's angle on the edge a->b.
 
-          dpsi/de += +kb(t_e, t_f) / (2 |e|)
-          dpsi/df += +kb(t_e, t_f) / (2 |f|)
+    Returns ``(g (6,), J (6, 6))`` over the stacked nodes ``(p_a, p_b)`` for
+    the scalar whose variation is ``director_spin(t) . dt``.  That scalar is
+    not a function on its own (the spin is a non-exact one-form -- there is no
+    frame field on the sphere that is parallel everywhere); only the whole of
+    ``H`` is, which is why ``J`` here need not be symmetric while the assembled
+    Hessian of ``H`` is.
+    """
+    e = np.asarray(p_b, dtype=float) - np.asarray(p_a, dtype=float)
+    n = np.linalg.norm(e)
+    if n < _EPS:
+        return np.zeros(6), np.zeros((6, 6))
+    t = e / n
+    w = director_spin(t)
+    P = np.eye(3) - np.outer(t, t)
+    # d/de of (omega(t(e)) / |e|), with dt/de = P / |e| and d(1/|e|)/de = -t/|e|^2
+    Jg = (director_spin_jac(t) @ P - np.outer(w, t)) / n ** 2
 
-    * the **re-adaptation** of each stored director, ``tbar -> t``, which has
-      exactly the same form on its own leg::
+    g = np.concatenate([-w / n, w / n])
+    J = np.block([[Jg, -Jg], [-Jg, Jg]])
+    return g, J
 
-          dpsi/de += +kb(tbar_e, t_e) / (2 |e|)
-          dpsi/df += -kb(tbar_f, t_f) / (2 |f|)
 
-      This term vanishes identically when the stored tangents equal the
-      current ones, which is why it is easy to miss: it is invisible at the
-      start of a step and grows as the Newton iterate moves away.  Dropping it
-      costs ~50% of the gradient by the time the solve has travelled a
-      realistic distance.
+# ------------------------------------------------------------- the Bishop frame
 
-    Both parts are differentiated once more for the Hessian.  As with the
+def bishop_directors(pos):
+    """The Bishop director of every edge, shape ``(nv - 1, 3)``.
+
+    Seeded with :func:`gripper_director` of the first edge -- so the left
+    gripper's yaw is the first edge's material angle outright -- and parallel
+    transported along the rod.  A pure function of ``pos``: nothing is carried
+    between steps.
+    """
+    pos = np.asarray(pos, dtype=float)
+    t = tangents(pos)
+    u = np.empty_like(t)
+    u[0] = gripper_director(t[0])
+    for i in range(1, len(t)):
+        u[i] = parallel_transport(u[i - 1], t[i - 1], t[i])
+    return u
+
+
+def holonomy(pos):
+    """``H``: the angle the transport chain loses against the far yaw reference.
+
+    The Bishop director of the last edge, against that edge's
+    :func:`gripper_director`, about its tangent.  Zero for any planar
+    configuration in the vertical plane, which is why a flat rod's twist is
+    just the difference of the two yaws.
+    """
+    # Inlined rather than calling bishop_directors: this runs once per energy
+    # gradient and once per Hessian, and only the last director is needed.
+    pos = np.asarray(pos, dtype=float)
+    t = tangents(pos)
+    u = gripper_director(t[0])
+    for i in range(1, len(t)):
+        u = parallel_transport(u, t[i - 1], t[i])
+    return signed_angle(gripper_director(t[-1]), u, t[-1])
+
+
+def holonomy_grad_hess(pos, need_hess=True):
+    """``(H, grad (3 nv,), hess (3 nv, 3 nv))`` -- all exact.
+
+    ``hess`` is ``None`` when ``need_hess`` is False; the Newton line search
+    asks for the gradient far more often than for the Hessian.
+    """
+    pos = np.asarray(pos, dtype=float)
+    nv = pos.shape[0]
+    g = np.zeros(3 * nv)
+    H = np.zeros((3 * nv, 3 * nv)) if need_hess else None
+
+    # The transport chain: one holonomy stencil per interior node.
+    for i in range(1, nv - 1):
+        gp, Hp = psi_grad_hess(pos[i - 1], pos[i], pos[i + 1], need_hess=need_hess)
+        sl = slice(3 * (i - 1), 3 * (i + 2))
+        g[sl] += gp
+        if need_hess:
+            H[sl, sl] += Hp
+
+    # The yaw reference spins with each end edge: + at the seeded end, - at
+    # the end the chain is compared against.
+    for sl, sign in ((slice(0, 6), 1.0), (slice(3 * nv - 6, 3 * nv), -1.0)):
+        gs, Js = _spin_grad_jac(pos[sl.start // 3], pos[sl.start // 3 + 1])
+        g[sl] += sign * gs
+        if need_hess:
+            H[sl, sl] += sign * Js
+
+    # Each piece above is a one-form, not the gradient of a function of its own,
+    # so the Jacobian assembled from them carries a spurious antisymmetric part.
+    # Only their sum is exact, and its symmetric part is the Hessian -- verified
+    # against second differences by scripts/check_twist.py.
+    if need_hess:
+        H = 0.5 * (H + H.T)
+
+    return holonomy(pos), g, H
+
+
+# ------------------------------------------- derivatives of one holonomy stencil
+
+def psi_grad_hess(p0, p1, p2, need_hess=True):
+    """``(grad (9,), hess (9, 9))`` of one node's transport holonomy.
+
+    The classical result (Bergou et al. 2008, eq. 9): carrying a director
+    across the node between edges ``e = p1 - p0`` and ``f = p2 - p1`` rotates
+    it about the tangent at the rate::
+
+        dpsi/de = kb(t_e, t_f) / (2 |e|)
+        dpsi/df = kb(t_e, t_f) / (2 |f|)
+
+    with ``kb`` the curvature binormal.  Summed over the interior nodes this is
+    the gradient of the chain's holonomy (eq. 10); on its own it is a one-form,
+    not the gradient of anything (see :func:`_spin_grad_jac`).
+
+    The expression is differentiated once more for the Hessian.  As with the
     bending stencil, the raw chain-rule matrix carries a spurious
-    antisymmetric piece; the true Hessian is its symmetric part.
+    antisymmetric piece; the true second derivative is its symmetric part.
     """
-    e, f = p1 - p0, p2 - p1
+    e, f = np.asarray(p1, float) - np.asarray(p0, float), \
+           np.asarray(p2, float) - np.asarray(p1, float)
     ne, nf = np.linalg.norm(e), np.linalg.norm(f)
+    zero_h = np.zeros((9, 9)) if need_hess else None
     if ne < _EPS or nf < _EPS:
-        return np.zeros(9), np.zeros((9, 9))
+        return np.zeros(9), zero_h
 
     te, tf = e / ne, f / nf
     chi = 1.0 + float(np.dot(te, tf))
     if chi < _EPS:                      # 180 degree fold: genuinely singular
-        return np.zeros(9), np.zeros((9, 9))
-    kb = 2.0 * np.cross(te, tf) / chi
-
-    I3 = np.eye(3)
-    Pe = (I3 - np.outer(te, te)) / ne       # dte/de
-    Pf = (I3 - np.outer(tf, tf)) / nf       # dtf/df
-
-    # --- holonomy leg t_e -> t_f ---
-    dkb_de = -(2.0 / chi) * (hat(tf) @ Pe) - (1.0 / chi) * np.outer(kb, Pe @ tf)
-    dkb_df = (2.0 / chi) * (hat(te) @ Pf) - (1.0 / chi) * np.outer(kb, Pf @ te)
+        return np.zeros(9), zero_h
+    # -kb, so that scattering onto the nodes below lands on the paper's
+    # +kb/(2|e^{i-1}|) and -kb/(2|e^i|); the sign is the orientation
+    # convention of signed_angle, and check_twist.py pins it down.
+    kb = -2.0 * np.cross(te, tf) / chi
 
     A = kb / (2.0 * ne)
     B = kb / (2.0 * nf)
-    dA_de = dkb_de / (2.0 * ne) - np.outer(kb, te) / (2.0 * ne ** 2)
-    dA_df = dkb_df / (2.0 * ne)
-    dB_de = dkb_de / (2.0 * nf)
-    dB_df = dkb_df / (2.0 * nf) - np.outer(kb, tf) / (2.0 * nf ** 2)
-
-    # --- re-adaptation legs tbar -> t (each touches only its own edge) ---
-    kbe, dkbe = _kb_and_jac(np.asarray(tbar_e, dtype=float), e, ne)
-    kbf, dkbf = _kb_and_jac(np.asarray(tbar_f, dtype=float), f, nf)
-
-    A = A + kbe / (2.0 * ne)
-    B = B - kbf / (2.0 * nf)
-    dA_de = dA_de + dkbe / (2.0 * ne) - np.outer(kbe, te) / (2.0 * ne ** 2)
-    dB_df = dB_df - (dkbf / (2.0 * nf) - np.outer(kbf, tf) / (2.0 * nf ** 2))
-
-    M = np.zeros((6, 6))
-    M[0:3, 0:3] = dA_de
-    M[0:3, 3:6] = dA_df
-    M[3:6, 0:3] = dB_de
-    M[3:6, 3:6] = dB_df
 
     Bm = np.zeros((6, 9))
+    I3 = np.eye(3)
     Bm[0:3, 0:3] = -I3
     Bm[0:3, 3:6] = I3
     Bm[3:6, 3:6] = -I3
     Bm[3:6, 6:9] = I3
 
     g = Bm.T @ np.concatenate([A, B])
-    H = Bm.T @ M @ Bm
-    return g, 0.5 * (H + H.T)
+    if not need_hess:
+        return g, None
+
+    Pe = (I3 - np.outer(te, te)) / ne       # dte/de
+    Pf = (I3 - np.outer(tf, tf)) / nf       # dtf/df
+    dkb_de = (2.0 / chi) * (hat(tf) @ Pe) - (1.0 / chi) * np.outer(kb, Pe @ tf)
+    dkb_df = -(2.0 / chi) * (hat(te) @ Pf) - (1.0 / chi) * np.outer(kb, Pf @ te)
+
+    M = np.zeros((6, 6))
+    M[0:3, 0:3] = dkb_de / (2.0 * ne) - np.outer(kb, te) / (2.0 * ne ** 2)
+    M[0:3, 3:6] = dkb_df / (2.0 * ne)
+    M[3:6, 0:3] = dkb_de / (2.0 * nf)
+    M[3:6, 3:6] = dkb_df / (2.0 * nf) - np.outer(kb, tf) / (2.0 * nf ** 2)
+
+    Hs = Bm.T @ M @ Bm
+    return g, 0.5 * (Hs + Hs.T)
 
 
-def psi_grad(p0, p1, p2, tbar_e, tbar_f):
-    """``d(psi)/d(p0, p1, p2)``, shape (9,)."""
-    return psi_grad_hess(p0, p1, p2, tbar_e, tbar_f)[0]
+# ------------------------------------------------------- material frames (view)
+
+def material_frames(pos, yaw_l, yaw_r):
+    """``(m1, m2)`` of every edge, shapes ``(nv - 1, 3)`` -- for drawing only.
+
+    The quasistatic material frame of sec. 5: the Bishop frame rotated by an
+    angle that grows uniformly along the rod, from ``yaw_l`` on the first edge
+    to ``yaw_l + Phi`` on the last.
+    """
+    pos = np.asarray(pos, dtype=float)
+    t = tangents(pos)
+    u = bishop_directors(pos)
+    n_e = len(t)
+    phi_total = float(yaw_r) - float(yaw_l) - holonomy(pos)
+    frac = np.arange(n_e) / max(n_e - 1, 1)
+    theta = float(yaw_l) + phi_total * frac
+
+    v = np.cross(t, u)
+    c, s = np.cos(theta)[:, None], np.sin(theta)[:, None]
+    return c * u + s * v, -s * u + c * v

@@ -1,12 +1,16 @@
 from .SimulatorEnv_2D import SimulatorEnv_2D
 from .SimulatorEnv_3D import SimulatorEnv_3D, tangent_from_angles
 from .rodframes import (
-    RodFrames,
+    bishop_directors,
+    gripper_director,
+    holonomy,
+    holonomy_grad_hess,
+    material_frames,
     parallel_transport,
     signed_angle,
-    psi_grad_hess,
 )
 from .implicit_grad_tools import (
+    GRAD_METHODS,
     implicit_final_control_grad,
     boundary_node_jacobian,
     boundary_node_jacobian_3d,

@@ -71,7 +71,7 @@ def node_position(q, dim: int, node: int) -> np.ndarray:
     """Position of ``node`` as a ``dim``-vector.
 
     Positions occupy the front of ``q``, so this is correct with or without
-    the twist angles appended behind them.
+    the gripper yaws appended behind them.
     """
     a = dim * node
     return np.asarray(q[a:a + dim], dtype=float)
@@ -334,8 +334,7 @@ def initial_midpoint(env, cfg) -> np.ndarray:
     Not the undeformed rod's midpoint: the rod sags as soon as the first
     equilibrium is solved, so a trajectory anchored at ``env.nodes[mid]`` would
     already be wrong on step 0.  This takes one step with the initial control,
-    reads the midpoint, and restores the environment -- including the material
-    frames, which ``get_state``/``set_state`` carry.
+    reads the midpoint, and restores the environment afterwards.
     """
     dim = env_dim(cfg)
     state = env.get_state()
@@ -369,10 +368,9 @@ def make_target_trajectory(N, rod_length, traj_type="circle", dim=2, up_axis=Non
     and point-to-point directly comparable: same endpoint, same target, one
     asks only for the destination and the other for the whole path to it.
 
-    The fixed curves (``circle``, ``figure8``, ``line``, ``helix``,
-    ``figure8_3d``) ignore ``start``: they sit wherever they are defined, so
-    the rod generally has to travel to reach step 0 and the first part of the
-    run is spent closing that gap.
+    The fixed curves (``circle``, ``figure8``, ``line``) ignore ``start``:
+    they sit wherever they are defined, so the rod generally has to travel to
+    reach step 0 and the first part of the run is spent closing that gap.
 
     The planar curves (``circle``, ``figure8``, ``line``) are laid out in the
     *vertical* plane -- the one containing gravity -- because that is what they
@@ -382,13 +380,14 @@ def make_target_trajectory(N, rod_length, traj_type="circle", dim=2, up_axis=Non
     curves occupy x-y in 2D and x-z in 3D.  ``up_axis`` overrides the choice
     for a config that tilts gravity somewhere else.
 
-    ``helix`` and ``figure8_3d`` are genuinely three-dimensional and 3D-only.
+    Reference paths that start where the rod is -- straight lines, sine waves
+    and circular arcs anchored at the mid node -- live in the named presets of
+    scripts/train_tracking.py, which are the ones its RRT comparison verifies.
     """
     lams = np.linspace(0, 1, N)
     targets = np.zeros((N, dim))
     # Index of the axis gravity acts along; the planar curves stand up in it.
     up = (1 if dim == 2 else 2) if up_axis is None else int(up_axis)
-    lat = 1 if dim == 3 else None      # the remaining horizontal axis, 3D only
 
     if traj_type == "segment":
         if start is None or end is None:
@@ -414,24 +413,6 @@ def make_target_trajectory(N, rod_length, traj_type="circle", dim=2, up_axis=Non
     elif traj_type == "line":
         targets[:, 0] = rod_length / 2
         targets[:, up] = -0.20 + 0.40 * lams
-    elif traj_type == "helix":
-        if dim != 3:
-            raise ValueError("trajectory_type 'helix' requires env.dim: 3")
-        # Axis along gravity: a horizontal circle that climbs.
-        cx, cy, r = rod_length / 2, 0.0, 0.15
-        theta = 4 * np.pi * lams
-        targets[:, 0] = cx + r * np.cos(theta)
-        targets[:, lat] = cy + r * np.sin(theta)
-        targets[:, up] = -0.15 + 0.30 * lams
-    elif traj_type == "figure8_3d":
-        if dim != 3:
-            raise ValueError("trajectory_type 'figure8_3d' requires env.dim: 3")
-        # The vertical figure-8, plus a lateral wobble out of its plane.
-        cx, r = rod_length / 2, 0.20
-        theta = 2 * np.pi * lams
-        targets[:, 0] = cx + r * np.sin(theta)
-        targets[:, up] = r * np.sin(2 * theta) / 2
-        targets[:, lat] = 0.15 * np.sin(2 * theta)
     else:
         raise ValueError(f"Unknown traj_type: {traj_type}")
 

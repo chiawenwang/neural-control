@@ -103,13 +103,13 @@ def boundary_node_jacobian_3d_twist(control_12d, deltaL):
     """``d(q_b)/d(u)`` for the twisting 3D rod, shape 14x12.
 
     - u   = [x_l, y_l, z_l, th_l, ph_l, yaw_l,  x_r, y_r, z_r, th_r, ph_r, yaw_r]
-    - q_b = [node_0, node_1, node_{n-2}, node_{n-1}, theta^0, theta^{n-2}]
+    - q_b = [node_0, node_1, node_{n-2}, node_{n-1}, yaw_l, yaw_r]
 
     The 12 position rows are exactly the twist-free map; the two extra rows are
-    the end twist angles, which the gripper yaws set directly -- so each is a
-    single 1.  That directness is the point of measuring yaw against the
-    reference director: no geometry enters, and the bend/twist coupling is
-    carried entirely by the reference twist inside the energy.
+    the clamped yaws, which the control sets directly -- so each is a single 1.
+    That directness is the point of measuring yaw against a frame built from
+    the gripper's own tangent: no geometry enters here, and the bend/twist
+    coupling is carried entirely by the holonomy inside the energy.
     """
     control_12d = np.asarray(control_12d, dtype=float)
     J = np.zeros((14, 12), dtype=float)
@@ -220,39 +220,61 @@ def local_dxf_dxb(J, free_index, fixed_index, jac_reg=0.0):
     return dxf_dxb
 
 
+#: The multi-step adjoint gradients ``train.grad_method`` selects between (see
+#: :func:`multistep_adjoint_gradient`); the first is the default.
+GRAD_METHODS = ("state", "proxy")
+
+
 def multistep_adjoint_gradient(u_seq, J_list, free_index, fixed_index, deltaL,
                                 a_free_per_step, jac_reg=0.0, dim=2, twist=False,
-                                boundary_rows=None, accumulate=True):
+                                boundary_rows=None, *, grad_method):
     """
-    Exact multi-step (receding-horizon) adjoint gradient: computes dL/du_k for
-    every step k in the horizon, instead of computing it once at the final
-    step and reusing that same gradient for every step.
+    Per-step adjoint vectors of a T-step quasi-static rollout, for either
+    gradient method (``train.grad_method``).
 
-    This is a direct port of the backward recursion in the original
-    submission code (adjoint_RHC_any_node.py / adjoint_RHC_middle_tracking.py),
-    adapted to this repository's control parameterization:
-      - In the original code, the boundary state xb_k is accumulated linearly
-        over time from a "control rate"
-        (xb_k = xb_{k-1} + dlam * B @ u_rate_k), so the backward recursion
-        needs an explicit state-transition matrix A (always zero here).
-      - In this repository the policy network outputs a rate u_dot, but the
-        integration from rate to accumulated control u_k
-        (u_k = u_0 + dlam * cumsum(u_dot)) already happens inside torch's
-        computational graph. So the numpy side here only needs to supply
-        dL/du_k (the gradient w.r.t. the accumulated control), which is then
-        dotted with u_k to build a surrogate loss that autograd backprops
-        through — there's no need to reimplement the A/B state recursion.
+    Notation, for the steps k = 0..T-1:
+      - r_k   the rate the policy outputs; the executed command is
+              u_k = u_{k-1} + dlam * r_k (integrated in torch's graph)
+      - B_k   d(q_b)/d(u) at u_k (:func:`_boundary_jacobian`)
+      - S_k   dq_free/dq_b = -J_ff^{-1} J_fb at step k's equilibrium
+              (:func:`local_dxf_dxb`, with its regularization and lstsq
+              fallback)
+      - a_k   dL/dq_free_k; zero on a step that carries no loss term
 
-    Physical assumption (identical to the original code, not a new
-    approximation): the equilibrium is treated as evolving "along a
-    continuously tracked branch", i.e. a small boundary perturbation δxb_i at
-    step i is assumed to propagate approximately unchanged, through the
-    subsequent warm-started Newton solves, to every later step's free DOFs
-    (δxf_k ≈ δxf_i, k>=i). Under this assumption, any step's loss term
-    a_free_k = dL_k/dxf_k should be accumulated backward onto every earlier
-    step i<=k, using step i's own local Jacobian dxf_dxb_i to compute its
-    contribution — rather than, as in the "approximate" version, using only
-    the final step's Jacobian to stand in for every step.
+    Both methods take the same forward pass (the states the warm-started
+    Newton solves actually reached), solve with each step's own Jacobian, and
+    give a lower-triangular dL/dr_j summed from the back.  They differ only in
+    which step's S projects a later step's loss, and so in what the result is
+    attached to:
+
+    ``state`` -- exact; the default
+        On one equilibrium branch the state depends only on the current
+        boundary, q_k = X(q_b,k), so each a_k is projected by its own S_k::
+
+            p_k = B_k^T S_k^T a_k                     (row k of the result)
+
+        p_k is dL/du_k.  Attached to the executed command u_k, autograd's pass
+        back through the integration sums it onto every earlier rate,
+        dL/dr_j = dlam * sum_{k>=j} p_k.  No third derivatives appear, and on
+        the branch the rollout followed this is the exact gradient.  A step
+        with a_k = 0 needs no solve, so a terminal loss costs one.
+
+    ``proxy`` -- frozen tangent
+        Differentiate q_free = q_free(0) + int S B r dlam and drop the term in
+        dS/dtheta (it needs the energy's third derivative).  The future
+        losses are summed in state space first and projected by the S of the
+        step where the control was applied::
+
+            A_j = a_j + A_{j+1},   A_T = 0
+            q_j = B_j^T S_j^T A_j                     (row j of the result)
+
+        dL/dr_j = dlam * q_j, so q_j belongs on the *rate* r_j: attached to
+        u_j, autograd would sum the future losses a second time.  It treats
+        the state as remembering a perturbation perfectly
+        (dq_{k+1}/dq_k = I), which is exact only while S stays constant along
+        the path; finer steps do not make the error go away.  It is the
+        backward recursion of the original submission code
+        (adjoint_RHC_any_node.py), which put it on the network's rate output.
 
     Parameters
     ----------
@@ -282,35 +304,35 @@ def multistep_adjoint_gradient(u_seq, J_list, free_index, fixed_index, deltaL,
     boundary_rows : np.ndarray or None
         Rows of d(q_b)/d(u) that correspond to ``fixed_index`` (the
         environment's ``boundary_rows``). None -> both ends clamped.
-    accumulate : bool
-        True (default): the branch assumption above -- every later step's
-        loss is carried back onto step i through step i's Jacobian.
-        False: each step's loss acts only on that step's control,
-        ``g_u_i = B_i^T dxf_dxb_i^T a_free_i``. That is the exact gradient
-        when each equilibrium depends on the current control alone (a
-        quasi-static, frictionless, history-free model: dq_k/du_i = 0 for
-        i < k), where the branch sum instead credits early controls with
-        sensitivities the final state no longer has.
+    grad_method : str
+        ``state`` or ``proxy`` (:data:`GRAD_METHODS`).  Required, so a caller
+        cannot fall back on a default without saying so.
 
     Returns
     -------
-    g_u_seq : np.ndarray, shape (T, n_u)
-        dL_total/du_k, for every step's accumulated control.
+    g_seq : np.ndarray, shape (T, n_u)
+        ``state``: p_k = dL/du_k, for the executed commands.
+        ``proxy``: q_j, for the rates (dL/dr_j = dlam * q_j).
     """
+    if grad_method not in GRAD_METHODS:
+        raise ValueError(f"grad_method must be one of {GRAD_METHODS}, got {grad_method!r}")
+    accumulate = grad_method == "proxy"
     u_seq = np.asarray(u_seq, dtype=float)
     a_free_per_step = np.asarray(a_free_per_step, dtype=float)
     T, nu = u_seq.shape
 
-    g_u_seq = np.zeros((T, nu), dtype=float)
-    lam_f_cum = np.zeros(len(free_index), dtype=float)
+    g_seq = np.zeros((T, nu), dtype=float)
+    A = np.zeros(len(free_index), dtype=float)
 
     for i in range(T - 1, -1, -1):
-        lam_f_cum = (lam_f_cum if accumulate else 0.0) + a_free_per_step[i]
+        A = (A if accumulate else 0.0) + a_free_per_step[i]     # proxy: A_i; state: a_i
+        if not A.any():                     # S_i^T 0 = 0: nothing to solve for
+            continue
 
         dxf_dxb_i = local_dxf_dxb(J_list[i], free_index, fixed_index, jac_reg)
         B_i = _boundary_jacobian(u_seq[i], deltaL, dim, twist, boundary_rows)   # (n_qb, n_u)
 
-        g_qb_i = dxf_dxb_i.T @ lam_f_cum                  # (4*dim,)
-        g_u_seq[i] = B_i.T @ g_qb_i                        # (n_u,)
+        g_qb_i = dxf_dxb_i.T @ A                           # (n_qb,)
+        g_seq[i] = B_i.T @ g_qb_i                          # (n_u,)
 
-    return g_u_seq
+    return g_seq

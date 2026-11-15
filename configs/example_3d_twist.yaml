@@ -3,8 +3,7 @@
 #
 # Point-to-point: drive the mid node to task.target_xyz.
 #
-#   python scripts/train_adjoint.py --config configs/example_3d_twist.yaml
-#   python scripts/train_cmaes.py   --config configs/example_3d_twist.yaml
+#   python scripts/train_point_to_point.py --config configs/example_3d_twist.yaml
 #
 # Validate the torsion model itself with:
 #   python scripts/check_twist.py
@@ -16,7 +15,8 @@ env:
   dim: 3
 
 rod:
-  twist: true                # per-edge twist angles + a yaw per gripper
+  twist: true                # torsion on: a yaw per gripper, and the
+                             # twist the rod carries between them
   material: soft_strip       # stiff rods buckle almost immediately under
                              # compression; a soft strip keeps the useful
                              # range wide (see `materials:` in default.yaml).
@@ -33,8 +33,8 @@ start:
   u_right_twist: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   init_yaw: 0.0
 
-# The task is picked by the script, not the config: train_adjoint.py /
-# train_cmaes.py run point-to-point toward target_xyz.
+# The task is picked by the script, not the config:
+# train_point_to_point.py runs point-to-point toward target_xyz.
 task:
   target_xyz: [0.45, 0.15, 0.05]
 

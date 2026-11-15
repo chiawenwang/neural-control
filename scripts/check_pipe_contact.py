@@ -258,7 +258,7 @@ g_nc = implicit_final_control_grad(J_nc, env.free_index, env.fixed_index, a_free
                                    env.deltaL, dim=2, boundary_rows=env.boundary_rows)
 check("dropping the contact Jacobian changes the gradient",
       rel(g_nc[3:], g_fd[3:]) > 1e-2, f"error without it: {rel(g_nc[3:], g_fd[3:]):.2e}")
-# What makes train.adjoint_mode: local exact here: frictionless and
+# What makes train.grad_method: state exact here: frictionless and
 # quasi-static, the state after a step depends on that step's control only, so
 # perturbing an *earlier* control (and then returning to the same later ones)
 # must leave the final state where it was.

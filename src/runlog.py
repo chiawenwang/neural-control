@@ -315,6 +315,7 @@ class RunLogger:
             "nv": int(rod.get("nv", getattr(env, "nv", 0) or 0)),
             "material": str(rod.get("material", "custom")),
             "lr": float(train.get("lr", 0.0)),
+            "grad_method": str(train.get("grad_method", "")),
             "epochs": int(train.get("epochs", 0)),
             "rhc": bool((cfg.get("rhc") or {}).get("enabled", False)),
             # The script decides the task and passes it in; the config has no

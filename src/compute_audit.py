@@ -447,11 +447,11 @@ class ComputeAudit:
         if hasattr(rodframes, "psi_grad_hess"):
             self._wrap_global(rodframes, "psi_grad_hess", "kernel.psi_grad_hess",
                        lambda a, kw: np.concatenate([np.asarray(x, float).ravel()
-                                                     for x in a]),
+                                                     for x in a[:3]]),
                        detail=False)
-        if hasattr(rodframes, "RodFrames") and hasattr(rodframes.RodFrames, "reference_twist"):
-            self._wrap(rodframes.RodFrames, "reference_twist", "kernel.reference_twist",
-                       lambda a, kw: np.asarray(a[1], dtype=float).ravel(),
+        if hasattr(rodframes, "holonomy"):
+            self._wrap_global(rodframes, "holonomy", "kernel.holonomy",
+                       lambda a, kw: np.asarray(a[0], dtype=float).ravel(),
                        detail=False)
 
     def restore(self):

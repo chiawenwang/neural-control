@@ -1,12 +1,14 @@
 """90-degree pipe insertion: push the free tip of the rod round the bend to a target.
 
     python scripts/train_pipe.py --config configs/task_90deg_pipe.yaml
+    python scripts/train_pipe.py --config configs/task_90deg_pipe.yaml --grad-method proxy
 
-The controller is train_adjoint.py's, unchanged: the same BoundaryVelocityNet
-(lambda -> right-end control rate), the same rollout (open loop: the whole
-control trajectory is generated, then simulated), the same multi-step adjoint
-gradient through the equilibrium Jacobians (train.adjoint_mode picks how it
-spreads each step's loss over the controls). What this script adds is the task:
+The controller is src/neural_control.py's, unchanged -- the same one the other
+two tasks use: a BoundaryVelocityNet (lambda -> right-end control rate), the
+same rollout (open loop: the whole control trajectory is generated, then
+simulated), the same multi-step adjoint gradient through the equilibrium
+Jacobians (train.grad_method, or --grad-method, picks the exact `state`
+gradient or the frozen-tangent `proxy`). What this script adds is the task:
 
   * the rod is gripped at the right end only (env.grasp_mode: right); node 0 is
     a free tip that moves only through the rod's response;
@@ -56,10 +58,12 @@ from env_factory import (
     material_summary,
     node_position,
 )
-from implicit_grad_tools import multistep_adjoint_gradient
+from neural_control import (
+    BoundaryVelocityNet, resolve_device, rollout, adjoint_gradient, surrogate_loss,
+    workspace_bounds, workspace_projection, workspace_penalty, GRAD_METHODS,
+)
 from runlog import RunLogger
 from utils import maybe_save_trajectory_gif, visualize_pipe_task
-from train_adjoint import BoundaryVelocityNet, rollout_segment, resolve_device
 
 
 # --------------------------------------------------------------- setup checks
@@ -77,16 +81,6 @@ def check_setup(cfg, env):
     if 2 * tip not in set(env.free_index.tolist()):
         raise SystemExit(f"task.pipe.tip_node = {tip} is a clamped node")
     return tip
-
-
-def workspace_bounds(cfg):
-    """(lo, hi) of the gripper pose (x, y, theta), or None when disabled."""
-    ws = cfg.get("workspace") or {}
-    if not ws.get("enabled", False):
-        return None
-    lo = np.array(list(ws["position_min"]) + [ws["orientation_limits"][0]], dtype=float)
-    hi = np.array(list(ws["position_max"]) + [ws["orientation_limits"][1]], dtype=float)
-    return lo, hi
 
 
 def feasibility_report(cfg, env, pipe, tip0, target):
@@ -109,7 +103,7 @@ def feasibility_report(cfg, env, pipe, tip0, target):
     s_goal = pipe.arclength(target)[0]
     need = s_goal - s0
 
-    bounds = workspace_bounds(cfg)
+    bounds = workspace_bounds(cfg, 2, 3)
     if bounds is None:
         avail = float("inf")
     else:
@@ -212,42 +206,17 @@ def task_losses(env, pipe, q_list, tip, target, s_ref, w, margin, goal=True):
     return parts, a_free
 
 
-def workspace_projection(bounds, u0):
-    """Clamp the gripper command onto the workspace -- the robot cannot leave it.
-
-    Straight-through: the forward value is clamped, the backward pass is the
-    identity, so the task gradient is not cut off at the boundary (the
-    workspace penalty, on the unprojected command, pulls the policy back in).
-    """
-    if bounds is None:
-        return None
-    lo = torch.full_like(u0, -float("inf"))
-    hi = torch.full_like(u0, float("inf"))
-    lo[3:] = torch.tensor(bounds[0], dtype=u0.dtype)
-    hi[3:] = torch.tensor(bounds[1], dtype=u0.dtype)
-    return lambda u: u + (torch.clamp(u, lo, hi) - u).detach()
-
-
-def control_losses(net, u_list, u0, dlam, w, bounds):
+def control_losses(net, u_list, u0, dlam, w, bounds, device):
     """Control effort and workspace violation, in torch (functions of u alone).
 
     Both are measured on what the policy *asks for* -- its rates, and the
     command before projection onto the workspace -- so the penalty still sees
     a violation that the projection kept from being executed.
     """
-    U = torch.stack(u_list)
-    T = U.shape[0]
-    lams = (torch.arange(T, dtype=U.dtype, device=U.device) / round(1.0 / dlam))[:, None]
-    u_dot = net(lams)
-    L_ctrl = w["control"] * (u_dot ** 2).sum(dim=1).mean()
-    L_ws = torch.zeros((), dtype=U.dtype, device=U.device)
-    if bounds is not None:
-        prev = torch.cat([u0[None], U[:-1]])[:, 3:]
-        raw = prev + dlam * u_dot
-        lo = torch.tensor(bounds[0], dtype=U.dtype, device=U.device)
-        hi = torch.tensor(bounds[1], dtype=U.dtype, device=U.device)
-        viol = torch.relu(raw - hi) + torch.relu(lo - raw)
-        L_ws = w["workspace"] * (viol ** 2).sum(dim=1).mean()
+    T = len(u_list)
+    lams = (torch.arange(T, dtype=u0.dtype, device=device) / round(1.0 / dlam))[:, None]
+    L_ctrl = w["control"] * (net(lams) ** 2).sum(dim=1).mean()
+    L_ws = workspace_penalty(net, u0, u_list, 3, bounds, w["workspace"], device, dlam)
     return L_ctrl, L_ws
 
 
@@ -320,8 +289,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None,
                         help="Path to a YAML config overriding configs/default.yaml")
+    parser.add_argument("--grad-method", choices=GRAD_METHODS, default=None,
+                        help="adjoint gradient: state (exact) or proxy (frozen tangent); "
+                             "default: train.grad_method")
     args = parser.parse_args()
     cfg = load_config(args.config)
+    if args.grad_method is not None:        # the command line wins over the YAML
+        cfg["train"]["grad_method"] = args.grad_method
+    grad_method = cfg.train.grad_method
 
     torch.manual_seed(cfg.train.seed)
     np.random.seed(cfg.train.seed)
@@ -336,12 +311,11 @@ def main():
     tp = cfg.task.pipe
     w = {k: float(v) for k, v in tp.weights.items()}
     margin = float(tp.contact_margin)
-    bounds = workspace_bounds(cfg)
-    adjoint_mode = str(cfg.train.get("adjoint_mode", "branch"))
-    if adjoint_mode not in ("branch", "local"):
-        raise SystemExit(f"train.adjoint_mode must be 'branch' or 'local', got {adjoint_mode!r}")
+    bounds = workspace_bounds(cfg, 2, 3)
 
-    print(f"Task: 90-degree pipe insertion, tip reaching  (adjoint gradients, {adjoint_mode})")
+    print("Task: 90-degree pipe insertion, tip reaching  (adjoint gradients)")
+    print(f"Adjoint gradient: {grad_method}  "
+          f"({'--grad-method' if args.grad_method else 'train.grad_method'})")
     print(f"Environment: {type(env).__name__}  (grasp_mode={env.grasp_mode}, "
           f"gravity={env.gravity.tolist()}, contact={'ON' if pipe in env.obstacles else 'OFF'})")
     print(f"Rod material: {material_summary(cfg)}")
@@ -378,7 +352,7 @@ def main():
     # a run that has overshot can still walk back.
     sched = optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=0,
                                                  min_lr=1e-2 * float(cfg.train.lr))
-    project = workspace_projection(bounds, u0)
+    project = workspace_projection(bounds, u0, 3)
     # The policy that is finally executed: the best converged epoch whose
     # gripper stayed in the workspace.
     best = {"loss": float("inf"), "epoch": None, "state": None}
@@ -391,16 +365,16 @@ def main():
     for ep in pbar:
         env.set_state(checkpoint)
         opt.zero_grad(set_to_none=True)
-        u_list, q_list, J_list, converged = rollout_segment(
-            env, net, u0, N, dlam, device, cfg.train.jac_reg, project=project)
-        if not converged:
+        u_list, r_list, q_list, J_list, conv = rollout(env, net, u0, N, dlam, device,
+                                                       project=project)
+        if not conv.all():
             # A failed solve has no usable state or Jacobian, and with no step
             # taken the next epoch would repeat the same rollout forever. The
             # converged prefix is still exact, though: step on its path and
             # contact terms (deep contact / jamming is usually what made the
             # solve fail) and on the workspace and control terms, which depend
             # on u alone.
-            u_list, q_list, J_list = u_list[:-1], q_list[:-1], J_list[:-1]
+            u_list, r_list, q_list, J_list = u_list[:-1], r_list[:-1], q_list[:-1], J_list[:-1]
             if not u_list:
                 run.log(epoch=ep, converged=False, steps=0,
                         newton_failures=env.n_newton_failures,
@@ -410,17 +384,12 @@ def main():
                                         margin, goal=False)
         else:
             parts, a_free = task_losses(env, pipe, q_list, tip, target, s_ref, w, margin)
-        u_seq_np = np.stack([u.detach().cpu().numpy() for u in u_list])
-        g_u_seq = multistep_adjoint_gradient(
-            u_seq_np, J_list, env.free_index, env.fixed_index, env.deltaL, a_free,
-            jac_reg=cfg.train.jac_reg, dim=2, boundary_rows=env.boundary_rows,
-            accumulate=adjoint_mode == "branch")
+        g_seq = adjoint_gradient(env, u_list, J_list, a_free, cfg.train.jac_reg,
+                                 grad_method=grad_method)
 
-        L_ctrl, L_ws = control_losses(net, u_list, u0, dlam, w, bounds)
-        surrogate = L_ctrl + L_ws
-        for k, u_k in enumerate(u_list):
-            surrogate = surrogate + torch.dot(
-                u_k, torch.tensor(g_u_seq[k], dtype=u_k.dtype, device=device))
+        L_ctrl, L_ws = control_losses(net, u_list, u0, dlam, w, bounds, device)
+        surrogate = L_ctrl + L_ws + surrogate_loss(u_list, r_list, g_seq, dlam, device,
+                                                   grad_method=grad_method)
         surrogate.backward()
         torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
         pre_step_state = copy.deepcopy(net.state_dict())
@@ -428,7 +397,7 @@ def main():
 
         parts["control"] = float(L_ctrl.detach())
         parts["workspace"] = float(L_ws.detach())
-        if not converged:
+        if not conv.all():
             pbar.set_postfix({"status": "Newton failed", "steps": len(u_list)})
             run.log(epoch=ep, converged=False, steps=len(u_list),
                     newton_failures=env.n_newton_failures,
@@ -464,8 +433,7 @@ def main():
         print(f"\nExecuting the policy from epoch {best['epoch']} (best loss {best['loss']:.5g})")
     env.set_state(checkpoint)
     with torch.no_grad():
-        u_list, q_list, _, _ = rollout_segment(env, net, u0, N, dlam, device,
-                                               cfg.train.jac_reg, project=project)
+        u_list, _, q_list, _, _ = rollout(env, net, u0, N, dlam, device, project=project)
     m = rollout_metrics(env, pipe, q_list, u_list, tip, target, bounds, N)
     crit, success = success_criteria(m, pipe, cfg)
 
@@ -487,7 +455,7 @@ def main():
     print(f"RESULT: {'SUCCESS' if success else 'FAILURE'}")
     print("=" * 72)
 
-    out_dir = str(_ROOT / 'outputs')
+    out_dir = str(run.artifact_dir)      # the run's own directory
     visualize_pipe_task(
         q_list, env, target, losses, tip_node=tip, q_init=q_init, reference=reference,
         metrics={"err": f"{m['tip_error'] * 1e3:.1f}mm",
@@ -501,7 +469,7 @@ def main():
                               track_node=tip, track_label='Tip', gripper_node=env.nv - 1)
 
     run.finish(
-        task="pipe_tip_reaching", mode="single_horizon",
+        task="pipe_tip_reaching", mode="single_horizon", grad_method=grad_method,
         final_loss=losses[-1] if losses else None, final_error=m["tip_error"],
         target=target, losses=losses, success=bool(success), best_epoch=best["epoch"],
         criteria={k: bool(v) for k, v in crit.items()},
