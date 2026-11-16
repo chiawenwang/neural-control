@@ -1,0 +1,170 @@
+# =============================================================================
+# Fig. 1 components: every numeric setting lives here.
+#
+#   python -m paper_figures.fig01.landscape [--force]     panel (a)
+#   python -m paper_figures.fig01.tiles [--provisional]   panel (b)
+#   python -m paper_figures.fig01.preview                 layout preview
+#
+# The physics block (`model`, `homotopy`, `landscape`, `obstacle`) is hashed
+# into the cache key: change any of it and the computation reruns.
+# =============================================================================
+
+figure:
+  name: fig01
+  size_in: [3.5, 2.45]          # IEEE single column
+
+# ----------------------------------------------------------------- panel (a)
+model:
+  material: soft_strip          # preset in configs/default.yaml (results are
+                                # normalized by L and EI/L, so it does not matter)
+  nv: 51
+  length: 1.0                   # L [m]
+  eps: 0.10                     # clamp-to-clamp distance (1 - eps) L -> bistable arch
+  gravity: [0.0, 0.0]           # in-plane gravity [m/s^2]; [0, -9.81] turns it on
+  newton_max_iter: 200          # per attempt; a failed attempt falls back to relaxation
+  kick_amp: 1.0e-3              # [m] nudge along an unstable mode
+  descent_max_iter: 500         # energy-descent fallback (shifted-Hessian Newton, Armijo on E)
+
+homotopy:
+  steps: 200                    # M quasi-static steps, lambda_k = k / M
+  theta_max_factor: 1.3         # theta_max = 1.3 theta_c
+  sweep_step: 0.01              # [rad] coarse search for the snap, both directions
+  sweep_limit: 1.5708           # [rad] give up beyond this rotation
+  jump_tol: 0.02                # [L] |s_k - s_(k-1)| above this is a jump (search, bisection)
+  bisection_tol: 1.0e-6         # [rad] on theta_c
+  snap_ratio: 20.0              # snap: |ds| > ratio * median |ds| ...
+  snap_min_jump: 0.02           # ... and > this [L]; or Newton iterations > ratio * median
+
+landscape:
+  n_s: 200                      # s grid points on [-s_max, s_max]
+  s_max_factor: 1.2             # s_max = 1.2 x arch amplitude (lambda = 0)
+  curves_fixed: [0.0, 0.2, 0.4, 0.6]   # lambda of the early curves (kept if < lambda_pre - 0.05)
+  n_curves: 6                   # fixed ones + one just before the fold + one after the snap
+  post_snap_delta: null         # lambda_post = lambda_snap + this (rounded to the step grid);
+                                # null -> 1, the end of the homotopy
+  surface_n_lambda: 29          # lambda grid of the 3D surface on [0, lambda_post]
+  max_iter: 80                  # Newton per constrained point
+  min_match_tol: [0.004, 0.002] # validation: |ds| [L], |dE| [EI/L] of minima vs equilibria
+  workers: 12                   # processes for the per-lambda sweeps
+
+obstacle:                       # optional second scenario (a circle above the arch)
+  enabled: true
+  center_x: 0.5                 # fraction of the clamp distance
+  bottom: 0.85                  # lowest point of the circle, x the lambda = 0 arch amplitude
+  radius: 0.12                  # [L]
+  k_contact: 1.0e+4             # [N/m] per node (src/contact.py CircleObstacle)
+
+# drawing of panel (a)
+panel_a:
+  size_in: [3.5, 1.45]
+  placement_in: [0.0, 1.0]      # lower-left corner on the final canvas
+  energy_clip: 1.6              # drop curve points more than this x (lambda=0 barrier
+                                # height) above the lambda=0 wells
+  offset_per_lambda: null       # vertical offset per unit lambda [EI/L]; null -> auto
+  overlap: 0.55                 # auto offset: consecutive curves overlap by this fraction
+  axes_rect_in: [0.28, 0.31, 1.86, 1.10]   # [left, bottom, width, height] of the ridgeline's
+                                # data area; ends left of the rod column (x = 2.20 in)
+  ball_size_pt: 4.2
+  surface:
+    axes_rect_in: [0.0, 0.08, 2.42, 1.40]   # the 3D axes box; the right column holds the rods
+    elev: 26.0
+    azim: -68.0
+    zoom: 1.32
+    box_aspect: [2.6, 1.7, 0.9]
+    n_s_plot: 120               # s samples of the rasterized surface
+    s_margin: 0.005             # [L] the surface ends this far right of the right well
+    process:                    # 2D layer over the surface (inches)
+      head_in: [0.05, 0.045]    # arrowhead [length, width]
+      head_edge_pt: 0.4         # white edge of the arrowheads on the path
+      gap_in: 0.01              # between an arrow tip and the ball it points at
+      snap_arc: {depart_deg: 110, arrive_deg: 85, height_in: 0.35}   # cubic: leaves the
+                                # fold ball, comes down onto the landing ball
+      labels:                   # offset from the anchor [in] and horizontal alignment;
+                                # anchors: first ball, apex of the snap arrow, last ball
+        start: {offset_in: [-0.045, -0.035], ha: right}
+        snap: {offset_in: [0.0, 0.065], ha: center}
+        end: {offset_in: [0.035, 0.06], ha: left}
+      tick_in: 0.028
+      ticklabel_gap_in: 0.02    # tick end to its label (below for s, right for lambda)
+      s_label_in: [0.0, -0.22]  # s/L label, from the middle of the s axis
+      lambda_label_in: [0.15, -0.12]  # lambda label, from the middle of the lambda axis
+      energy_label_in: 0.07     # energy label, left of the energy axis
+  rods:
+    size_in: [3.5, 0.5]
+    placement_in: [0.0, 1.95]
+    scale_in_per_m: 1.0         # shared physical scale of every rod sketch
+    lambdas: [first, pre, post] # which states: first | pre | post | <lambda value>
+                                # (post = the last curve: lambda = 1)
+    column_x_in: 2.40           # main layout: a_rod_lam_* stacked right of the ridgeline
+    column_y_in: [1.05, 1.50, 1.95]   # lower-left y of each, in the order of `lambdas`
+    clamp_in: [0.035, 0.07]     # clamp rectangle [length, width] in inches
+    single_size_in: [1.1, 0.5]  # canvas of each a_rod_lam_<value> file
+    column:                     # main layout: the process as a stack of rods, a_rods_column_*
+      placement_in: [2.20, 1.0] # lower-left corner on the final canvas
+      size_in: [1.30, 1.45]
+      rod_left_in: 0.30         # left rod end, from the canvas' left edge
+      direction: up             # up: start at the bottom (lambda grows upward, as on the
+                                # surface); down: start at the top
+      base_in: 0.08             # first clamp line, from the bottom (up) or the top (down)
+      pitch_in: 0.14            # min spacing of clamp lines; frames are also kept
+      clearance_in: 0.03        # this far apart (more where the shape flips)
+      fill_margin_in: 0.03      # stretch the spacing to fill the canvas up to this margin
+                                # (null: keep the minimum spacing)
+      ghost_alpha: 0.4          # frames between the named states: opacity ...
+      ghost_lw_pt: 0.8          # ... and line width
+      label_x_in: 0.13          # centers of the names
+      arrow_gap_in: 0.075       # arrows stop this far from the names' center lines
+      head_in: [0.045, 0.035]   # arrowhead [length, width]
+  colorbar:
+    horizontal_bar_in: [1.2, 0.08]
+    horizontal_canvas_in: [1.62, 0.16]  # "0 [bar] 1 lambda", labels inline
+    horizontal_placement_in: [0.52, 0.835]   # in the gap between panel (a) and the tiles
+    vertical_bar_in: [0.08, 1.0]
+    vertical_canvas_in: [0.40, 1.30]
+    n_patches: 128
+
+preview:
+  labels_in: {"(a)": [0.0, 2.45], "(b)": [0.0, 0.985]}   # top-left corner of each panel label
+
+# ----------------------------------------------------------------- panel (b)
+panel_b:
+  tile_in: 0.82
+  y_in: 0.0                     # tiles row: lower edge on the final canvas
+  tasks: [shape_formation, insertion, routing, hardware]
+  titles:
+    shape_formation: Shape formation
+    insertion: Insertion
+    routing: Routing
+    hardware: Hardware
+  n_snapshots: 4                # snapshots besides the final shape
+  snapshot_alpha: [0.35, 0.9]   # opacity of the first and last snapshot
+  margin_in: 0.06               # free border inside a tile
+  gripper_in: 0.07              # gripper glyph jaw opening
+  contact_tol: 1.5e-3           # [m] edge-obstacle clearance counted as contact
+
+provisional:
+  shape_formation:
+    config: null                # configs/default.yaml with the overrides below
+    nv: 41
+    steps: 120
+    gravity: [0.0, 0.0]
+    k_contact: 1.0e+5
+    obstacles:                  # [x, y, r] in m
+      - [0.38, 0.075, 0.05]
+      - [0.66, -0.10, 0.05]
+    gripper_start: [1.0, 0.0, 0.0]
+    gripper_end: [0.62, -0.30, -1.5708]
+  insertion:
+    config: configs/task_90deg_pipe.yaml
+    steps: 100
+    gripper_start: [1.0, 0.0, 0.0]
+    tilt: [-0.05, -0.20]        # gripper y [m], theta [rad] reached during the first part:
+                                # the rod rides the upper wall, the tip is deflected down the bend
+    tilt_fraction: 0.15
+    feed_to_x: 0.48             # gripper x at the end (workspace limit)
+    pipe_wall: 0.03             # drawn wall thickness [m]
+  routing:
+    config: configs/example_3d_twist.yaml
+    steps: 100
+    gripper_end: [0.70, 0.25, 0.20, 0.6, -0.3, 6.2832]   # x y z theta phi yaw (a full turn)
+    camera: {elev: 22.0, azim: -62.0, zoom: 1.0}
