@@ -2,6 +2,13 @@
 
     python scripts/train_pipe.py --config configs/task_90deg_pipe.yaml
     python scripts/train_pipe.py --config configs/task_90deg_pipe.yaml --grad-method proxy
+    python scripts/train_pipe.py --config configs/task_90deg_pipe.yaml --optimizer linesearch
+    python scripts/train_pipe.py --config configs/task_90deg_pipe_3d.yaml --optimizer linesearch
+
+In 3D (configs/task_90deg_pipe_3d.yaml) the pipe is two cylindrical bores
+meeting at a right angle (contact.LPipe3D) and the target sits on the far
+wall of the corner: once the tip touches that wall it cannot leave it again,
+so a point on the centerline of the second bore is not where a rod ends up.
 
 The controller is src/neural_control.py's, unchanged -- the same one the other
 two tasks use: a BoundaryVelocityNet (lambda -> right-end control rate), the
@@ -10,8 +17,9 @@ simulated), the same multi-step adjoint gradient through the equilibrium
 Jacobians (train.grad_method, or --grad-method, picks the exact `state`
 gradient or the frozen-tangent `proxy`). What this script adds is the task:
 
-  * the rod is gripped at the right end only (env.grasp_mode: right); node 0 is
-    a free tip that moves only through the rod's response;
+  * the rod is gripped at the right end only (env.grasp_mode: right, 2D or 3D
+    without twist); node 0 is a free tip that moves only through the rod's
+    response;
   * the pipe (pipe:, contact:) acts inside every equilibrium solve, so it shapes
     both the rollout and -- through the same Jacobian -- the gradient;
   * the loss is over the whole trajectory, not just the final pose:
@@ -24,6 +32,15 @@ gradient or the frozen-tangent `proxy`). What this script adds is the task:
     step); the last two are functions of u alone and go straight into autograd.
   * the gripper command is projected onto the workspace before it is executed,
     so the robot never leaves it; the penalty acts on the unprojected command.
+  * ``--optimizer`` (train.optimizer): ``adam`` as above, or ``linesearch``,
+    the paper's Algorithm 1 (the Adam direction, a backtracking step length
+    on full rollouts). The pipe loss is a trajectory objective, so in that
+    mode a trial with a snap-through is rejected, like one with a Newton
+    failure, an unstable state or a command outside the workspace (no
+    projection then: the policy has to keep the gripper inside).
+
+The rollouts start from the equilibrium at the initial gripper pose
+(``newton.initial_equilibrium``), solved before the checkpoint is taken.
 
 Before training it checks that the workspace can feed enough rod to reach the
 target at all, and prints the buckling-vs-bending estimate for the configured
@@ -52,6 +69,7 @@ from config import load_config
 from env_factory import (
     build_env,
     reset_env,
+    settle_initial,
     end_control_dim,
     initial_control,
     task_target,
@@ -60,7 +78,8 @@ from env_factory import (
 )
 from neural_control import (
     BoundaryVelocityNet, resolve_device, rollout, adjoint_gradient, surrogate_loss,
-    workspace_bounds, workspace_projection, workspace_penalty, GRAD_METHODS,
+    workspace_bounds, workspace_projection, workspace_penalty, GRAD_METHODS, OPTIMIZERS,
+    LineSearch, trial_rule, flat_gradient, get_parameters, set_parameters,
 )
 from runlog import RunLogger
 from utils import maybe_save_trajectory_gif, visualize_pipe_task
@@ -70,15 +89,13 @@ from utils import maybe_save_trajectory_gif, visualize_pipe_task
 
 def check_setup(cfg, env):
     """Refuse configurations this task cannot run, with the reason."""
-    if env.dim != 2:
-        raise SystemExit("train_pipe.py needs env.dim: 2")
     if getattr(env, "grasp_mode", "both") != "right":
         raise SystemExit("train_pipe.py needs env.grasp_mode: right -- with both ends "
                          "clamped there is no free tip to steer")
     if env.pipe is None:
         raise SystemExit("train_pipe.py needs pipe.enabled: true")
     tip = int(cfg.task.pipe.tip_node)
-    if 2 * tip not in set(env.free_index.tolist()):
+    if env.dim * tip not in set(env.free_index.tolist()):
         raise SystemExit(f"task.pipe.tip_node = {tip} is a clamped node")
     return tip
 
@@ -98,18 +115,20 @@ def feasibility_report(cfg, env, pipe, tip0, target):
     does not change which one wins, only the geometry does.
     """
     u0 = initial_control(cfg)
-    g0 = u0[3:5]
+    dim = env.dim
+    k = end_control_dim(dim)
+    g0 = u0[k:k + dim]
     s0 = pipe.arclength(tip0)[0]
     s_goal = pipe.arclength(target)[0]
     need = s_goal - s0
 
-    bounds = workspace_bounds(cfg, 2, 3)
+    bounds = workspace_bounds(cfg, dim, k)
     if bounds is None:
         avail = float("inf")
     else:
         lo, hi = bounds
         d = pipe.d1
-        avail = float(sum(max(d[c] * (hi[c] - g0[c]), d[c] * (lo[c] - g0[c])) for c in range(2)))
+        avail = float(sum(max(d[c] * (hi[c] - g0[c]), d[c] * (lo[c] - g0[c])) for c in range(dim)))
 
     L_free = float((g0 - pipe.P0) @ -pipe.d1)
     EI = env.EI
@@ -145,8 +164,8 @@ def feasibility_report(cfg, env, pipe, tip0, target):
                         "entry direction, start with more rod inserted, or move the target")
     if bounds is not None:
         lo, hi = bounds
-        if np.any(u0[3:6] < lo) or np.any(u0[3:6] > hi):
-            problems.append(f"the initial gripper pose {u0[3:6]} is outside the workspace")
+        if np.any(u0[k:] < lo) or np.any(u0[k:] > hi):
+            problems.append(f"the initial gripper pose {u0[k:]} is outside the workspace")
     if P_euler < P_bend:
         print("  WARNING: the free span will likely buckle before the tip is forced round "
               "the bend. Grip closer to the entry or enlarge the bend radius; a stiffer "
@@ -169,7 +188,7 @@ def free_grad(env, full):
 
 def node_grad(env, node, vec):
     full = np.zeros(env.q.size)
-    full[2 * node:2 * node + 2] = vec
+    full[env.dim * node:env.dim * node + env.dim] = vec
     return free_grad(env, full)
 
 
@@ -185,14 +204,15 @@ def task_losses(env, pipe, q_list, tip, target, s_ref, w, margin, goal=True):
     a_free = np.zeros((T, len(env.free_index)))
     parts = {"goal": 0.0, "path": 0.0, "contact": 0.0}
 
+    dim = env.dim
     if goal:
-        p_T = node_position(q_list[-1], 2, tip)
+        p_T = node_position(q_list[-1], dim, tip)
         d = p_T - target
         parts["goal"] = w["goal"] * float(d @ d)
         a_free[-1] += node_grad(env, tip, 2.0 * w["goal"] * d)
 
     for k, q in enumerate(q_list):
-        s_k, ds_dp = pipe.arclength(node_position(q, 2, tip))
+        s_k, ds_dp = pipe.arclength(node_position(q, dim, tip))
         e = s_k - s_ref[k]
         parts["path"] += w["path"] / N * e * e
         a_free[k] += node_grad(env, tip, 2.0 * w["path"] / N * e * ds_dp)
@@ -216,18 +236,22 @@ def control_losses(net, u_list, u0, dlam, w, bounds, device):
     T = len(u_list)
     lams = (torch.arange(T, dtype=u0.dtype, device=device) / round(1.0 / dlam))[:, None]
     L_ctrl = w["control"] * (net(lams) ** 2).sum(dim=1).mean()
-    L_ws = workspace_penalty(net, u0, u_list, 3, bounds, w["workspace"], device, dlam)
+    L_ws = workspace_penalty(net, u0, u_list, net.out_dim, bounds, w["workspace"], device, dlam)
     return L_ctrl, L_ws
 
 
 # --------------------------------------------------------------- evaluation
 
 def max_bending_strain(env, q):
-    """Largest surface bending strain R * kappa along the rod (2D DER curvature)."""
-    X = np.asarray(q[:2 * env.nv]).reshape(-1, 2)
+    """Largest surface bending strain R * kappa along the rod (DER curvature)."""
+    dim = env.dim
+    X = np.asarray(q[:dim * env.nv]).reshape(-1, dim)
     e = np.diff(X, axis=0)
     t = e / np.linalg.norm(e, axis=1, keepdims=True)
-    cross = t[:-1, 0] * t[1:, 1] - t[:-1, 1] * t[1:, 0]
+    if dim == 2:
+        cross = t[:-1, 0] * t[1:, 1] - t[:-1, 1] * t[1:, 0]
+    else:
+        cross = np.linalg.norm(np.cross(t[:-1], t[1:]), axis=1)
     dot = np.sum(t[:-1] * t[1:], axis=1)
     kappa = 2.0 * np.abs(cross) / (1.0 + dot) / env.deltaL      # 2 tan(phi/2) / l
     return float(env.R_outer * kappa.max())
@@ -235,8 +259,10 @@ def max_bending_strain(env, q):
 
 def rollout_metrics(env, pipe, q_list, u_list, tip, target, bounds, n_steps):
     """Everything the success criteria and the log need, for one rollout."""
+    dim = env.dim
+    k = end_control_dim(dim)
     U = np.stack([u.detach().cpu().numpy() for u in u_list])
-    tips = np.array([node_position(q, 2, tip) for q in q_list])
+    tips = np.array([node_position(q, dim, tip) for q in q_list])
     s = np.array([pipe.arclength(p)[0] for p in tips])
     # Energy/force only when the pipe actually acts; penetration either way
     # (with contact off it measures how far the rod goes through the wall).
@@ -246,12 +272,12 @@ def rollout_metrics(env, pipe, q_list, u_list, tip, target, bounds, n_steps):
         pen = max(pen, pipe.detect_dlo_pipe_contact(q)["max_penetration"])
         if acting:
             e_max = max(e_max, pipe.compute_contact_energy(q))
-            F = pipe.compute_contact_force(q).reshape(-1, 2)
+            F = pipe.compute_contact_force(q).reshape(-1, dim)
             f_max = max(f_max, float(np.linalg.norm(F, axis=1).max()))
     viol = 0.0
     if bounds is not None:
         lo, hi = bounds
-        viol = float(np.maximum(np.maximum(U[:, 3:] - hi, lo - U[:, 3:]), 0.0).max())
+        viol = float(np.maximum(np.maximum(U[:, k:] - hi, lo - U[:, k:]), 0.0).max())
     return {
         "tip_error": float(np.linalg.norm(tips[-1] - target)),
         "tip_final": tips[-1],
@@ -266,7 +292,7 @@ def rollout_metrics(env, pipe, q_list, u_list, tip, target, bounds, n_steps):
         "workspace_violation": viol,
         "steps_completed": len(q_list),
         "all_converged": len(q_list) == n_steps,
-        "gripper_final": U[-1, 3:6],
+        "gripper_final": U[-1, k:],
     }
 
 
@@ -283,6 +309,102 @@ def success_criteria(m, pipe, cfg):
     return crit, all(crit.values())
 
 
+# --------------------------------------------------------------- line search
+
+def train_linesearch(env, checkpoint, net, u0, N, dlam, device, cfg, pipe, tip, target, s_ref,
+                     w, margin, bounds, run, epochs, lr, pbar):
+    """Algorithm 1 on the pipe loss: :class:`neural_control.LineSearch`.
+
+    The trial rule is the trajectory one: every step converged and stable,
+    every command inside the workspace, and no snap-through.  Returns the
+    per-epoch losses and the line-search records; the policy is left at the
+    last accepted weights.
+    """
+    gm = cfg.train.grad_method
+    ls = LineSearch(net, lr, c=float(cfg.train.linesearch.c),
+                    tau_min=float(cfg.train.linesearch.tau_min))
+    losses, records = [], []
+
+    def evaluate(xi):
+        set_parameters(net, xi)
+        env.set_state(checkpoint)
+        infos = []
+        u_list, r_list, q_list, J_list, conv = rollout(env, net, u0, N, dlam, device,
+                                                       project=None, infos=infos)
+        ok, reason = trial_rule(infos, conv, u_list, net.out_dim, bounds, snap_ok=False)
+        tr = {"ok": ok, "reason": reason, "loss": np.inf, "u_list": u_list, "r_list": r_list,
+              "q_list": q_list, "J_list": J_list, "conv": conv, "infos": infos}
+        if conv.all():
+            parts, a_free = task_losses(env, pipe, q_list, tip, target, s_ref, w, margin)
+            L_ctrl, L_ws = control_losses(net, u_list, u0, dlam, w, bounds, device)
+            parts["control"] = float(L_ctrl.detach())
+            parts["workspace"] = float(L_ws.detach())
+            tr.update(loss=float(sum(parts.values())), parts=parts, a_free=a_free,
+                      L_ctrl=L_ctrl, L_ws=L_ws)
+        return tr
+
+    def gradient(tr):
+        g_seq = adjoint_gradient(env, tr["u_list"], tr["J_list"], tr["a_free"], cfg.train.jac_reg,
+                                 grad_method=gm)
+        surrogate = tr["L_ctrl"] + tr["L_ws"] + surrogate_loss(
+            tr["u_list"], tr["r_list"], g_seq, dlam, device, grad_method=gm)
+        return flat_gradient(net, surrogate)
+
+    def record(ep, tr, rec, fallback):
+        m = rollout_metrics(env, pipe, tr["q_list"], tr["u_list"], tip, target, bounds, N)
+        n_snap = int(sum(1 for i in tr["infos"] if i.get("snap")))
+        losses.append(tr["loss"])
+        records.append({"epoch": ep, "loss": tr["loss"], "tau": rec["tau"],
+                        "rejected": rec["n_rejected"],
+                        "rejected_reasons": [r["reason"] for r in rec["rejected"]],
+                        "rollouts": ls.n_rollouts, "snaps": n_snap, "fallback": fallback})
+        pbar.set_postfix({"loss": f"{tr['loss']:.4g}", "tip_err": f"{m['tip_error']:.4f}",
+                          "tau": "-" if rec["tau"] is None else f"{rec['tau']:g}",
+                          "rej": rec["n_rejected"]})
+        run.log(epoch=ep, total_loss=tr["loss"],
+                **{f"loss_{k}": v for k, v in tr["parts"].items()},
+                error=m["tip_error"], tip=m["tip_final"], target=target,
+                tip_s=m["tip_s_final"], max_penetration=m["max_penetration"],
+                max_contact_energy=m["max_contact_energy"],
+                max_contact_force=m["max_contact_force"],
+                workspace_violation=m["workspace_violation"],
+                tau=rec["tau"], rejected=rec["n_rejected"], rollouts=ls.n_rollouts,
+                snaps=n_snap, fallback=fallback,
+                converged=True, steps=len(tr["u_list"]), newton_failures=env.n_newton_failures,
+                u_final=tr["u_list"][-1].detach().cpu().numpy())
+        if ep % 10 == 0 or rec["tau"] is None:
+            print(f"[ep {ep:04d}] L={tr['loss']:.5g} "
+                  f"({', '.join(f'{k}={v:.3g}' for k, v in tr['parts'].items())})  "
+                  f"tip=({','.join(f'{v:.3f}' for v in m['tip_final'])}) err={m['tip_error']:.4f}  "
+                  f"tau={'-' if rec['tau'] is None else f'{rec['tau']:g}'} rejected={rec['n_rejected']} "
+                  f"rollouts={ls.n_rollouts}")
+
+    xi = get_parameters(net)
+    ls.n_rollouts += 1
+    cur = evaluate(xi)
+    stop = None
+    if not cur["ok"]:
+        stop = {"epoch": 0, "reason": f"initial rollout rejected: {cur['reason']}"}
+        print(f"the initial rollout is rejected ({cur['reason']}): Algorithm 1 needs a feasible "
+              "start, no update is made")
+        run.log(epoch=0, converged=bool(cur["conv"].all()), steps=len(cur["u_list"]),
+                newton_failures=env.n_newton_failures, note=stop["reason"])
+        return losses, records, stop, ls
+    g = gradient(cur)
+    for ep in pbar:
+        d, fallback = ls.direction(g)
+        acc, rec = ls.search(xi, g, cur["loss"], d, evaluate)
+        record(ep, cur, rec, fallback)
+        if acc is None:
+            stop = {"epoch": ep, "reason": rec["stop"]}
+            print(f"[ep {ep:04d}] line search stopped: {rec['stop']}")
+            break
+        xi = get_parameters(net)
+        cur = acc
+        g = gradient(cur)
+    return losses, records, stop, ls
+
+
 # --------------------------------------------------------------- main
 
 def main():
@@ -292,11 +414,17 @@ def main():
     parser.add_argument("--grad-method", choices=GRAD_METHODS, default=None,
                         help="adjoint gradient: state (exact) or proxy (frozen tangent); "
                              "default: train.grad_method")
+    parser.add_argument("--optimizer", choices=OPTIMIZERS, default=None,
+                        help="adam (fixed lr, every step accepted) or linesearch (the paper's "
+                             "Algorithm 1); default: train.optimizer")
     args = parser.parse_args()
     cfg = load_config(args.config)
     if args.grad_method is not None:        # the command line wins over the YAML
         cfg["train"]["grad_method"] = args.grad_method
+    if args.optimizer is not None:
+        cfg["train"]["optimizer"] = args.optimizer
     grad_method = cfg.train.grad_method
+    optimizer = cfg.train.optimizer
 
     torch.manual_seed(cfg.train.seed)
     np.random.seed(cfg.train.seed)
@@ -306,25 +434,32 @@ def main():
     tip = check_setup(cfg, env)
     pipe = env.pipe
     target = task_target(cfg)
+    dim = env.dim
+    k_end = end_control_dim(dim)
     N = env.Nsteps
     dlam = 1.0 / N
     tp = cfg.task.pipe
     w = {k: float(v) for k, v in tp.weights.items()}
     margin = float(tp.contact_margin)
-    bounds = workspace_bounds(cfg, 2, 3)
+    bounds = workspace_bounds(cfg, dim, k_end)
 
     print("Task: 90-degree pipe insertion, tip reaching  (adjoint gradients)")
     print(f"Adjoint gradient: {grad_method}  "
           f"({'--grad-method' if args.grad_method else 'train.grad_method'})")
+    print(f"Optimizer: {optimizer}  "
+          f"({'--optimizer' if args.optimizer else 'train.optimizer'})")
     print(f"Environment: {type(env).__name__}  (grasp_mode={env.grasp_mode}, "
           f"gravity={env.gravity.tolist()}, contact={'ON' if pipe in env.obstacles else 'OFF'})")
     print(f"Rod material: {material_summary(cfg)}")
 
-    # Where the tip actually starts: one step at the initial control.
+    # The rollouts start from the equilibrium at the initial gripper pose
+    # (newton.initial_equilibrium); without it, from the straight rod as before.
+    settle_initial(env, cfg)
     checkpoint = env.get_state()
+    # Where the tip actually starts: one step at the initial control.
     u0_np = initial_control(cfg)
     _, _, info0 = env.step(u0_np)
-    tip0 = node_position(info0["q"], 2, tip)
+    tip0 = node_position(info0["q"], dim, tip)
     q_init = info0["q"].copy()
     env.set_state(checkpoint)
 
@@ -338,7 +473,7 @@ def main():
 
     device = resolve_device(cfg.train.device)
     u0 = torch.tensor(u0_np, dtype=torch.float32, device=device)
-    net = BoundaryVelocityNet(hidden=cfg.train.hidden, out_dim=end_control_dim(2)).to(device)
+    net = BoundaryVelocityNet(hidden=cfg.train.hidden, out_dim=k_end).to(device)
     # Start from "hold still": zero output layer, same architecture. A randomly
     # initialized policy sweeps the gripper tens of cm out of the workspace and
     # levers the rod over the entry lip, where the solves fail and no gradient
@@ -352,17 +487,29 @@ def main():
     # a run that has overshot can still walk back.
     sched = optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=0,
                                                  min_lr=1e-2 * float(cfg.train.lr))
-    project = workspace_projection(bounds, u0, 3)
+    # No projection under the line search: a command outside the workspace
+    # rejects the trial instead.
+    project = None if optimizer == "linesearch" else workspace_projection(bounds, u0, k_end)
     # The policy that is finally executed: the best converged epoch whose
     # gripper stayed in the workspace.
     best = {"loss": float("inf"), "epoch": None, "state": None}
 
+    # Tagged by the optimizer and gradient, so two runs started in the same
+    # second (adam and linesearch side by side) get their own directories.
     run = RunLogger(cfg, env=env, root=_ROOT,
+                    tag=f"pipe_{optimizer}" + ("_proxy" if grad_method == "proxy" else ""),
                     enabled=bool((cfg.get("output") or {}).get("run_log", True)))
 
     losses = []
+    ls_records, ls_stop, ls = [], None, None
     pbar = tqdm(range(cfg.train.epochs), desc="Training", dynamic_ncols=True)
-    for ep in pbar:
+    if optimizer == "linesearch":
+        losses, ls_records, ls_stop, ls = train_linesearch(
+            env, checkpoint, net, u0, N, dlam, device, cfg, pipe, tip, target, s_ref, w,
+            margin, bounds, run, cfg.train.epochs, float(cfg.train.lr), pbar)
+        if losses:
+            best.update(loss=losses[-1], epoch=len(losses) - 1, state=None)
+    for ep in (pbar if optimizer == "adam" else ()):
         env.set_state(checkpoint)
         opt.zero_grad(set_to_none=True)
         u_list, r_list, q_list, J_list, conv = rollout(env, net, u0, N, dlam, device,
@@ -424,7 +571,7 @@ def main():
                 u_final=u_list[-1].detach().cpu().numpy())
         if ep % 10 == 0:
             print(f"[ep {ep:04d}] L={L:.5g} ({', '.join(f'{k}={v:.3g}' for k, v in parts.items())})"
-                  f"  tip=({m['tip_final'][0]:.3f},{m['tip_final'][1]:.3f}) "
+                  f"  tip=({','.join(f'{v:.3f}' for v in m['tip_final'])}) "
                   f"err={m['tip_error']:.4f}  pen={1e3 * m['max_penetration']:.3f}mm")
 
     # Final open-loop trajectory from the trained policy: generate, then execute.
@@ -441,7 +588,7 @@ def main():
     print(f"Final tip error      {m['tip_error']:.4f} m   (tolerance {float(tp.success_tolerance):g})"
           f"  -- along the pipe {m['progress_error']:.4f} m, the rest is lateral "
           f"(the wall sets it; up to {pipe.r_eff:.4f} m)")
-    print(f"Tip                  ({m['tip_final'][0]:.4f}, {m['tip_final'][1]:.4f}) in "
+    print(f"Tip                  ({', '.join(f'{v:.4f}' for v in m['tip_final'])}) in "
           f"{m['tip_piece_final']}, s = {m['tip_s_final']:.3f} (bend ends at {pipe.s_bend_end:.3f})")
     print(f"Max penetration      {1e3 * m['max_penetration']:.3f} mm  "
           f"(limit {1e3 * float(tp.max_penetration):.3f} mm)")
@@ -468,8 +615,14 @@ def main():
                               title='90-degree pipe insertion',
                               track_node=tip, track_label='Tip', gripper_node=env.nv - 1)
 
+    extra = {}
+    if optimizer == "linesearch":
+        extra = {"linesearch": ls_records, "stop": ls_stop,
+                 "rollouts_total": ls.n_rollouts if ls is not None else 0,
+                 "rejected_total": ls.n_rejected if ls is not None else 0}
     run.finish(
         task="pipe_tip_reaching", mode="single_horizon", grad_method=grad_method,
+        optimizer=optimizer,
         final_loss=losses[-1] if losses else None, final_error=m["tip_error"],
         target=target, losses=losses, success=bool(success), best_epoch=best["epoch"],
         criteria={k: bool(v) for k, v in crit.items()},
@@ -477,7 +630,8 @@ def main():
         max_contact_force=m["max_contact_force"], tip_final=m["tip_final"],
         progress_error=m["progress_error"], max_bending_strain=m["max_bending_strain"],
         feasibility={k: v for k, v in feas.items() if k != "problems"},
-        newton_failures_total=env.n_newton_failures, device=str(device),
+        newton_failures_total=env.n_newton_failures, unstable_steps_total=env.n_unstable,
+        snaps_total=env.n_snaps, device=str(device), **extra,
     )
 
 

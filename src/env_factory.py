@@ -194,15 +194,15 @@ def build_env(cfg, **overrides):
     )
 
     grasp_mode = str((cfg.get("env") or {}).get("grasp_mode", "both"))
+    kwargs["grasp_mode"] = grasp_mode
     if dim == 2:
         from SimulatorEnv_2D import SimulatorEnv_2D as EnvCls
         gravity = cfg.rod.get("gravity_2d")
         if gravity is not None:
             kwargs["gravity"] = tuple(float(g) for g in gravity)
-        kwargs["grasp_mode"] = grasp_mode
     else:
-        if grasp_mode != "both":
-            raise ValueError(f"env.grasp_mode: {grasp_mode} is 2D only; 3D clamps both ends")
+        if grasp_mode == "right" and env_twist(cfg):
+            raise ValueError("env.grasp_mode: right in 3D needs rod.twist: false (a free end has no yaw)")
         from SimulatorEnv_3D import SimulatorEnv_3D as EnvCls
         gravity = cfg.rod.get("gravity")
         if gravity is not None:
@@ -213,16 +213,50 @@ def build_env(cfg, **overrides):
     kwargs.update(overrides)
     env = EnvCls(**kwargs)
     attach_pipe(env, cfg)
+    attach_peg(env, cfg)
+    env.workspace_box = workspace_box(cfg, dim)
     return env
+
+
+def workspace_box(cfg, dim):
+    """``(lo, hi)`` position corners of the gripper workspace, or None when it is off.
+
+    Only what the plots need (the figures and GIFs draw it); the controller
+    reads the full bounds, angles included, from ``neural_control.workspace_bounds``.
+    """
+    ws = cfg.get("workspace") or {}
+    if not ws.get("enabled", False):
+        return None
+    sfx = "_3d" if dim == 3 else ""
+    return (np.array(ws[f"position_min{sfx}"], dtype=float),
+            np.array(ws[f"position_max{sfx}"], dtype=float))
 
 
 def build_pipe(cfg, env):
     """The ``pipe:`` geometry with the ``contact:`` parameters, for ``env``'s rod."""
-    from contact import LPipe2D
+    from contact import LPipe2D, LPipe3D
     p = cfg.pipe
-    if env.dim != 2:
-        raise ValueError("pipe is implemented for env.dim: 2 only")
     c = cfg.get("contact") or {}
+    if env.dim == 3:
+        # The sharp corner in space: 3-vectors for the entry position and the
+        # two directions (the same keys as in 2D, one entry longer).
+        return LPipe3D(
+            entry_position=p.entry_position,
+            entry_direction=p.entry_direction,
+            exit_direction=p.exit_direction,
+            inner_radius=p.inner_radius,
+            bend_radius=p.bend_radius,
+            first_segment_length=p.first_segment_length,
+            second_segment_length=p.second_segment_length,
+            rod_radius=env.R_outer,
+            nv=env.nv,
+            deltaL=env.deltaL,
+            k_contact=c.get("k_contact", 1.0e7),
+            smoothing=c.get("smoothing", 1.0e-4),
+            corner_smoothing=c.get("corner_smoothing", 5.0e-4),
+            samples_per_edge=c.get("samples_per_edge", 4),
+            geometry_type=p.get("geometry_type", "l_corner_3d"),
+        )
     return LPipe2D(
         entry_position=p.entry_position,
         entry_direction=p.entry_direction,
@@ -269,7 +303,7 @@ def attach_pipe(env, cfg):
     if contact_on:
         env.add_obstacle(pipe)
 
-    q0 = env.nodes.reshape(-1)
+    q0 = env.nodes.reshape(-1)        # positions only; the pipe reads just those
     pen = pipe.detect_dlo_pipe_contact(q0)["max_penetration"]
     if pen > 0.0:
         raise ValueError(
@@ -277,6 +311,31 @@ def attach_pipe(env, cfg):
             "Move pipe.entry_position / entry_direction so the inserted part of "
             "the rod lies inside the first segment.")
     return pipe
+
+
+def attach_peg(env, cfg):
+    """Add the ``peg:`` cylinder (axis along y) to ``env.obstacles``; 3D only.
+
+    Returns the peg, or None when ``peg.enabled`` is false.  A rod that starts
+    inside the peg is rejected rather than left to be pushed out.
+    """
+    p = cfg.get("peg") or {}
+    if not p.get("enabled", False):
+        return None
+    if env_dim(cfg) != 3:
+        raise ValueError("peg.enabled: true needs env.dim: 3 (the peg is a cylinder along y)")
+    from contact import PegObstacle
+    cx, cz = (float(v) for v in p["center_xz"])
+    peg = PegObstacle(cx, float(p["center_y"]), cz, float(p["radius"]),
+                      float(p["half_length_y"]), k_contact=float(p["k_contact"]))
+    spacing = cfg.rod.rod_length / (cfg.rod.nv - 1)
+    if peg.radius <= spacing:
+        raise ValueError(f"peg.radius {peg.radius} m is not above the node spacing "
+                         f"{spacing:.4g} m: the rod could slip between two nodes")
+    if any(peg.node_energy(*x) > 0.0 for x in env.nodes.reshape(-1, 3)):
+        raise ValueError("the initial rod penetrates the peg; move peg.center_xz / center_y")
+    env.add_obstacle(peg)
+    return peg
 
 
 def reset_env(env, cfg):
@@ -291,6 +350,31 @@ def reset_env(env, cfg):
                      init_theta=cfg.start.init_theta,
                      init_phi=cfg.start.get("init_phi", 0.0),
                      init_yaw=cfg.start.get("init_yaw", 0.0))
+
+
+def settle_initial(env, cfg):
+    """Solve the equilibrium at the initial control before the horizon starts.
+
+    With ``newton.initial_equilibrium`` the rod is brought to equilibrium at
+    ``u0`` (by continuation from the pose that clamps the undeformed rod, see
+    SimulatorEnv_*.settle) and that state is what the rollout checkpoint
+    holds, so the first control step leaves from an equilibrium rather than
+    from the straight rod.  The equilibrium has to converge and, when the
+    stability check is on, to be stable: an unstable start would put the
+    whole rollout on a branch the rod cannot be on.  Returns the step info,
+    or None when the option is off (the checkpoint is then the reset state,
+    as before).
+    """
+    if not bool((cfg.get("newton") or {}).get("initial_equilibrium", False)):
+        return None
+    info = env.settle(initial_control(cfg))
+    if not info["converged"]:
+        raise RuntimeError("no equilibrium at the initial control u0: "
+                           f"{info['reason'] or info['newton'].get('reason', '')}")
+    if info["stable"] is False:
+        raise RuntimeError("the equilibrium at the initial control u0 is unstable "
+                           "(J_ff is not positive definite); the rollout cannot start there")
+    return info
 
 
 # --------------------------------------------------------- controls / tasks
@@ -356,7 +440,7 @@ def task_target(cfg) -> np.ndarray:
 
 
 def make_target_trajectory(N, rod_length, traj_type="circle", dim=2, up_axis=None,
-                           start=None, end=None):
+                           start=None, end=None, sine=None):
     """The N-step target trajectory for the mid node, shape (N, dim).
 
     ``segment`` is the default and the one to reach for: a straight line from
@@ -400,6 +484,26 @@ def make_target_trajectory(N, rod_length, traj_type="circle", dim=2, up_axis=Non
             raise ValueError(f"segment endpoints must be {dim}D, got "
                              f"{p0.size} and {p1.size}")
         targets[:] = p0 + np.outer(lams, p1 - p0)
+    elif traj_type == "sine_xz":
+        # 3D: a sine in the vertical x-z plane from `start` (the ready position
+        # of the mid node), drifting by (dx, dy) and bowing x by `bow` -- the keys of
+        # task.tracking.sine_xz.  Step k targets t = (k+1)/N, so the last step
+        # lands at t = 1, as in train_tracking.reference_path.
+        if dim != 3 or start is None or sine is None:
+            raise ValueError("trajectory_type 'sine_xz' needs dim 3, start= and sine=")
+        p0 = np.asarray(start, dtype=float).reshape(-1)
+        t = np.arange(1, N + 1) / N
+        targets[:, 0] = p0[0] + float(sine["dx"]) * t
+        targets[:, 1] = p0[1] + float(sine["dy"]) * t
+        targets[:, 2] = p0[2] + float(sine["amp"]) * np.sin(2 * np.pi * float(sine["periods"]) * t)
+        # `bow`: let x follow the surface a bowed rod's mid node lives on,
+        # x ~ x0 - bow * (y^2 + z^2) (about 1.43 for the 1 m soft_strip), so a
+        # path that moves in y or z moves *towards* the fixed end instead of
+        # stretching the rod; `dx` is on top of that.
+        bow = float(sine.get("bow", 0.0))
+        if bow:
+            targets[:, 0] -= bow * ((targets[:, 1] ** 2 + targets[:, 2] ** 2)
+                                    - (p0[1] ** 2 + p0[2] ** 2))
     elif traj_type == "circle":
         cx, cu, r = rod_length / 2, 0.25, 0.15
         theta = 2 * np.pi * lams

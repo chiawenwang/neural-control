@@ -8,6 +8,7 @@ except ImportError:
     render_dlo_neurips = None
 
 from contact import get_contact_forces
+from continuation import quasistatic_step
 from energy import build_energy
 from newton import solve_equilibrium
 from matplotlib.patches import Circle
@@ -439,6 +440,10 @@ class SimulatorEnv_2D:
         self.newton_cfg = dict(newton_cfg or {})
         self.warn_on_newton_failure = warn_on_newton_failure
         self.n_newton_failures = 0
+        # Steps that ended on an unstable equilibrium, and steps in which the
+        # rod snapped through a fold (see src/continuation.py).
+        self.n_unstable = 0
+        self.n_snaps = 0
 
         # Cross-section and material parameters
         self.I_sec = np.pi * (R_outer ** 4 - r_inner ** 4) / 4
@@ -496,6 +501,8 @@ class SimulatorEnv_2D:
         else:
             raise ValueError(f"grasp_mode must be 'both' or 'right', got {grasp_mode!r}")
         self.free_index = np.setdiff1d(all_DOFs, self.fixed_index)
+        #: Every DOF is a node position (no twist angles in 2D).
+        self.n_pos = 2 * nv
 
         # Mid-node index
         # self.mid_node = nv // 2 + 1  # kept consistent with the original script
@@ -518,6 +525,9 @@ class SimulatorEnv_2D:
         self.ctime = None
         self.current_step = None
         self.lamda = None
+        #: The pose the current state was solved under: the start of the pose
+        #: path the next step follows (src/continuation.py).
+        self.u_prev = None
 
         # History log (optional)
         self.history = {
@@ -569,6 +579,42 @@ class SimulatorEnv_2D:
         Yn_1 = y_r
         return np.array([X_0, Y_0, X_1, Y_1, Xn_2, Yn_2, Xn_1, Yn_1], dtype=float)
 
+    # The dimension-neutral name the continuation driver calls (Gamma of the paper).
+    _control_node_from_pose = _control_node_from_xytheta
+
+    def _rest_control(self):
+        """The pose that clamps the undeformed straight rod where reset() puts it."""
+        n0, n1 = self.nodes[0], self.nodes[-1]
+        return np.array([n0[0], n0[1], 0.0, n1[0], n1[1], 0.0], dtype=float)
+
+    def _apply_boundary(self, q, control_node):
+        """A copy of ``q`` with the clamped DOFs set from ``control_node``."""
+        q_new = np.asarray(q, dtype=float).copy()
+        q_new[self.fixed_index] = control_node[self.boundary_rows]
+        return q_new
+
+    def _solve(self, q_old, control_node, use_inertia=False):
+        """One equilibrium solve at ``control_node``, warm-started from ``q_old``."""
+        return objfun(
+            q_old=q_old,
+            u_old=self.u,
+            dt=self.dt,
+            tol=self.tol,
+            maximum_iter=self.max_newton_iter,
+            m=self.m,
+            mMat=self.mMat,
+            energy=self.energy,
+            W=self.W,
+            deltaL=self.deltaL,
+            free_index=self.free_index,
+            control_node=control_node,
+            use_inertia=use_inertia,
+            obstacles=self.obstacles,
+            newton_cfg=self.newton_cfg,
+            fixed_index=self.fixed_index,
+            boundary_rows=self.boundary_rows,
+        )
+
     def _get_midpoint(self):
         """Returns the current midpoint coordinates (midx, midy)."""
         x_arr = self.q[::2]
@@ -613,6 +659,9 @@ class SimulatorEnv_2D:
         self.ctime = 0.0
         self.current_step = 0
         self.lamda = 0.0
+        # The straight rod is what the pose below clamps: the first step's
+        # continuation starts from it.
+        self.u_prev = self._rest_control()
 
         # Clear history
         if self.save_history:
@@ -622,6 +671,66 @@ class SimulatorEnv_2D:
         # No integration step is taken in reset(); just return the current observation.
         return self._get_observation()
 
+    @staticmethod
+    def _check_control(control):
+        control = np.asarray(control, dtype=float).flatten()
+        if control.shape[0] != 6:
+            raise ValueError("control must be a 6D vector: [x_l, y_l, th_l, x_r, y_r, th_r].")
+        return control
+
+    def _commit(self, control, res):
+        """Bookkeeping shared by step() and settle(): counters, warnings, info."""
+        flag, ninfo = res["flag"], res["newton"]
+        if flag < 0:
+            self.n_newton_failures += 1
+            if self.warn_on_newton_failure:
+                print(f"[newton] step {self.current_step}: {res['reason'] or ninfo.get('reason', '')} "
+                      f"(residual {ninfo['residual']:.3e} vs tol {self.tol:.3e}, "
+                      f"{res['newton_iterations']} iters)")
+        if res["stable"] is False:
+            self.n_unstable += 1
+        if res["snap"]:
+            self.n_snaps += 1
+        self.u_prev = control.copy()
+        return {
+            "converged": (flag > 0),
+            "control": control,
+            "J": res["J"],
+            "free_index": self.free_index.copy(),
+            "fixed_index": self.fixed_index.copy(),
+            "control_node": self._control_node_from_xytheta(control),  # 8D boundary DOFs
+            "newton": ninfo,
+            # continuation / stability / snap diagnostics (src/continuation.py)
+            "substeps": res["substeps"],
+            "newton_iterations": res["newton_iterations"],
+            "stable": res["stable"],
+            "snap": res["snap"],
+            "snap_by": res.get("snap_by"),
+            "snaps": res["snaps"],
+            "max_displacement": res.get("max_displacement", 0.0),
+            "boundary_displacement": res.get("boundary_displacement", 0.0),
+            "reason": res["reason"],
+        }
+
+    def settle(self, control):
+        """Bring the rod to equilibrium at ``control`` without advancing the horizon.
+
+        Used before a rollout starts, so that its first step leaves from an
+        equilibrium under the initial command rather than from the undeformed
+        rod (``newton.initial_equilibrium``).  The pose path from the state's
+        previous pose to ``control`` is followed by continuation, exactly as a
+        step would; the step counter, time and lambda stay where they are and
+        the velocity is reset.  Returns the same ``info`` as :meth:`step`.
+        """
+        control = self._check_control(control)
+        res = quasistatic_step(self, control, use_inertia=False)
+        info = self._commit(control, res)
+        self.q = res["q"]
+        self.u = np.zeros_like(self.q)
+        info["q"] = self.q.copy()
+        info["u"] = self.u.copy()
+        return info
+
     def step(self, control, use_inertia=False):
         """
         Single simulation step.
@@ -629,48 +738,14 @@ class SimulatorEnv_2D:
         Returns:
           obs, reward, done, info
         """
-        control = np.asarray(control, dtype=float).flatten()
-        if control.shape[0] != 6:
-            raise ValueError("control must be a 6D vector: [x_l, y_l, th_l, x_r, y_r, th_r].")
+        control = self._check_control(control)
 
-        # x, y, theta = control
-        control_node = self._control_node_from_xytheta(control)
-
-        # Call the implicit integrator
-        q_new, flag, J, ninfo = objfun(
-            q_old=self.q,
-            u_old=self.u,
-            dt=self.dt,
-            tol=self.tol,
-            maximum_iter=self.max_newton_iter,
-            m=self.m,
-            mMat=self.mMat,
-            energy=self.energy,
-            W=self.W,
-            deltaL=self.deltaL,
-            free_index=self.free_index,
-            control_node=control_node,
-            use_inertia=use_inertia,
-            obstacles=self.obstacles,
-            newton_cfg=self.newton_cfg,
-            fixed_index=self.fixed_index,
-            boundary_rows=self.boundary_rows,
-        )
-
-        if flag < 0 and not use_inertia and self.newton_cfg.get("max_substeps", 0):
-            retry = self._substep_solve(control_node)
-            if retry is not None:
-                q_new, flag, J, ninfo = retry
-
-        if flag > 0 and not use_inertia and self.newton_cfg.get("stability_check", False):
-            q_new, flag, J, ninfo = self._stabilize(q_new, J, ninfo, control_node)
-
-        if flag < 0:
-            self.n_newton_failures += 1
-            if self.warn_on_newton_failure:
-                print(f"[newton] step {self.current_step}: {ninfo['reason']} "
-                      f"(residual {ninfo['residual']:.3e} vs tol {self.tol:.3e}, "
-                      f"{ninfo['iterations']} iters)")
+        # The equilibrium at the new boundary, reached along the pose path
+        # from the previous one (continuation, stability check, snap rule --
+        # src/continuation.py; a single Newton solve with all three off).
+        res = quasistatic_step(self, control, use_inertia=use_inertia)
+        q_new, flag = res["q"], res["flag"]
+        info = self._commit(control, res)
 
         # Update velocity and time
         u_new = (q_new - self.q) / self.dt
@@ -684,17 +759,8 @@ class SimulatorEnv_2D:
         obs = self._get_observation()
         done = (self.current_step >= self.Nsteps) or (flag < 0)
 
-        info = {
-            "converged": (flag > 0),
-            "control": control,
-            "q": self.q.copy(),
-            "u": self.u.copy(),
-            "J": J,
-            "free_index": self.free_index.copy(),
-            "fixed_index": self.fixed_index.copy(),
-            "control_node": control_node.copy(),  # 8D boundary DOFs
-            "newton": ninfo,
-        }
+        info["q"] = self.q.copy()
+        info["u"] = self.u.copy()
 
         # Save history
         if self.save_history:
@@ -710,84 +776,6 @@ class SimulatorEnv_2D:
 
         return obs, done, info
 
-    def _substep_solve(self, control_node):
-        """Retry a failed quasi-static solve by continuation in the boundary motion.
-
-        Near a snap-through (e.g. a rod in a pipe flipping from one wall to the
-        other) the nearest equilibrium jumps and a single Newton solve from the
-        previous state can stall. Moving the clamped DOFs there in 2, 4, ...
-        (up to ``newton.max_substeps``) equal increments, each solved from the
-        last, follows the equilibrium branch instead. The final solve is at
-        exactly ``control_node``, so the state and Jacobian returned belong to
-        the requested control. Returns None when every split fails -- a
-        partial sequence ends at an intermediate pose, which must not be
-        mistaken for the requested one.
-        """
-        b0 = self.q[self.fixed_index]
-        b1 = control_node[self.boundary_rows]
-        max_sub = int(self.newton_cfg.get("max_substeps", 0))
-        n = 2
-        result = None
-        while n <= max_sub:
-            q = self.q
-            for j in range(1, n + 1):
-                cn = control_node.copy()
-                cn[self.boundary_rows] = b0 + (j / n) * (b1 - b0)
-                result = objfun(
-                    q_old=q, u_old=self.u, dt=self.dt, tol=self.tol,
-                    maximum_iter=self.max_newton_iter, m=self.m, mMat=self.mMat,
-                    energy=self.energy, W=self.W, deltaL=self.deltaL,
-                    free_index=self.free_index, control_node=cn, use_inertia=False,
-                    obstacles=self.obstacles, newton_cfg=self.newton_cfg,
-                    fixed_index=self.fixed_index, boundary_rows=self.boundary_rows,
-                )
-                q = result[0]
-                if result[1] < 0:
-                    break
-            if result[1] > 0:
-                result[3]["substeps"] = n
-                return result
-            n *= 2
-        return None
-
-    def _stabilize(self, q, J, info, control_node, max_tries=6):
-        """Keep the quasi-static state on a *stable* equilibrium.
-
-        Newton finds any root of the residual, saddles included. A straight
-        rod pushed axially past its Euler load is such a saddle: an exact
-        equilibrium that a real rod leaves by buckling, but which Newton holds
-        forever, so the push goes into axial compression (and, against a wall,
-        through it). Here a converged state whose free-DOF Hessian has a
-        negative eigenvalue is nudged along that unstable mode, by
-        ``newton.stability_perturbation`` [m] at its largest node, and solved
-        again -- which is how the rod would leave it.
-        """
-        free = self.free_index
-        amp = float(self.newton_cfg.get("stability_perturbation", 1.0e-3))
-        n_kicks = 0
-        for _ in range(max_tries):
-            H = J[np.ix_(free, free)]
-            w, V = np.linalg.eigh(0.5 * (H + H.T))
-            if w[0] >= -1e-9 * max(float(np.abs(np.diag(H)).max()), 1.0):
-                break
-            v = V[:, 0] * np.sign(V[np.argmax(np.abs(V[:, 0])), 0])   # deterministic sign
-            q_try = q.copy()
-            q_try[free] += amp * v / np.abs(v).max()
-            q_new, flag, J_new, info_new = objfun(
-                q_old=q_try, u_old=self.u, dt=self.dt, tol=self.tol,
-                maximum_iter=self.max_newton_iter, m=self.m, mMat=self.mMat,
-                energy=self.energy, W=self.W, deltaL=self.deltaL,
-                free_index=free, control_node=control_node, use_inertia=False,
-                obstacles=self.obstacles, newton_cfg=self.newton_cfg,
-                fixed_index=self.fixed_index, boundary_rows=self.boundary_rows,
-            )
-            if flag < 0:
-                break
-            q, J, info = q_new, J_new, info_new
-            n_kicks += 1
-        info["stability_kicks"] = n_kicks
-        return q, 1, J, info
-
     # ---------- RHC state checkpointing ----------
 
     def get_state(self):
@@ -798,6 +786,7 @@ class SimulatorEnv_2D:
             "ctime": self.ctime,
             "current_step": self.current_step,
             "lamda": self.lamda,
+            "u_prev": None if self.u_prev is None else self.u_prev.copy(),
         }
 
     def set_state(self, state):
@@ -807,6 +796,8 @@ class SimulatorEnv_2D:
         self.ctime = state["ctime"]
         self.current_step = state["current_step"]
         self.lamda = state["lamda"]
+        u_prev = state.get("u_prev")
+        self.u_prev = None if u_prev is None else np.asarray(u_prev, dtype=float).copy()
 
     def render(self, saveimg=False, show_target=True, show=True, ax=None,
                xlim=None, ylim=None):

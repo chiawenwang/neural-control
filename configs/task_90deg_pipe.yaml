@@ -73,13 +73,17 @@ friction:
 # solve from the previous state can stall (seen at 1000 iterations). Retrying
 # by continuation in the gripper motion follows the branch through it.
 newton:
+  # The rod is pushed into the pipe along its own axis, so Newton keeps finding
+  # the straight, compressed rod: an exact equilibrium but an unstable one. The
+  # stability check rejects it, the continuation subdivides the step, and the
+  # snap rule's energy descent lets the rod buckle sideways (the kick breaks
+  # the symmetry of the straight rod; its sign is deterministic). These are
+  # the defaults of configs/default.yaml, listed here because this task needs
+  # them -- the former `stability_perturbation` nudge is gone, see README.
+  continuation: true
   max_substeps: 16
-  # Pushed head-on into the corner wall, a perfectly straight rod sits on an
-  # unstable (saddle) equilibrium that Newton would hold forever, driving it
-  # through the wall; this makes it buckle instead, like a real rod.
   stability_check: true
-  stability_perturbation: 5.0e-3   # [m]; 1 mm was too small to leave the saddle in a 0.2 m channel
-
+  snap_rule: true
 workspace:
   enabled: true
   position_min: [0.48, -0.05]  # 3 cm short of the entry face, so the jaws stay out

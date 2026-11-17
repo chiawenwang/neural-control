@@ -13,9 +13,11 @@ The physics is in :mod:`landscape_compute`, cached by a hash of the settings
 Components (``out/fig01/components``), every plot as ``*_bare`` (graphics only)
 and ``*_axes`` (minimal axes):
 
-a_surface_*              E(s, lambda) as a rasterized surface, the realized path on
-                         top: balls with arrowheads between them, a curved arrow
-                         for the snap, labels start / snap / end (main style)
+a_surface_*              E(s, lambda) as a rasterized surface (main style), the
+                         realized path on top: balls joined by dashed links, a thin
+                         arrow beside each branch, a curved arrow for the snap, the
+                         saddle line (dashed on a white halo); labels start / snap /
+                         end / saddle
 a_rods_column_*          the process as a stack of rods (flipbook): start, snap,
                          end solid, the frames between translucent
 a_ridgeline_*            curves E(s; lambda_i) stacked by lambda, balls at the
@@ -45,8 +47,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt                                 # noqa: E402
 import numpy as np                                              # noqa: E402
 import yaml                                                     # noqa: E402
-from matplotlib.patches import Polygon, Rectangle               # noqa: E402
-from matplotlib.path import Path as MPath                       # noqa: E402
+from matplotlib.patches import Rectangle                        # noqa: E402
 
 from paper_figures import style                                 # noqa: E402
 from paper_figures.common import draw                           # noqa: E402
@@ -364,32 +365,31 @@ def surface_balls(sc):
     return sorted(set(ks))
 
 
-def _arrowhead(ax, tip, u, *, length, width, gid, color=style.INK, edge="none", edge_lw=0.0,
-               zorder=8):
-    u = np.asarray(u, dtype=float) / np.linalg.norm(u)
-    n = np.array([-u[1], u[0]])
-    base = np.asarray(tip) - length * u
-    poly = Polygon([tip, base + 0.5 * width * n, base - 0.5 * width * n], closed=True,
-                   fc=color, ec=edge, lw=edge_lw, joinstyle="miter", zorder=zorder,
-                   clip_on=False)
-    poly.set_gid(gid)
-    ax.add_patch(poly)
-    return poly
+def _arclen(P):
+    """Cumulative arc length along the polyline ``P``, starting at 0."""
+    return np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))])
 
 
-def _point_before(P, dist):
-    """Point of the polyline ``P`` at arc length ``dist`` before its end, and the
-    unit tangent there (direction of travel)."""
-    seg = np.diff(P, axis=0)
-    ln = np.linalg.norm(seg, axis=1)
-    back = np.cumsum(ln[::-1])
-    j = int(np.searchsorted(back, dist))
-    if j >= len(ln):
-        return P[0], seg[0] / max(ln[0], 1e-12)
-    i = len(ln) - 1 - j                      # segment i holds the point
-    over = back[j] - dist                    # distance from P[i] along segment i
-    u = seg[i] / max(ln[i], 1e-12)
-    return P[i] + over * u, u
+def _beside(P, offset, trim, smooth, step=0.002):
+    """The polyline ``P`` (inches) resampled, smoothed (Gaussian of ``smooth``
+    inches, so a corner of the path does not kink it), shifted ``offset`` to the
+    right of the direction of travel and cut by the fractions ``trim = (tail,
+    head)`` of its length."""
+    c = _arclen(P)
+    t = np.linspace(0.0, c[-1], max(int(c[-1] / step), 2) + 1)
+    Q = np.column_stack([np.interp(t, c, P[:, i]) for i in range(2)])
+    if smooth > 0.0:
+        sig = smooth / (t[1] - t[0])
+        m = min(int(3 * sig), len(Q) - 1)
+        w = np.exp(-0.5 * (np.arange(-m, m + 1) / sig) ** 2)
+        # odd reflection at both ends keeps the end points and directions
+        ext = np.vstack([2 * Q[0] - Q[m:0:-1], Q, 2 * Q[-1] - Q[-2:-m - 2:-1]])
+        Q = np.column_stack([np.convolve(ext[:, i], w / w.sum(), mode="valid") for i in range(2)])
+    T = np.gradient(Q, axis=0)
+    T /= np.linalg.norm(T, axis=1)[:, None]
+    Q = Q + offset * np.column_stack([T[:, 1], -T[:, 0]])
+    c = _arclen(Q)
+    return Q[(c >= trim[0] * c[-1]) & (c <= (1.0 - trim[1]) * c[-1])]
 
 
 def _snap_curve(a, b, arc, trim, n=400):
@@ -407,11 +407,11 @@ def _snap_curve(a, b, arc, trim, n=400):
     return B[keep]
 
 
-def surface_overlay(fig, ax, sc, cfg, variant, box):
-    """2D layer over the 3D axes, in inches: arrowheads between consecutive balls,
-    the snap arrow, and (``axes`` variant) hand-placed axes with the energy axis
-    on the left and the start / snap / end labels."""
-    from matplotlib.patches import FancyArrowPatch
+def surface_overlay(fig, ax, sc, cfg, variant, box, saddle=None):
+    """2D layer over the 3D axes, in inches: dashed links between consecutive
+    balls, an arrow beside each branch of the path, the snap arrow, and (``axes``
+    variant) hand-placed axes with the energy axis on the left, the start / snap /
+    end labels and the saddle label."""
     pa = cfg["panel_a"]
     sp = pa["surface"]
     ann = sp["process"]
@@ -427,24 +427,34 @@ def surface_overlay(fig, ax, sc, cfg, variant, box):
     balls = surface_balls(sc)
     C = {k: project(fig, ax, xyz[[k]])[0] for k in balls}
     r = 0.5 * pa["ball_size_pt"] * style.PT + 0.5 * style.LW_AUX * style.PT
-    hl, hw = ann["head_in"]
-    # arrowheads: tip just short of the next ball, along the projected path; a thin
-    # white edge sets them off the dark casing of the path
+    # dashed links between consecutive balls along the projected valley floor; the
+    # dash pattern is fitted to each link so it starts and ends with a whole dash
+    lk = ann["links"]
+    d0, g0 = lk["dash_pt"]
     for ka, kb in zip(balls[:-1], balls[1:]):
         if ka < ksn <= kb:
             continue                         # the snap: its own arrow
         P = project(fig, ax, xyz[ka:kb + 1])
-        tip, u = _point_before(P, r + ann["gap_in"])
-        _arrowhead(ov, tip, u, length=hl, width=hw, gid=f"arrow_k{ka}_k{kb}", edge="white",
-                   edge_lw=ann["head_edge_pt"])
+        c = _arclen(P)
+        a, b = r + lk["clear_in"], c[-1] - r - lk["clear_in"]
+        if b <= a:
+            continue
+        t = np.concatenate([[a], c[(c > a) & (c < b)], [b]])
+        n = max(lk["min_dashes"], round(((b - a) / style.PT + g0) / (d0 + g0)))
+        f = (b - a) / style.PT / (n * d0 + (n - 1) * g0) / lk["lw_pt"]
+        draw.polyline(ov, np.column_stack([np.interp(t, c, P[:, i]) for i in range(2)]),
+                      color=style.INK, lw=lk["lw_pt"], ls=(0, (f * d0, f * g0)),
+                      gid=f"link_k{ka}_k{kb}")
+    # one thin arrow beside each branch, on the right of the direction of travel
+    # (outside the right valley, below the left one: clear of the snap arrow)
+    bs = ann["beside"]
+    for name, ka, kb in (("pre", balls[0], ksn - 1), ("post", ksn, balls[-1])):
+        Q = _beside(project(fig, ax, xyz[ka:kb + 1]), bs["offset_in"], bs["trim"], bs["smooth_in"])
+        draw.arrow(ov, Q, head_in=ann["head_in"], gid=f"arrow_{name}")
     # the snap: a curved arrow over the landscape, ball to ball, coming down steeply
     # onto the landing ball (clear of the path that leaves it)
     B = _snap_curve(C[ksn - 1], C[ksn], ann["snap_arc"], r + ann["gap_in"])
-    arc = FancyArrowPatch(path=MPath(B), arrowstyle=f"-|>,head_length={hl / style.PT:.2f},"
-                                                    f"head_width={0.5 * hw / style.PT:.2f}",
-                          lw=style.LW_DATA_THIN, color=style.INK, zorder=8, clip_on=False)
-    arc.set_gid("snap_arrow")
-    ov.add_patch(arc)
+    draw.arrow(ov, B, head_in=ann["head_in"], gid="snap_arrow")
     if variant == "bare":
         return ov
     # hand-placed axes: s along the front edge, lambda along the right edge,
@@ -494,6 +504,18 @@ def surface_overlay(fig, ax, sc, cfg, variant, box):
         t = ov.text(*(at + np.array(spec["offset_in"])), name, fontsize=fs, ha=spec["ha"],
                     va="center")
         t.set_gid(f"label_{name}")
+    if saddle is not None:
+        # the saddle line's name, above it and along it
+        sa = sp["saddle"]
+        S = project(fig, ax, saddle)
+        c = _arclen(S)
+        i = min(int(np.searchsorted(c, sa["label_at"] * c[-1])), len(S) - 2)
+        u = (S[i + 1] - S[i]) * (1.0 if S[-1, 0] >= S[0, 0] else -1.0)
+        u /= np.linalg.norm(u)
+        at = S[i] + sa["label_offset_in"] * np.array([-u[1], u[0]])
+        t = ov.text(*at, sa["label"], fontsize=fs, ha="center", va="center",
+                    rotation=float(np.degrees(np.arctan2(u[1], u[0]))), rotation_mode="anchor")
+        t.set_gid("label_saddle")
     return ov
 
 
@@ -520,36 +542,31 @@ def draw_surface(fig, sc, ridge, cfg, variant):
     surf = ax.plot_surface(S, Lm, Z, facecolors=fc, rstride=1, cstride=1,
                            linewidth=0, antialiased=False, shade=False, rasterized=True, zorder=1)
     surf.set_gid("surface")
-    p, ksn = sc["path"], sc["k_snap"]
-    kmax = sc["k_curves"][-1]
-    from mpl_toolkits.mplot3d.art3d import Line3DCollection
-    for name, sl in (("pre", slice(0, ksn)), ("post", slice(ksn, kmax + 1))):
-        xyz = np.column_stack([p["s"][sl], sc["lam"][sl], p["E"][sl]])
-        # dark casing: the surface carries the same lambda colors as the path
-        (case,) = ax.plot(*xyz.T, color=style.INK, lw=style.LW_DATA_THICK + 1.0, zorder=3.5,
-                          solid_capstyle="round", solid_joinstyle="round")
-        case.set_gid(f"valley_path_{name}_casing")
-        pieces, lams = draw.lambda_pieces(xyz, sc["lam"][sl])
-        lc = Line3DCollection(pieces, colors=style.lambda_color(lams), linewidths=style.LW_DATA_THICK,
-                              capstyle="round", joinstyle="round", zorder=4)
-        lc.set_gid(f"valley_path_{name}")
-        ax.add_collection3d(lc, autolim=False)
-    balls = surface_balls(sc)
+    p = sc["path"]                           # the path between the balls: dashed links
+    balls = surface_balls(sc)                # on the overlay
     for kk, tag in zip(balls, lam_tags([sc["lam"][k] for k in balls])):
         (b,) = ax.plot([p["s"][kk]], [sc["lam"][kk]], [p["E"][kk]], ls="none", marker="o",
                        ms=pa["ball_size_pt"], mfc=style.lambda_color(sc["lam"][kk]), mec=style.INK,
                        mew=style.LW_AUX, zorder=5)
         b.set_gid(f"ball_lam_{tag}")
+    saddle = None
     if ridge.saddle is not None and len(ridge.saddle) > 1:
-        # saddle branch in (s, lambda, E): undo the ridgeline offset
+        # saddle branch in (s, lambda, E) (undo the ridgeline offset): the barrier
+        # between the two valleys, up to the fold. Dark dashes on a soft white halo
+        # read on the dark front of the surface and on the light back alike
         sd = ridge.saddle
-        (sl_,) = ax.plot(sd[:, 0], sd[:, 2], sd[:, 1] - ridge.c * sd[:, 2], color=style.AUX_GRAY,
-                         lw=style.LW_AUX, ls=(0, (2.5, 1.5)), zorder=3)
-        sl_.set_gid("local_maxima")
+        saddle = np.column_stack([sd[:, 0], sd[:, 2], sd[:, 1] - ridge.c * sd[:, 2]])
+        sa = sp["saddle"]
+        (halo,) = ax.plot(*saddle.T, color="white", lw=sa["halo_pt"], alpha=sa["halo_alpha"],
+                          zorder=2.9, solid_capstyle="round")
+        halo.set_gid("saddle_halo")
+        (line,) = ax.plot(*saddle.T, color=style.INK, lw=sa["lw_pt"], dashes=sa["dashes"],
+                          zorder=3)
+        line.set_gid("saddle_line")
     draw.unclip(ax)
     ax.set_axis_off()                        # axes are drawn by hand on the overlay
     fig.canvas.draw()
-    surface_overlay(fig, ax, sc, cfg, variant, box)
+    surface_overlay(fig, ax, sc, cfg, variant, box, saddle)
     return ax
 
 
@@ -688,7 +705,6 @@ def export_rod_column(ex, sc, cfg, tag_suffix, alt):
     labeled, joined by arrows; the frames between them are thin and translucent.
     Frames sit ``pitch_in`` apart, or more where the shape flips, so that
     neighbors never touch. Same scale as the ``a_rod_lam_*`` singles."""
-    from matplotlib.patches import FancyArrowPatch
     rcfg = cfg["panel_a"]["rods"]
     col = rcfg["column"]
     scale = rcfg["scale_in_per_m"]
@@ -720,7 +736,6 @@ def export_rod_column(ex, sc, cfg, tag_suffix, alt):
                          "(lower pitch_in / clearance_in or base_in)")
     obstacle = sc.get("obstacle")
     key = [j for j, k in enumerate(ks) if k in names]
-    hl, hw = col["head_in"]
     for variant in ("bare", "label"):
         fig = plt.figure(figsize=(W, H))
         ax = fig.add_axes([0, 0, 1, 1])
@@ -761,12 +776,8 @@ def export_rod_column(ex, sc, cfg, tag_suffix, alt):
             d = np.sign(ys[jb] - ys[ja])            # up or down the column
             a = np.array([col["label_x_in"], ys[ja] + d * col["arrow_gap_in"]]) / scale
             b = np.array([col["label_x_in"], ys[jb] - d * col["arrow_gap_in"]]) / scale
-            arr = FancyArrowPatch(a, b, arrowstyle=f"-|>,head_length={hl / style.PT:.2f},"
-                                                   f"head_width={0.5 * hw / style.PT:.2f}",
-                                  shrinkA=0, shrinkB=0, lw=style.LW_AUX, color=style.INK,
-                                  clip_on=False)
-            arr.set_gid(f"arrow_{names[ks[ja]]}_{names[ks[jb]]}")
-            ax.add_patch(arr)
+            draw.arrow(ax, [a, b], head_in=col["head_in"],
+                       gid=f"arrow_{names[ks[ja]]}_{names[ks[jb]]}")
         stem = f"a_rods{tag_suffix}_column_{variant}"
         px, py = col["placement_in"]
         ex.save(fig, stem, variant=variant,
@@ -979,7 +990,7 @@ def main(argv=None):
             fig.canvas.draw()
             pts = ridge_annotations(fig, ax, ridge, sc)
             stem = f"a_ridgeline{suffix}_{variant}"
-            ex.save(fig, stem, variant=variant, placement=dict(plc, alternative=alt),
+            ex.save(fig, stem, variant=variant, placement=dict(plc, alternative=True),
                     data_scale=ridge_scale(fig, ax, ridge),
                     notes="E(s; lambda) stacked by lambda; balls = realized equilibria; colored "
                           "path = valley floor (split at the snap); dashed = local maxima (saddles)")
@@ -987,7 +998,7 @@ def main(argv=None):
         fig = plt.figure(figsize=(W, H))
         ax = draw_ridgeline(fig, ridge, cfg, "solid")
         ex.save(fig, f"a_ridgeline{suffix}_path_solid", variant="graphic",
-                placement=dict(plc, alternative=alt), data_scale=ridge_scale(fig, ax, ridge),
+                placement=dict(plc, alternative=True), data_scale=ridge_scale(fig, ax, ridge),
                 notes="valley-floor path as two single-color polylines (before / after the snap) "
                       "for a gradient stroke; lambda runs 0 -> lambda_pre on the first and "
                       "lambda_snap -> lambda_post on the second",
@@ -999,14 +1010,15 @@ def main(argv=None):
             fig.canvas.draw()
             pts = surface_annotations(fig, ax, sc, ridge)
             stem = f"a_surface{suffix}_{variant}"
-            ex.save(fig, stem, variant=variant, placement=dict(plc, alternative=True),
+            ex.save(fig, stem, variant=variant, placement=dict(plc, alternative=alt),
                     data_scale={"projection": "orthographic", **pa["surface"],
                                 "energy_clip_EI_over_L": round(ridge.clip, 5)},
-                    notes="alternative to the ridgeline: E(s, lambda) surface (rasterized), "
-                          "valley path and balls as vectors")
+                    notes="E(s, lambda) surface (rasterized); balls, dashed links along the "
+                          "valley floor, process arrows and the saddle line (barrier, up to "
+                          "the fold) as vectors")
             ex.annotate(stem, pts)
         singles = [{"panel": "a", "x_in": rc["column_x_in"], "y_in": y, "anchor": "lower-left",
-                    "alternative": alt} for y in rc["column_y_in"]]
+                    "alternative": True} for y in rc["column_y_in"]]
         export_rods(ex, sc, cfg, suffix,
                     {"panel": "a", "x_in": rc["placement_in"][0], "y_in": rc["placement_in"][1],
                      "anchor": "lower-left", "alternative": True,

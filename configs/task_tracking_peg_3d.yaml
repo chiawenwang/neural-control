@@ -1,0 +1,82 @@
+# =============================================================================
+# Path tracking in 3D with gravity and a peg: the mid node follows a sine in the
+# vertical x-z plane (with a small drift in y) while the rod rests on, and lifts
+# off, a fixed peg. PRELIMINARY -- see "Status" below.
+#
+#   python scripts/train_tracking.py --config configs/task_tracking_peg_3d.yaml
+#
+# Scenario: the left end is clamped at the origin, the right end is driven by the
+# policy (5 DOFs: x, y, z, theta, phi), gravity pulls the rod down (-z) so it
+# sags. The peg is a cylinder along y (perpendicular to the x-z plane) under the
+# left half of the rod. The reference z(t) oscillates about the ready pose:
+#   * mid-way  -> the mid node dips, the rod comes down onto the peg and bends
+#                 over it (contact on),
+#   * the ends -> the mid node is back at its ready height, the rod is clear of
+#                 the peg (contact off),
+# so one rollout contains both phases.
+#
+# Status: the peg (contact.PegObstacle, env_factory.attach_peg, drawn in every
+# png/gif) and trajectory_type sine_xz (env_factory.make_target_trajectory, used
+# by train_tracking.py without --path) are implemented but NOT yet run. The
+# geometry is a first guess from the 1 m soft_strip sag (mid node ~6 cm below
+# the clamps in the ready pose, x ~ 0.5). Check the first figure: the peg should
+# be touched around the middle of the path only. If it is touched all the time, lower
+# center_xz[1] or shrink amp; if never, raise it or increase amp.
+# =============================================================================
+env:
+  dim: 3
+  grasp_mode: both              # left end fixed at u_left_3d, right end driven
+rod:
+  material: soft_strip          # EI = 0.127 N*m^2, sags visibly under gravity
+  twist: false
+  nv: 51                        # node spacing 2 cm
+  dt: 0.01
+  total_time: 2.0               # -> 200 control steps
+  rod_length: 1.0
+  max_newton_iter: 1000
+  gravity: [0.0, 0.0, -9.81]    # z is up; the rod sags in the x-z plane
+start:
+  u_left_3d:  [0.0, 0.0, 0.0, 0.0, 0.0]
+  u_right_3d: [1.0, 0.0, 0.0, 0.0, 0.0]
+task:
+  target_xyz: [0.475, 0.04, -0.0626]   # end of the fallback `segment` path only
+  tracking:
+    trajectory_type: sine_xz
+    weight: 1.0
+    sine_xz:                    # half a sine period: one smooth dip
+      amp: -0.07                # [m] z dips 7 cm below m0_z (-0.0626) mid-way, back at the end
+      periods: 0.5              # half period -> a single arch, no oscillation
+      dx: 0.0                   # no x motion of its own: x only ever moves towards the
+                                # fixed end (negative), through `bow`, never away from it
+      dy: 0.25                  # displacement out of the x-z plane; the longer run keeps the
+                                # curvature at amp * (pi / 0.25)^2 ~ 11 1/m (radius ~ 9 cm)
+      bow: 1.43                 # x -= 1.43 * (d(y^2 + z^2)): the rod bows as the mid node
+                                # moves, so x falls ~ 6 cm at the end and ~ 3 cm more at the
+                                # bottom of the dip, which keeps the rod from being stretched
+peg:
+  enabled: true
+  center_xz: [0.30, -0.075]     # top of the peg at z = -0.045, about 1 cm under
+                                # the rod there in the ready pose (guess)
+  center_y: 0.0
+  half_length_y: 0.20           # covers the 0 .. 0.25 m y run
+  radius: 0.03                  # > node spacing 0.02 m
+  k_contact: 1.0e+7
+workspace:
+  enabled: true                 # tracking needs the bounded workspace
+  position_min_3d: [0.20, -0.40, -0.30]
+  position_max_3d: [1.05, 0.40, 0.30]
+  orientation_limits_3d: [[-0.8, 0.8], [-0.8, 0.8]]   # theta, phi [rad]
+newton:
+  continuation: true
+  max_substeps: 16
+  stability_check: true
+  snap_rule: true
+train:
+  grad_method: state
+  optimizer: adam
+  epochs: 20
+  lr: 0.0001                    # 1e-3 oscillated in earlier tracking runs
+  device: auto
+output:
+  experiment_name: tracking_peg_3d
+  save_gif: true

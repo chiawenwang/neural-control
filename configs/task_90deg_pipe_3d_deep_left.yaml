@@ -1,0 +1,90 @@
+# Variant of task_90deg_pipe_3d.yaml: same 0.30 m depth, shifted 5 cm to the LEFT (-y) along the far wall (looking from the gripper into the pipe).
+#   python scripts/train_pipe.py --config configs/task_90deg_pipe_3d_deep_left.yaml
+# (Adam is the default optimizer; only the target and experiment name differ.)
+# =============================================================================
+# 90-degree corner pipe insertion in 3D: push the free tip of the rod round
+# the corner to a target on the far wall of the second bore.
+#
+#   python scripts/train_pipe.py --config configs/task_90deg_pipe_3d.yaml
+#   python scripts/train_pipe.py --config configs/task_90deg_pipe_3d.yaml --optimizer linesearch
+#
+# The 3D counterpart of task_90deg_pipe.yaml: the same rod and corner (two
+# cylindrical bores of radius 0.1 m meeting at a right angle, contact.LPipe3D),
+# the gripper now with five DOFs (x, y, z, theta, phi), no torsion (a free end
+# has no yaw). The target is NOT on the centerline of the second bore: a rod
+# pushed round the corner presses against the far (outer) wall and cannot
+# spring back to the middle, so the reachable points are on that wall. The
+# target below is pipe.far_wall_point(0.25) moved 1 mm off the wall: 0.25 m
+# past the corner along the exit direction, x = corner - r_eff + 0.001 with
+# r_eff = 0.1 - 0.002 (exactly on the wall it has zero clearance, which the
+# feasibility check reads as unreachable).
+# =============================================================================
+env:
+  dim: 3
+  grasp_mode: right            # gripper holds the right end; node 0 is free
+rod:
+  material: pp_rod             # springy plastic, 4 mm: EI = 0.019 N*m^2
+  twist: false
+  nv: 51
+  dt: 0.01
+  total_time: 1.0              # -> 100 control steps
+  rod_length: 1.0
+  max_newton_iter: 200
+  # gravity: [0.0, 0.0, 0.0]     # as in 2D: the rod lies in the pipe, no sag
+  gravity: [0.0, 0.0, -2.81]     # as in 2D: the rod lies in the pipe, no sag
+start:
+  u_left_3d:  [0.0, 0.0, 0.0, 0.0, 0.0]   # unused with grasp_mode: right
+  u_right_3d: [1.0, 0.0, 0.0, 0.0, 0.0]   # gripper starts at the rod's right end
+pipe:
+  enabled: true
+  geometry_type: l_corner_3d   # sharp right angle, two cylindrical bores
+  entry_position: [0.45, 0.0, 0.0]
+  entry_direction: [-1.0, 0.0, 0.0]
+  exit_direction: [0.0, 0.0, -1.0]   # second bore goes down
+  inner_radius: 0.100          # 0.2 m wide bores, 4 mm rod: 98 mm of lateral play
+  bend_radius: 0.15            # unused by the corner
+  first_segment_length: 0.6
+  second_segment_length: 0.4
+contact:
+  enabled: true
+  k_contact: 1.0e+7
+  smoothing: 1.0e-4
+  corner_smoothing: 5.0e-4
+  samples_per_edge: 16
+friction:
+  enabled: false
+newton:
+  continuation: true
+  max_substeps: 16
+  stability_check: true
+  snap_rule: true
+workspace:
+  enabled: true
+  position_min_3d: [0.48, -0.05, -0.05]   # 3 cm short of the entry face
+  position_max_3d: [1.05, 0.05, 0.05]
+  orientation_limits_3d: [[-0.35, 0.35], [-0.35, 0.35]]   # theta, phi [rad]
+task:
+  target_xyz: [-0.150, -0.097, -0.35]   # same 0.30 m depth, shifted 5 cm to the LEFT (-y) along the far wall (looking from the gripper into the pipe)
+  pipe:
+    tip_node: 0
+    success_tolerance: 0.01
+    max_penetration: 5.0e-4
+    contact_margin: 2.5e-4
+    workspace_tolerance: 1.0e-4
+    require_bend_crossing: true
+    require_workspace_feasibility: true
+    weights:
+      goal: 1.0
+      path: 0.1
+      contact: 1.0e+4
+      control: 1.0e-3
+      workspace: 100.0
+train:
+  grad_method: state
+  optimizer: adam              # this scenario is run with Adam only
+  epochs: 50
+  lr: 0.001
+  device: cpu
+output:
+  experiment_name: pipe_90deg_3d_deep_left
+  save_gif: true

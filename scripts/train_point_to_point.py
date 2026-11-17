@@ -29,12 +29,22 @@ comparison uses.
 
 ``--grad-method`` (default ``train.grad_method``, ``state``) picks the adjoint
 gradient: ``state`` is exact, ``proxy`` the frozen-tangent rate formulation
-(see src/implicit_grad_tools.py).
+(see src/implicit_grad_tools.py).  ``--optimizer`` (default
+``train.optimizer``, ``adam``) picks the update: ``adam`` is the fixed-rate
+Adam with gradient clipping, ``linesearch`` the paper's Algorithm 1 -- the
+Adam direction with a backtracking step length on full rollouts, where a
+trial is rejected on a Newton failure, an unstable state or a command outside
+the workspace, and a snap-through is admitted when it lowers the loss (a
+terminal objective).  Single-horizon training only.
+
+Every rollout starts from the equilibrium at the initial control
+(``newton.initial_equilibrium``), solved before the checkpoint is taken.
 
 Usage
 -----
     python scripts/train_point_to_point.py                      # the config's target
     python scripts/train_point_to_point.py --grad-method proxy
+    python scripts/train_point_to_point.py --optimizer linesearch
     python scripts/train_point_to_point.py --target T1 --method rrt_nc --out DIR
     python scripts/train_point_to_point.py report --out DIR
 """
@@ -65,15 +75,16 @@ from config import load_config
 from dlo_rrt import (RRTPlanner, PlannerParams, path_length, resample_path,
                      min_stiffness_eig)
 from env_factory import (
-    build_env, reset_env, env_dim, env_twist, control_dim, end_control_dim,
-    initial_control, task_target, material_summary, node_tracking_loss,
-    dloss_dq_free_node, node_position,
+    build_env, reset_env, settle_initial, env_dim, env_twist, control_dim,
+    end_control_dim, initial_control, task_target, material_summary,
+    node_tracking_loss, dloss_dq_free_node, node_position,
 )
 from neural_control import (
     BoundaryVelocityNet, reinit_net_, resolve_device, segment_lengths,
     rollout, execute_controls, adjoint_gradient, surrogate_loss, apply_update,
     fit_policy, workspace_bounds, workspace_projection, workspace_penalty,
-    set_audit, GRAD_METHODS,
+    set_audit, GRAD_METHODS, OPTIMIZERS, LineSearch, trial_rule, flat_gradient,
+    get_parameters, set_parameters,
 )
 from runlog import RunLogger
 from utils import visualize_results, maybe_save_trajectory_gif
@@ -171,6 +182,138 @@ def path_metrics(env, u0, U, q_list, target, dim, k, J_list=None, bounds=None):
 
 # --------------------------------------------------------------- training
 
+def p2p_loss_terms(env, q_list, target, track_ref=None, track_weight=0.0):
+    """Terminal loss, the full loss, the final mid node, and ``dL/dq_free`` per step.
+
+    The full loss adds the optional plan-tracking term
+    ``track_weight * mean_k |mid_k - track_ref_k|^2``; the recorded error
+    stays the terminal one.
+    """
+    dim, free_index = env.dim, env.free_index
+    q_final = q_list[-1]
+    L_np, mid_pos = final_midpoint_loss(q_final, dim, env.mid_node, target)
+    a_free_per_step = np.zeros((len(q_list), len(free_index)), dtype=float)
+    a_free_per_step[-1] = dloss_dq_free_node(q_final, free_index, dim, env.mid_node, target)
+    L_total = float(L_np)
+    if track_weight > 0.0:
+        w = track_weight / len(q_list)
+        for kk, qk in enumerate(q_list):
+            a_free_per_step[kk] += w * dloss_dq_free_node(qk, free_index, dim, env.mid_node,
+                                                          track_ref[kk])
+            L_total += w * node_tracking_loss(qk, dim, env.mid_node, track_ref[kk])[0]
+    return L_np, L_total, mid_pos, a_free_per_step
+
+
+def count_snaps(infos):
+    return int(sum(1 for i in infos if i.get("snap")))
+
+
+def train_single_horizon_linesearch(env, checkpoint, net, u0, target, cfg, epochs, device, lr,
+                                    run=None, log_every=10, tag="", track_ref=None,
+                                    track_weight=0.0, bounds=None):
+    """Algorithm 1 over the whole horizon: :class:`neural_control.LineSearch`.
+
+    Same inputs and outputs as :func:`train_single_horizon`, with the
+    optimizer replaced.  Every round rolls out trials ``xi + tau d`` until one
+    satisfies the Armijo condition and the point-to-point rule (no Newton
+    failure, no unstable state, every command inside the workspace; a
+    snap-through is admitted since only the final shape counts), reuses that
+    rollout for the next gradient, and stops when no step is accepted.  There
+    is no projection onto the workspace in this mode and no penalty is needed:
+    a command outside it rejects the trial.  ``hist`` additionally records
+    the accepted ``tau``, the rejected trials and their reasons, the
+    cumulative number of rollouts and the snaps of each accepted rollout.
+    """
+    dim = env.dim
+    N = env.Nsteps
+    dlam = 1.0 / N
+    n_end = net.out_dim
+    gm = cfg.train.grad_method
+    ls = LineSearch(net, lr, c=float(cfg.train.linesearch.c),
+                    tau_min=float(cfg.train.linesearch.tau_min))
+    hist = {"loss": [], "error": [], "converged": [], "time": [], "mid_paths": [], "u_paths": [],
+            "ws_loss": [], "tau": [], "rejected": [], "rejected_reasons": [], "rollouts": [],
+            "snaps": [], "fallback": [], "stop": None}
+    t_start = time.time()
+
+    def evaluate(xi):
+        set_parameters(net, xi)
+        env.set_state(checkpoint)
+        infos = []
+        u_list, r_list, q_list, J_list, conv = rollout(env, net, u0, N, dlam, device,
+                                                       project=None, infos=infos)
+        ok, reason = trial_rule(infos, conv, u_list, n_end, bounds, snap_ok=True)
+        tr = {"ok": ok, "reason": reason, "loss": np.inf, "u_list": u_list, "r_list": r_list,
+              "q_list": q_list, "J_list": J_list, "conv": conv, "infos": infos}
+        if conv.all():
+            L_np, L_total, mid_pos, a = p2p_loss_terms(env, q_list, target, track_ref, track_weight)
+            tr.update(loss=L_total, task_loss=float(L_np), mid=mid_pos, a_free=a)
+        return tr
+
+    def gradient(tr):
+        g_seq = adjoint_gradient(env, tr["u_list"], tr["J_list"], tr["a_free"], cfg.train.jac_reg,
+                                 grad_method=gm)
+        return flat_gradient(net, surrogate_loss(tr["u_list"], tr["r_list"], g_seq, dlam, device,
+                                                 grad_method=gm))
+
+    def record(ep, tr, rec, fallback):
+        mids, u_seq_np = rollout_record(env, tr["q_list"], tr["u_list"], dim)
+        hist["loss"].append(tr["task_loss"])
+        hist["error"].append(tr["task_loss"] ** 0.5)
+        hist["converged"].append(True)
+        hist["time"].append(time.time() - t_start)
+        hist["mid_paths"].append(mids)
+        hist["u_paths"].append(u_seq_np)
+        hist["ws_loss"].append(0.0 if bounds is not None else np.nan)
+        hist["tau"].append(rec["tau"])
+        hist["rejected"].append(rec["n_rejected"])
+        hist["rejected_reasons"].append([r["reason"] for r in rec["rejected"]])
+        hist["rollouts"].append(ls.n_rollouts)
+        hist["snaps"].append(count_snaps(tr["infos"]))
+        hist["fallback"].append(fallback)
+        if run is not None:
+            run.log(epoch=ep, loss=tr["task_loss"], error=tr["task_loss"] ** 0.5,
+                    total_loss=tr["loss"], midpoint=tr["mid"], target=target, converged=True,
+                    steps=len(tr["u_list"]), newton_failures=env.n_newton_failures,
+                    tau=rec["tau"], rejected=rec["n_rejected"], rollouts=ls.n_rollouts,
+                    snaps=count_snaps(tr["infos"]), fallback=fallback,
+                    u_final=tr["u_list"][-1].detach().cpu().numpy())
+        if ep % log_every == 0 or ep == epochs - 1 or rec["tau"] is None:
+            print(f"[{tag} ep {ep:03d}] err={tr['task_loss'] ** 0.5 * 1e3:7.2f} mm  "
+                  f"tau={'-' if rec['tau'] is None else f'{rec['tau']:g}'}  "
+                  f"rejected={rec['n_rejected']}  rollouts={ls.n_rollouts}  "
+                  f"snaps={count_snaps(tr['infos'])}  t={time.time() - t_start:7.1f}s", flush=True)
+
+    xi = get_parameters(net)
+    ls.n_rollouts += 1
+    cur = evaluate(xi)
+    if not cur["ok"]:
+        hist["stop"] = {"epoch": 0, "reason": f"initial rollout rejected: {cur['reason']}"}
+        print(f"[{tag}] the initial rollout is rejected ({cur['reason']}): Algorithm 1 needs a "
+              "feasible start, no update is made", flush=True)
+        if run is not None:
+            run.log(epoch=0, converged=bool(cur["conv"].all()), steps=len(cur["u_list"]),
+                    newton_failures=env.n_newton_failures, note=hist["stop"]["reason"])
+        return (hist, cur["u_list"], cur["q_list"], cur["J_list"], bool(cur["conv"].all()),
+                time.time() - t_start)
+    g = gradient(cur)
+    for ep in range(epochs):
+        AUDIT.set_context(epoch=ep)
+        d, fallback = ls.direction(g)
+        acc, rec = ls.search(xi, g, cur["loss"], d, evaluate)
+        record(ep, cur, rec, fallback)
+        if acc is None:
+            hist["stop"] = {"epoch": ep, "reason": rec["stop"]}
+            print(f"[{tag} ep {ep:03d}] line search stopped: {rec['stop']}", flush=True)
+            break
+        xi = get_parameters(net)          # the accepted trial's weights, as stored
+        cur = acc
+        g = gradient(cur)
+    # The policy after the last accepted update is the one `cur` was rolled out with.
+    return (hist, cur["u_list"], cur["q_list"], cur["J_list"], bool(cur["conv"].all()),
+            time.time() - t_start)
+
+
 def train_single_horizon(env, checkpoint, net, u0, target, cfg, epochs, device, lr,
                          run=None, log_every=10, tag="", track_ref=None, track_weight=0.0,
                          bounds=None, ws_weight=0.0):
@@ -186,7 +329,15 @@ def train_single_horizon(env, checkpoint, net, u0, target, cfg, epochs, device, 
     projected onto the workspace before it is executed, and
     ``ws_weight * mean_k |violation_k|^2`` of the *unprojected* command joins
     the surrogate.
+
+    This is the ``adam`` optimizer; ``train.optimizer: linesearch`` goes to
+    :func:`train_single_horizon_linesearch` instead.
     """
+    if cfg.train.optimizer == "linesearch":
+        return train_single_horizon_linesearch(
+            env, checkpoint, net, u0, target, cfg, epochs, device, lr, run=run,
+            log_every=log_every, tag=tag, track_ref=track_ref, track_weight=track_weight,
+            bounds=bounds)
     dim = env.dim
     opt = optim.Adam(net.parameters(), lr=lr)
     N = env.Nsteps
@@ -225,17 +376,8 @@ def train_single_horizon(env, checkpoint, net, u0, target, cfg, epochs, device, 
                 hist["u_paths"].append(np.full((N, len(u0)), np.nan))
             break
 
-        q_final = q_list[-1]
-        free_index = env.free_index
-        L_np, mid_pos = final_midpoint_loss(q_final, dim, env.mid_node, target)
-
-        a_free_per_step = np.zeros((len(q_list), len(free_index)), dtype=float)
-        a_free_per_step[-1] = dloss_dq_free_node(q_final, free_index, dim, env.mid_node, target)
-        if track_weight > 0.0:
-            w = track_weight / len(q_list)
-            for kk, qk in enumerate(q_list):
-                a_free_per_step[kk] += w * dloss_dq_free_node(qk, free_index, dim, env.mid_node,
-                                                              track_ref[kk])
+        L_np, _, mid_pos, a_free_per_step = p2p_loss_terms(env, q_list, target, track_ref,
+                                                           track_weight)
 
         g_seq = adjoint_gradient(env, u_list, J_list, a_free_per_step, cfg.train.jac_reg,
                                  grad_method=cfg.train.grad_method)
@@ -431,7 +573,13 @@ def cmd_train(args):
     cfg = load_config(args.config)
     if args.grad_method is not None:        # the command line wins over the YAML
         cfg["train"]["grad_method"] = args.grad_method
+    if args.optimizer is not None:
+        cfg["train"]["optimizer"] = args.optimizer
     grad_method = cfg.train.grad_method
+    optimizer = cfg.train.optimizer
+    if optimizer == "linesearch" and cfg.rhc.enabled:
+        raise SystemExit("train.optimizer: linesearch is implemented for single-horizon "
+                         "training; set rhc.enabled: false")
     if args.audit:
         cfg.setdefault("audit", {})["enabled"] = True
     if args.audit_kernels:
@@ -449,6 +597,8 @@ def cmd_train(args):
     global AUDIT
     AUDIT = set_audit(audit_from_config(cfg).install(env))
 
+    # The rollouts start from the equilibrium at u0, not from the straight rod.
+    settle_initial(env, cfg)
     checkpoint = env.get_state()
     N = env.Nsteps
     device = resolve_device(cfg.train.device if args.device is None else args.device)
@@ -466,7 +616,8 @@ def cmd_train(args):
                if args.method == "rrt_nc" else "")
             + ("" if args.lr is None else f"_lr{args.lr:g}")
             + (f"_trk{args.track_weight:g}" if args.track_weight > 0 else "")
-            + ("_proxy" if grad_method == "proxy" else ""))
+            + ("_proxy" if grad_method == "proxy" else "")
+            + ("_ls" if optimizer == "linesearch" else ""))
 
     # RunLogger owns the TensorBoard writer: every result goes through
     # run.log(), so the JSON record and the scalars cannot drift apart.
@@ -478,6 +629,10 @@ def cmd_train(args):
     print(f"Task: point-to-point  (adjoint neural control, method {args.method})")
     print(f"Adjoint gradient: {grad_method}  "
           f"({'--grad-method' if args.grad_method else 'train.grad_method'})")
+    print(f"Optimizer: {optimizer}  "
+          f"({'--optimizer' if args.optimizer else 'train.optimizer'})"
+          + (f", Armijo c={float(cfg.train.linesearch.c):g}, "
+             f"tau_min={float(cfg.train.linesearch.tau_min):g}" if optimizer == "linesearch" else ""))
     print(f"Environment: {type(env).__name__}  (dim={dim}, twist={twist}, "
           f"control={control_dim(dim, twist)}D)")
     print(f"Rod material: {material_summary(cfg)}")
@@ -486,12 +641,18 @@ def cmd_train(args):
               else f"single horizon, {epochs} epochs")
     print(f"Target: {np.round(target, 4)}   device: {device}   lr {lr:g}")
     print(f"Horizon: {N} steps, {budget}")
-    print(f"Workspace: {'off' if bounds is None else 'on, penalty ' + str(args.ws_weight)}")
+    print(f"Workspace: {'off' if bounds is None else 'on, ' + ('hard constraint (trials outside it are rejected)' if optimizer == 'linesearch' else 'penalty ' + str(args.ws_weight))}")
+    nw = cfg.newton
+    print(f"Rollout physics: initial equilibrium {'on' if nw.get('initial_equilibrium') else 'off'}, "
+          f"continuation {'on (max ' + str(nw.get('max_substeps')) + ' substeps)' if nw.get('continuation') else 'off'}, "
+          f"stability check {'on' if nw.get('stability_check') else 'off'}, "
+          f"snap rule {'on' if nw.get('snap_rule') else 'off'}")
     if AUDIT.enabled:
         print("Compute audit: ON  (instrumented kernels are wrapped; expect some overhead)")
 
     arrays, summary = {}, {"target_name": args.target, "target": target.tolist(),
                            "method": args.method, "grad_method": grad_method,
+                           "optimizer": optimizer,
                            "seed": args.seed, "epochs": epochs,
                            "nv": int(env.nv), "N": int(N), "lr": float(lr),
                            "lr_default": float(cfg.train.lr),
@@ -571,6 +732,12 @@ def cmd_train(args):
         if bounds is not None:
             summary["epoch_ws_loss"] = hist["ws_loss"]
         summary["stuck"] = hist.get("stuck")
+        if optimizer == "linesearch":
+            for key in ("tau", "rejected", "rejected_reasons", "rollouts", "snaps", "fallback"):
+                summary[f"epoch_{key}"] = hist[key]
+            summary["stop"] = hist.get("stop")
+            summary["rollouts_total"] = int(hist["rollouts"][-1]) if hist["rollouts"] else 0
+            summary["rejected_total"] = int(sum(hist["rejected"]))
         summary["final_converged"] = bool(conv)
         if conv:
             U_fin = np.array([u.detach().cpu().numpy() for u in u_list])
@@ -597,6 +764,8 @@ def cmd_train(args):
 
     summary["train_time"] = t_train
     summary["newton_failures_total"] = int(env.n_newton_failures)
+    summary["unstable_steps_total"] = int(env.n_unstable)
+    summary["snaps_total"] = int(env.n_snaps)
     summary["status"] = "done"
     np.savez_compressed(out / f"{name}.npz", **arrays)
     json.dump(summary, open(out / f"{name}.json", "w"), indent=1, default=float)
@@ -627,7 +796,8 @@ def cmd_train(args):
 
     run.finish(task="point_to_point",
                mode="rhc" if cfg.rhc.enabled else "single_horizon",
-               method=args.method, grad_method=grad_method,
+               method=args.method, grad_method=grad_method, optimizer=optimizer,
+               unstable_steps_total=env.n_unstable, snaps_total=env.n_snaps,
                final_loss=None if final_loss is None else float(final_loss),
                final_error=results['final_error'],
                target=target, losses=[float(l) for l in losses],
@@ -823,6 +993,7 @@ def report(out, config=None):
     cfg = load_config(config)      # the rod the jobs ran on, for the replays
     env = build_env(cfg)
     reset_env(env, cfg)
+    settle_initial(env, cfg)
     checkpoint = env.get_state()
     u0_np = initial_control(cfg)
     dim = env.dim
@@ -1109,6 +1280,9 @@ def main():
         ap.add_argument("--grad-method", choices=GRAD_METHODS, default=None,
                         help="adjoint gradient: state (exact) or proxy (frozen tangent); "
                              "default: train.grad_method")
+        ap.add_argument("--optimizer", choices=OPTIMIZERS, default=None,
+                        help="adam (fixed lr, every step accepted) or linesearch (the paper's "
+                             "Algorithm 1); default: train.optimizer")
         ap.add_argument("--target", default="T0",
                         help="a name from TARGETS, or 'x,y,z' (T0 = the config's target)")
         ap.add_argument("--seed", type=int, default=0, help="policy seed")

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 from matplotlib.collections import LineCollection
-from matplotlib.patches import Circle, PathPatch, Polygon
+from matplotlib.patches import Circle, FancyArrowPatch, PathPatch, Polygon
 from matplotlib.path import Path as MPath
 
 from paper_figures import style
@@ -49,6 +49,19 @@ def lambda_path(ax, xy, lam, *, lw, gid, max_segments=150, zorder=3, alpha=1.0):
     lc.set_gid(gid)
     ax.add_collection(lc)
     return lc
+
+
+def arrow(ax, xy, *, head_in, gid, lw=style.LW_ARROW, color=style.INK, zorder=8):
+    """A ``-|>`` arrow along the polyline ``xy`` (data units), head ``[length,
+    width]`` in inches; shaft and head are one artist (one SVG group)."""
+    hl, hw = head_in
+    arr = FancyArrowPatch(path=MPath(np.asarray(xy, dtype=float)),
+                          arrowstyle=f"-|>,head_length={hl / style.PT:.2f},"
+                                     f"head_width={0.5 * hw / style.PT:.2f}",
+                          lw=lw, color=color, zorder=zorder, clip_on=False)
+    arr.set_gid(gid)
+    ax.add_patch(arr)
+    return arr
 
 
 def ball(ax, x, y, *, color, gid, size_pt=4.2, edge=style.INK, edge_lw=style.LW_AUX,

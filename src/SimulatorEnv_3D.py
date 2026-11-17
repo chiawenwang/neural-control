@@ -49,6 +49,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from contact import get_contact_forces
+from continuation import quasistatic_step
 from energy import build_energy
 from newton import solve_equilibrium
 
@@ -68,12 +69,15 @@ def objfun_3d(q_old, u_old, dt, tol, maximum_iter,
               obstacles=None,
               newton_cfg=None,
               fixed_index=None,
-              n_pos=None):
+              n_pos=None,
+              boundary_rows=None):
     """Single-step implicit (quasi-static) equilibrium solve.
 
     Thin wrapper around :func:`newton.solve_equilibrium`: it only applies the
     clamped boundary DOFs and hands the rest to the shared globalized Newton
     solver. ``newton_cfg`` is the ``newton:`` block of the YAML config.
+    ``boundary_rows`` picks the clamped entries of ``control_node`` (the right
+    end only, for ``grasp_mode: right``); None clamps both ends.
     """
     if control_node is None:
         raise ValueError("Control node position must be provided.")
@@ -82,7 +86,7 @@ def objfun_3d(q_old, u_old, dt, tol, maximum_iter,
     # `control_node` is listed in exactly `free_index`'s complement order, so a
     # single scatter handles both the twist-free layout (12 clamped position
     # DOFs) and the twisting one (12 positions + the two end twist angles).
-    q_start[fixed_index] = control_node
+    q_start[fixed_index] = control_node if boundary_rows is None else control_node[boundary_rows]
 
     cfg = dict(newton_cfg or {})
     q_new, flag, J, info = solve_equilibrium(
@@ -141,7 +145,8 @@ class SimulatorEnv_3D:
                  energy_cfg=None,
                  energy=None,
                  newton_cfg=None,
-                 warn_on_newton_failure=False):
+                 warn_on_newton_failure=False,
+                 grasp_mode="both"):
         self.nv = nv
         self.dt = dt
         self.rod_length = rod_length
@@ -162,6 +167,10 @@ class SimulatorEnv_3D:
         self.newton_cfg = dict(newton_cfg or {})
         self.warn_on_newton_failure = warn_on_newton_failure
         self.n_newton_failures = 0
+        # Steps that ended on an unstable equilibrium, and steps in which the
+        # rod snapped through a fold (see src/continuation.py).
+        self.n_unstable = 0
+        self.n_snaps = 0
 
         # Cross-section and material parameters
         self.I_sec = np.pi * (R_outer ** 4 - r_inner ** 4) / 4
@@ -206,9 +215,25 @@ class SimulatorEnv_3D:
         # Constrained DOFs: the two nodes at each end are clamped by the
         # control, and with twist so are the two gripper yaws.  Everything the
         # Newton solve is free to move is then a node position.
-        clamped = [np.arange(0, 6), np.arange(3 * nv - 6, 3 * nv)]
-        if self.twist:
-            clamped.append(np.arange(self.n_pos, self.n_pos + self.n_twist))
+        #   both  -> both ends clamped (the original setup)
+        #   right -> only the right end is gripped; the left end is free, so
+        #            node 0 is a tip that moves only through the rod's response
+        #            (the pipe task). Twist-free only: a free end has no yaw.
+        # boundary_rows picks the clamped entries of the 12D control_node,
+        # i.e. the rows of d(q_b)/d(u) the adjoint must use; None = all.
+        self.grasp_mode = grasp_mode
+        if grasp_mode == "both":
+            clamped = [np.arange(0, 6), np.arange(3 * nv - 6, 3 * nv)]
+            if self.twist:
+                clamped.append(np.arange(self.n_pos, self.n_pos + self.n_twist))
+            self.boundary_rows = None
+        elif grasp_mode == "right":
+            if self.twist:
+                raise ValueError("grasp_mode: right needs rod.twist: false (a free end has no yaw)")
+            clamped = [np.arange(3 * nv - 6, 3 * nv)]
+            self.boundary_rows = np.arange(6, 12)
+        else:
+            raise ValueError(f"grasp_mode must be 'both' or 'right', got {grasp_mode!r}")
         self.fixed_index = np.concatenate(clamped)
         self.free_index = np.setdiff1d(np.arange(self.n_dof), self.fixed_index)
 
@@ -221,6 +246,10 @@ class SimulatorEnv_3D:
         self.dlamda = 1 / self.Nsteps
 
         self.obstacles = []
+        # Rigid environment geometry (contact.LPipe3D), kept for diagnostics
+        # and drawing even when its contact force is off; only what is in
+        # self.obstacles acts on the rod.
+        self.pipe = None
 
         # State variables (initialized in reset())
         self.q = None
@@ -228,6 +257,9 @@ class SimulatorEnv_3D:
         self.ctime = None
         self.current_step = None
         self.lamda = None
+        #: The pose the current state was solved under: the start of the pose
+        #: path the next step follows (src/continuation.py).
+        self.u_prev = None
 
         # History log (optional)
         self.history = {
@@ -297,6 +329,46 @@ class SimulatorEnv_3D:
     # Alias, so 2D code paths calling the 2D name keep working.
     _control_node_from_xytheta = _control_node_from_pose
 
+    def _rest_control(self, yaw=0.0):
+        """The pose that clamps the undeformed straight rod where reset() puts it."""
+        n0, n1 = self.nodes[0], self.nodes[-1]
+        left = [n0[0], n0[1], n0[2], 0.0, 0.0]
+        right = [n1[0], n1[1], n1[2], 0.0, 0.0]
+        if self.twist:
+            left.append(yaw)
+            right.append(yaw)
+        return np.array(left + right, dtype=float)
+
+    def _apply_boundary(self, q, control_node):
+        """A copy of ``q`` with the clamped DOFs set to ``control_node``."""
+        q_new = np.asarray(q, dtype=float).copy()
+        q_new[self.fixed_index] = (control_node if self.boundary_rows is None
+                                   else control_node[self.boundary_rows])
+        return q_new
+
+    def _solve(self, q_old, control_node, use_inertia=False):
+        """One equilibrium solve at ``control_node``, warm-started from ``q_old``."""
+        return objfun_3d(
+            q_old=q_old,
+            u_old=self.u,
+            dt=self.dt,
+            tol=self.tol,
+            maximum_iter=self.max_newton_iter,
+            m=self.m,
+            mMat=self.mMat,
+            energy=self.energy,
+            W=self.W,
+            deltaL=self.deltaL,
+            free_index=self.free_index,
+            control_node=control_node,
+            use_inertia=use_inertia,
+            obstacles=self.obstacles,
+            newton_cfg=self.newton_cfg,
+            fixed_index=self.fixed_index,
+            n_pos=self.n_pos,
+            boundary_rows=self.boundary_rows,
+        )
+
     def positions(self, q=None):
         """The node positions as an ``(nv, 3)`` array.
 
@@ -365,6 +437,9 @@ class SimulatorEnv_3D:
         self.ctime = 0.0
         self.current_step = 0
         self.lamda = 0.0
+        # The straight rod is what the pose below clamps: the first step's
+        # continuation starts from it.
+        self.u_prev = self._rest_control(init_yaw)
 
         # Clear history
         if self.save_history:
@@ -374,13 +449,7 @@ class SimulatorEnv_3D:
         # No integration step is taken in reset(); just return the current observation.
         return self._get_observation()
 
-    def step(self, control, use_inertia=False):
-        """
-        Single simulation step.
-          control: 10D vector [x_l, y_l, z_l, th_l, ph_l, x_r, y_r, z_r, th_r, ph_r]
-        Returns:
-          obs, done, info
-        """
+    def _check_control(self, control):
         control = np.asarray(control, dtype=float).flatten()
         if control.shape[0] != self.control_size:
             layout = ("[x_l, y_l, z_l, th_l, ph_l, yaw_l, "
@@ -388,35 +457,73 @@ class SimulatorEnv_3D:
                       "[x_l, y_l, z_l, th_l, ph_l, x_r, y_r, z_r, th_r, ph_r]")
             raise ValueError(
                 f"control must be a {self.control_size}D vector: {layout}")
+        return control
 
-        control_node = self._control_node_from_pose(control)
-
-        q_new, flag, J, ninfo = objfun_3d(
-            q_old=self.q,
-            u_old=self.u,
-            dt=self.dt,
-            tol=self.tol,
-            maximum_iter=self.max_newton_iter,
-            m=self.m,
-            mMat=self.mMat,
-            energy=self.energy,
-            W=self.W,
-            deltaL=self.deltaL,
-            free_index=self.free_index,
-            control_node=control_node,
-            use_inertia=use_inertia,
-            obstacles=self.obstacles,
-            newton_cfg=self.newton_cfg,
-            fixed_index=self.fixed_index,
-            n_pos=self.n_pos,
-        )
-
+    def _commit(self, control, res):
+        """Bookkeeping shared by step() and settle(): counters, warnings, info."""
+        flag, ninfo = res["flag"], res["newton"]
         if flag < 0:
             self.n_newton_failures += 1
             if self.warn_on_newton_failure:
-                print(f"[newton] step {self.current_step}: {ninfo['reason']} "
+                print(f"[newton] step {self.current_step}: {res['reason'] or ninfo.get('reason', '')} "
                       f"(residual {ninfo['residual']:.3e} vs tol {self.tol:.3e}, "
-                      f"{ninfo['iterations']} iters)")
+                      f"{res['newton_iterations']} iters)")
+        if res["stable"] is False:
+            self.n_unstable += 1
+        if res["snap"]:
+            self.n_snaps += 1
+        self.u_prev = control.copy()
+        return {
+            "converged": (flag > 0),
+            "control": control,
+            "J": res["J"],
+            "free_index": self.free_index.copy(),
+            "fixed_index": self.fixed_index.copy(),
+            "control_node": self._control_node_from_pose(control),  # clamped boundary DOFs
+            "newton": ninfo,
+            # continuation / stability / snap diagnostics (src/continuation.py)
+            "substeps": res["substeps"],
+            "newton_iterations": res["newton_iterations"],
+            "stable": res["stable"],
+            "snap": res["snap"],
+            "snap_by": res.get("snap_by"),
+            "snaps": res["snaps"],
+            "max_displacement": res.get("max_displacement", 0.0),
+            "boundary_displacement": res.get("boundary_displacement", 0.0),
+            "reason": res["reason"],
+        }
+
+    def settle(self, control):
+        """Bring the rod to equilibrium at ``control`` without advancing the horizon.
+
+        Used before a rollout starts, so that its first step leaves from an
+        equilibrium under the initial command rather than from the undeformed
+        rod (``newton.initial_equilibrium``).  The pose path from the state's
+        previous pose to ``control`` is followed by continuation, exactly as a
+        step would; the step counter, time and lambda stay where they are and
+        the velocity is reset.  Returns the same ``info`` as :meth:`step`.
+        """
+        control = self._check_control(control)
+        res = quasistatic_step(self, control, use_inertia=False)
+        info = self._commit(control, res)
+        self.q = res["q"]
+        self.u = np.zeros_like(self.q)
+        info["q"] = self.q.copy()
+        info["u"] = self.u.copy()
+        return info
+
+    def step(self, control, use_inertia=False):
+        """
+        Single simulation step.
+          control: 10D vector [x_l, y_l, z_l, th_l, ph_l, x_r, y_r, z_r, th_r, ph_r]
+        Returns:
+          obs, done, info
+        """
+        control = self._check_control(control)
+
+        res = quasistatic_step(self, control, use_inertia=use_inertia)
+        q_new, flag = res["q"], res["flag"]
+        info = self._commit(control, res)
 
         # Update velocity and time
         u_new = (q_new - self.q) / self.dt
@@ -430,17 +537,8 @@ class SimulatorEnv_3D:
         obs = self._get_observation()
         done = (self.current_step >= self.Nsteps) or (flag < 0)
 
-        info = {
-            "converged": (flag > 0),
-            "control": control,
-            "q": self.q.copy(),
-            "u": self.u.copy(),
-            "J": J,
-            "free_index": self.free_index.copy(),
-            "fixed_index": self.fixed_index.copy(),
-            "control_node": control_node.copy(),  # clamped boundary DOFs
-            "newton": ninfo,
-        }
+        info["q"] = self.q.copy()
+        info["u"] = self.u.copy()
 
         # Save history
         if self.save_history:
@@ -461,6 +559,7 @@ class SimulatorEnv_3D:
             "ctime": self.ctime,
             "current_step": self.current_step,
             "lamda": self.lamda,
+            "u_prev": None if self.u_prev is None else self.u_prev.copy(),
         }
         return state
 
@@ -471,6 +570,8 @@ class SimulatorEnv_3D:
         self.ctime = state["ctime"]
         self.current_step = state["current_step"]
         self.lamda = state["lamda"]
+        u_prev = state.get("u_prev")
+        self.u_prev = None if u_prev is None else np.asarray(u_prev, dtype=float).copy()
 
     def render(self, saveimg=False, show=True,
                xlim=None, ylim=None, zlim=None):

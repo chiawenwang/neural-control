@@ -25,6 +25,13 @@ what the vectors are attached to:
 (:func:`implicit_grad_tools.multistep_adjoint_gradient` derives both).  Terms
 that are functions of the command alone -- control effort, the workspace
 penalty -- are added to that surrogate directly and need no adjoint.
+
+What is done with the gradient is ``train.optimizer``: ``adam`` (the fixed
+learning rate with gradient clipping, every step accepted) or ``linesearch``,
+Algorithm 1 of the paper, implemented by :class:`LineSearch` -- the Adam
+direction, but a step length found by backtracking on full rollouts, each
+trial accepted only under the Armijo condition and the task's rule
+(:func:`trial_rule`).
 """
 from __future__ import annotations
 
@@ -34,6 +41,9 @@ import torch.nn as nn
 import torch.optim as optim
 
 from implicit_grad_tools import GRAD_METHODS, multistep_adjoint_gradient
+
+#: The updates ``train.optimizer`` selects between; the first is the default.
+OPTIMIZERS = ("adam", "linesearch")
 
 try:                                   # the audit is optional: see compute_audit.py
     from compute_audit import ComputeAudit
@@ -106,7 +116,8 @@ def segment_lengths(N: int, num_segments: int):
 
 # ------------------------------------------------------------------ rollout
 
-def rollout(env, net, u_start, T, dlam, device, project=None, stop_on_failure=True):
+def rollout(env, net, u_start, T, dlam, device, project=None, stop_on_failure=True,
+            infos=None):
     """Roll out ``T`` steps of the policy from the env's current state.
 
     ``lambda`` is reset to [0, 1] over this segment, matching the original
@@ -128,6 +139,8 @@ def rollout(env, net, u_start, T, dlam, device, project=None, stop_on_failure=Tr
     gradient goes on the commands, the ``proxy`` one on the rates), the
     configurations, the equilibrium Jacobians, and a per-step boolean mask
     (``converged.all()`` is the "did the whole rollout survive" answer).
+    ``infos`` (a list) collects every step's ``info`` dict as well -- the
+    stability, substep and snap flags the line search's rule reads.
     """
     u_list, r_list, q_list, J_list = [], [], [], []
     converged = np.zeros(T, dtype=bool)
@@ -149,6 +162,8 @@ def rollout(env, net, u_start, T, dlam, device, project=None, stop_on_failure=Tr
         _, _, info = env.step(u.detach().cpu().numpy(), use_inertia=False)
         q_list.append(info["q"])
         J_list.append(info["J"])
+        if infos is not None:
+            infos.append(info)
         converged[k] = info["converged"]
         if stop_on_failure and not info["converged"]:
             break
@@ -156,13 +171,13 @@ def rollout(env, net, u_start, T, dlam, device, project=None, stop_on_failure=Tr
     return u_list, r_list, q_list, J_list, converged
 
 
-def execute_controls(env, checkpoint, U, stable=False, J_out=None):
+def execute_controls(env, checkpoint, U, stable=False, J_out=None, info_out=None):
     """Open loop: step the env through the given absolute commands.
 
     ``stable=True`` steps with :func:`dlo_rrt.stable_step` (the planner's own
     model of the rod, which refuses an unstable equilibrium); the default is
     the plain ``env.step`` the controller trains on.  ``J_out`` (a list)
-    collects the equilibrium Jacobians.
+    collects the equilibrium Jacobians, ``info_out`` the step infos.
     """
     env.set_state(checkpoint)
     q_list, ok = [], True
@@ -177,6 +192,8 @@ def execute_controls(env, checkpoint, U, stable=False, J_out=None):
         q_list.append(info["q"])
         if J_out is not None:
             J_out.append(info["J"])
+        if info_out is not None:
+            info_out.append(info)
         if not conv:
             ok = False
             break
@@ -232,6 +249,150 @@ def apply_update(net, opt, surrogate, clip=1.0):
     surrogate.backward()
     torch.nn.utils.clip_grad_norm_([p for p in net.parameters() if p.requires_grad], clip)
     opt.step()
+
+
+# -------------------------------------------------------------- line search
+
+def flat_gradient(net, surrogate):
+    """``dL/dxi`` as one float64 vector: backward through ``surrogate``."""
+    params = [p for p in net.parameters() if p.requires_grad]
+    net.zero_grad(set_to_none=True)
+    surrogate.backward()
+    return np.concatenate([(torch.zeros_like(p) if p.grad is None else p.grad)
+                           .detach().cpu().double().reshape(-1).numpy() for p in params])
+
+
+def get_parameters(net):
+    """The policy's weights as one float64 vector, ``xi``."""
+    params = [p for p in net.parameters() if p.requires_grad]
+    return torch.nn.utils.parameters_to_vector(params).detach().cpu().double().numpy().copy()
+
+
+def set_parameters(net, xi):
+    """Load ``xi`` into the policy (cast to the weights' own dtype)."""
+    params = [p for p in net.parameters() if p.requires_grad]
+    vec = torch.as_tensor(np.asarray(xi, dtype=float), dtype=params[0].dtype,
+                          device=params[0].device)
+    torch.nn.utils.vector_to_parameters(vec, params)
+
+
+def workspace_violation(u_list, k, bounds, tol=1e-9):
+    """Largest amount by which an executed right-gripper command leaves the box."""
+    if bounds is None:
+        return 0.0
+    U = np.stack([u.detach().cpu().numpy() if torch.is_tensor(u) else np.asarray(u, float)
+                  for u in u_list])[:, k:]
+    lo, hi = np.asarray(bounds[0], float), np.asarray(bounds[1], float)
+    v = float(np.max(np.maximum(U - hi, 0.0) + np.maximum(lo - U, 0.0)))
+    return v if v > tol else 0.0
+
+
+def trial_rule(infos, converged, u_list, k, bounds, snap_ok):
+    """The task's acceptance rule for a line-search trial: ``(ok, reason)``.
+
+    Every task rejects a rollout with a Newton failure, a step that ended on
+    an unstable equilibrium, or a command outside the workspace (there is no
+    projection in this mode: the policy has to keep the gripper inside).  A
+    snap-through is admitted (``snap_ok``) for a terminal objective, whose
+    loss alone decides, and rejected for a trajectory objective, which has to
+    stay on the branch of the initial equilibrium (paper, Sec. III-C).  A
+    rollout that raises (the model's domain left) is rejected by
+    :meth:`LineSearch.search` before this rule is reached.
+    """
+    n = len(infos)
+    if not (n == len(converged) and converged.all()):
+        return False, "newton_failed"
+    if any(i.get("stable") is False for i in infos):
+        return False, "unstable"
+    if workspace_violation(u_list, k, bounds) > 0.0:
+        return False, "workspace"
+    if not snap_ok and any(i.get("snap") for i in infos):
+        return False, "snap"
+    return True, ""
+
+
+class LineSearch:
+    """Algorithm 1 of the paper: Adam's direction, backtracking on rollouts.
+
+    Each round takes the gradient ``g`` at the current weights ``xi``, forms
+    the descent direction ``d`` as the step Adam *would* take (its moment
+    estimates updated once, with this ``g``; the step computed but not
+    applied) and falls back to ``d = -g`` when that is not a descent
+    direction.  Then, starting from ``tau = 1``, the trial ``xi + tau d`` is
+    rolled out and accepted only if both
+
+        L(xi + tau d) <= L(xi) + c tau g.d        (Armijo, eq. 22)
+
+    and the task's rule (:func:`trial_rule`) hold; otherwise ``tau`` is
+    halved.  Below ``tau_min`` the search gives up and training stops.  The
+    accepted trial's rollout is handed back, so the next gradient costs no
+    further rollout -- only rejected trials do.
+    """
+
+    def __init__(self, net, lr, c=1e-4, tau_min=1e-4, betas=(0.9, 0.999), eps=1e-8):
+        self.net = net
+        self.lr, self.c, self.tau_min = float(lr), float(c), float(tau_min)
+        self.b1, self.b2, self.eps = float(betas[0]), float(betas[1]), float(eps)
+        n = get_parameters(net).size
+        self.m = np.zeros(n)
+        self.v = np.zeros(n)
+        self.t = 0
+        self.n_rollouts = 0
+        self.n_rejected = 0
+        self.stop_reason = None
+
+    def direction(self, g):
+        """Adam's preconditioned step for ``g`` (not applied); ``-g`` if it does not descend."""
+        g = np.asarray(g, dtype=float)
+        self.t += 1
+        self.m = self.b1 * self.m + (1.0 - self.b1) * g
+        self.v = self.b2 * self.v + (1.0 - self.b2) * g * g
+        m_hat = self.m / (1.0 - self.b1 ** self.t)
+        v_hat = self.v / (1.0 - self.b2 ** self.t)
+        d = -self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
+        fallback = bool(g @ d >= 0.0)
+        if fallback:
+            d = -g
+        return d, fallback
+
+    def search(self, xi, g, loss, d, evaluate):
+        """Backtrack along ``d`` from ``xi``; returns ``(trial or None, record)``.
+
+        ``evaluate(xi_trial)`` rolls the policy out at ``xi_trial`` and
+        returns a dict with at least ``loss`` (float), ``ok`` (the rule) and
+        ``reason``; whatever else it holds (the rollout) is handed back with
+        the accepted trial.  On return the policy's weights are those of the
+        accepted trial, or ``xi`` again when nothing was accepted.
+        """
+        gd = float(np.asarray(g, float) @ d)
+        tau = 1.0
+        rejected = []
+        while True:
+            self.n_rollouts += 1
+            try:
+                trial = evaluate(xi + tau * d)
+            except (ValueError, FloatingPointError, np.linalg.LinAlgError, RuntimeError) as exc:
+                # A trial that leaves the model's domain (e.g. the gripper
+                # tangent turned vertical, where the yaw director is singular)
+                # is rejected like any other infeasible one.
+                trial = {"ok": False, "reason": f"error: {type(exc).__name__}: {exc}"[:120],
+                         "loss": np.inf}
+            L = float(trial["loss"])
+            armijo = np.isfinite(L) and L <= loss + self.c * tau * gd
+            if trial["ok"] and armijo:
+                record = {"tau": tau, "gd": gd, "rejected": rejected,
+                          "n_rejected": len(rejected)}
+                return trial, record
+            self.n_rejected += 1
+            rejected.append({"tau": tau, "loss": L,
+                             "reason": trial["reason"] if not trial["ok"] else "armijo"})
+            tau *= 0.5
+            if tau < self.tau_min:
+                set_parameters(self.net, xi)
+                self.stop_reason = (f"no step accepted down to tau = {2 * tau:g} "
+                                    f"(last: {rejected[-1]['reason']})")
+                return None, {"tau": None, "gd": gd, "rejected": rejected,
+                              "n_rejected": len(rejected), "stop": self.stop_reason}
 
 
 # ---------------------------------------------------------------- workspace

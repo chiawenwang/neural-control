@@ -77,7 +77,7 @@ surface with the rod column (`fig01_layout_preview`).
 
 | stem | canvas [in] | content |
 |---|---|---|
-| `a_surface_{bare,axes}` | 3.5 x 1.45 | `E(s, lambda)` surface (rasterized) with the realized path as vectors: balls along it with arrowheads between them, a curved arrow for the snap, dashed gray saddle line. `axes` adds hand-placed axes (energy up the left edge, away from the rods) and the labels start, snap, end |
+| `a_surface_{bare,axes}` | 3.5 x 1.45 | `E(s, lambda)` surface (rasterized) with the realized path as vectors: balls joined by dashed links along the valley floor (the dashes are fitted to each gap), a thin arrow beside each branch (start to snap, landing to end), a curved arrow for the snap, and the saddle line (the barrier between the two valleys, ending at the fold where the snap starts) as dark dashes on a white halo. `axes` adds hand-placed axes (energy up the left edge, away from the rods) and the labels start, snap, end, saddle. Every arrow in panel (a), the rod column's too, has one line width (`style.LW_ARROW`) and head (`head_in`) |
 | `a_rods_column_{bare,label}` | 1.3 x 1.45 | the process as a stack of rods (a flipbook), bottom to top, at the lambdas of the surface balls: start (`lambda = 0`), three frames on the way, snap (the last state before the jump), the first state after it, end (`lambda = 1`). Start, snap and end are solid and joined by arrows; the frames between are thin and translucent. Frames are spaced to fill the column and never touch, with a wider gap where the shape flips; `label` adds the names. `rods.column` in the config sets the opacity, spacing and direction (`down`: start at the top) |
 | `a_rod_lam_<value>` | 1.1 x 0.5 | start, snap and end one per file (same scale as the column), clamps aligned with the end tangents |
 | `a_rods` | 3.5 x 0.5 | the same three rods as one strip (alternative arrangement) |
@@ -87,9 +87,10 @@ surface with the rod column (`fig01_layout_preview`).
 | `colorbar_lambda_vertical[_bare]` | 0.40 x 1.30 | bar 0.08 x 1.0 in |
 | `*_obstacle` | as above | the same with a circle above the arch |
 
-The arrows and labels of the process are separate SVG groups (`arrow_*`,
-`snap_arrow`, `label_start`, `label_snap`, `label_end`), so they can be
-restyled or moved in Illustrator.
+The links, arrows and labels of the process are separate SVG groups (`link_k*`, `arrow_pre`,
+`arrow_post`, `snap_arrow`, `arrow_start_snap`, `arrow_snap_end`, `label_start`,
+`label_snap`, `label_end`, `label_saddle`; the saddle line is `saddle_line` over
+`saddle_halo`), so they can be restyled or moved in Illustrator.
 
 All rod sketches share one scale (`panel_a.rods.scale_in_per_m`, recorded in
 the manifest). `s` is the midpoint height in units of `L`, energies are in

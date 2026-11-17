@@ -46,6 +46,16 @@ class CircleObstacle:
         self.cx = cx
         self.cy = cy
 
+    def node_energy(self, xk, yk):
+        """Penalty energy ``E_c = 0.5 * k * max(0, radius - dist)^2`` of one node.
+
+        The energy the force and Jacobian above differentiate; the energy
+        descent of the snap rule (src/newton.py: minimize_potential) needs the
+        value itself, which is the total potential's contact term.
+        """
+        phi = self.radius - float(np.hypot(xk - self.cx, yk - self.cy))
+        return 0.5 * self.k_contact * phi * phi if phi > 0.0 else 0.0
+
     def node_contact(self, xk, yk):
         """
         Contact force and force Jacobian for a single rod node at (xk, yk).
@@ -109,6 +119,12 @@ class SphereObstacle:
         self.cy = cy
         self.cz = cz
 
+    def node_energy(self, xk, yk, zk):
+        """``E_c = 0.5 * k * max(0, radius - dist)^2`` of one node (see CircleObstacle)."""
+        d = np.array([xk - self.cx, yk - self.cy, zk - self.cz], dtype=float)
+        phi = self.radius - float(np.linalg.norm(d))
+        return 0.5 * self.k_contact * phi * phi if phi > 0.0 else 0.0
+
     def node_contact(self, xk, yk, zk):
         """Contact force (3,) and force Jacobian (3, 3) for a single rod node."""
         d = np.array([xk - self.cx, yk - self.cy, zk - self.cz], dtype=float)
@@ -129,6 +145,71 @@ class SphereObstacle:
         J = self.k_contact * (pn * np.eye(3) - (1.0 + pn) * np.outer(n, n))
 
         return F, J
+
+
+class PegObstacle:
+    """Rigid peg: a cylinder parallel to y, 3D only (a capsule at its two ends).
+
+    Seen in the x-z plane it is a disc of ``radius`` at ``(cx, cz)``; along the
+    axis it spans ``cy +- half_length``.  A node's distance is taken to the
+    axis *segment*, so the penalty is :class:`SphereObstacle`'s with the nearest
+    axis point in place of the center::
+
+        d = p - (cx, clip(y, cy-h, cy+h), cz),   E_c = 0.5 k max(0, radius - |d|)^2
+        F_c = k phi n,    J_c = J_sphere(d) @ P
+
+    ``P = diag(1, 0, 1)`` while the node is within the axis range (the nearest
+    point follows y), the identity outside it.  Contact is node-based, so keep
+    ``radius`` above the node spacing or an edge can pass between two nodes.
+    """
+
+    def __init__(self, cx, cy, cz, radius, half_length, k_contact=1e7):
+        self.cx, self.cy, self.cz = cx, cy, cz
+        self.radius = radius
+        self.half_length = half_length
+        self.k_contact = k_contact
+
+    def _offset(self, xk, yk, zk):
+        """``d`` (3,) from the nearest axis point and whether the node is inside the y range."""
+        yc = min(max(yk, self.cy - self.half_length), self.cy + self.half_length)
+        return np.array([xk - self.cx, yk - yc, zk - self.cz], dtype=float), yc == yk
+
+    def bounds(self):
+        """``(lo, hi)`` corners of the box around the peg."""
+        c = np.array([self.cx, self.cy, self.cz], dtype=float)
+        e = np.array([self.radius, self.radius + self.half_length, self.radius])
+        return c - e, c + e
+
+    def node_energy(self, xk, yk, zk):
+        d, _ = self._offset(xk, yk, zk)
+        phi = self.radius - float(np.linalg.norm(d))
+        return 0.5 * self.k_contact * phi * phi if phi > 0.0 else 0.0
+
+    def node_contact(self, xk, yk, zk):
+        """Contact force (3,) and force Jacobian (3, 3) for a single rod node."""
+        d, inside = self._offset(xk, yk, zk)
+        dist = float(np.linalg.norm(d))
+        if dist < 1e-10:                       # on the axis: push out along +z
+            return np.array([0.0, 0.0, self.k_contact * self.radius]), np.zeros((3, 3))
+        phi = self.radius - dist
+        if phi <= 0.0:
+            return np.zeros(3), np.zeros((3, 3))
+        n = d / dist
+        pn = phi / dist
+        J = self.k_contact * (pn * np.eye(3) - (1.0 + pn) * np.outer(n, n))
+        if inside:
+            J[:, 1] = 0.0
+        return self.k_contact * phi * n, J
+
+    def draw_surface(self, ax, alpha=0.35, color="steelblue"):
+        """Translucent cylinder on a 3D axes; returns the artists."""
+        th = np.linspace(0.0, 2 * np.pi, 32)
+        ys = np.linspace(self.cy - self.half_length, self.cy + self.half_length, 2)
+        T, Y = np.meshgrid(th, ys)
+        surf = ax.plot_surface(self.cx + self.radius * np.cos(T), Y,
+                               self.cz + self.radius * np.sin(T), color=color, alpha=alpha,
+                               linewidth=0, shade=True)
+        return [surf]
 
 
 def get_contact_forces(q, obstacles, dim=2, forces_only=False, n_pos=None):
@@ -184,6 +265,28 @@ def get_contact_forces(q, obstacles, dim=2, forces_only=False, n_pos=None):
             Jc[a:a + dim, a:a + dim] += J_node
 
     return Fc, Jc
+
+
+def get_contact_energy(q, obstacles, dim=2, n_pos=None):
+    """Total contact energy ``E_c(q)`` of all obstacles, the value whose
+    derivatives :func:`get_contact_forces` returns.
+
+    Whole-rod obstacles expose ``compute_contact_energy(q)`` (LPipe2D), node
+    obstacles ``node_energy(*p)``.  Used by the total potential the snap rule
+    descends (src/newton.py: total_potential).
+    """
+    q = np.asarray(q, dtype=float)
+    npos = q.size if n_pos is None else int(n_pos)
+    N = npos // dim
+    E = 0.0
+    for obs in obstacles:
+        if hasattr(obs, "rod_contact"):
+            E += float(obs.compute_contact_energy(q[:npos]))
+        else:
+            for k in range(N):
+                a = dim * k
+                E += float(obs.node_energy(*q[a:a + dim]))
+    return E
 
 
 # =============================================================================
@@ -266,6 +369,8 @@ class LPipe2D:
 
     #: Pieces of the centerline, in order along it.
     PIECES = ("first_segment", "bend", "second_segment")
+    #: Spatial dimension of the points (LPipe3D sets 3).
+    D = 2
 
     def __init__(self, entry_position, entry_direction, exit_direction,
                  inner_radius, bend_radius, first_segment_length,
@@ -277,9 +382,9 @@ class LPipe2D:
                              f"got {geometry_type!r}")
         self.geometry_type = geometry_type
         self.corner = geometry_type == "l_corner_2d"
-        self.P0 = np.asarray(entry_position, dtype=float).reshape(2)
-        d1 = np.asarray(entry_direction, dtype=float).reshape(2)
-        d2 = np.asarray(exit_direction, dtype=float).reshape(2)
+        self.P0 = np.asarray(entry_position, dtype=float).reshape(self.D)
+        d1 = np.asarray(entry_direction, dtype=float).reshape(self.D)
+        d2 = np.asarray(exit_direction, dtype=float).reshape(self.D)
         self.d1 = d1 / np.linalg.norm(d1)
         self.d2 = d2 / np.linalg.norm(d2)
         if abs(self.d1 @ self.d2) > 1e-9:
@@ -348,7 +453,7 @@ class LPipe2D:
 
     def sample_points(self, q, m=None):
         """Points along the rod at which contact is evaluated, ``(n_samples, 2)``."""
-        X = np.asarray(q[:2 * self.nv], dtype=float).reshape(self.nv, 2)
+        X = np.asarray(q[:self.D * self.nv], dtype=float).reshape(self.nv, self.D)
         if m is None:
             e, f = self.s_edge, self.s_frac
         else:
@@ -447,10 +552,9 @@ class LPipe2D:
             return g, grad
         return g, grad, hess
 
-    @staticmethod
-    def _plane(g, grad, n):
+    def _plane(self, g, grad, n):
         """(value, gradient, Hessian) of a term linear in the point."""
-        return g, np.broadcast_to(grad, (n, 2)).copy(), np.zeros((n, 2, 2))
+        return g, np.broadcast_to(grad, (n, self.D)).copy(), np.zeros((n, self.D, self.D))
 
     @staticmethod
     def _smax2(A, B, tau):
@@ -512,7 +616,7 @@ class LPipe2D:
         return 0.5 * self.k_contact * float(self.s_w @ (h * h))
 
     def _scatter_vec(self, idx, vec):
-        out = np.zeros((self.nv, 2))
+        out = np.zeros((self.nv, self.D))
         e, f = self.s_edge[idx], self.s_frac[idx]
         np.add.at(out, e, (1.0 - f)[:, None] * vec)
         np.add.at(out, e + 1, f[:, None] * vec)
@@ -521,7 +625,7 @@ class LPipe2D:
     def contact_gradient_hessian(self, q, want_hess=True):
         """dE_c/dq and d2E_c/dq2 over the 2*nv position DOFs."""
         S, idx = self._active(q)
-        n2 = 2 * self.nv
+        n2 = self.D * self.nv
         if idx.size == 0:
             return np.zeros(n2), (np.zeros((n2, n2)) if want_hess else None)
 
@@ -542,11 +646,11 @@ class LPipe2D:
         nodes = (e, e + 1)
         coef = (1.0 - f, f)
         H = np.zeros((n2, n2))
-        c2 = np.arange(2)
+        c2 = np.arange(self.D)
         for na, ca in zip(nodes, coef):
-            rows = 2 * na[:, None] + c2[None, :]
+            rows = self.D * na[:, None] + c2[None, :]
             for nb, cb in zip(nodes, coef):
-                cols = 2 * nb[:, None] + c2[None, :]
+                cols = self.D * nb[:, None] + c2[None, :]
                 np.add.at(H, (rows[:, :, None], cols[:, None, :]),
                           (ca * cb)[:, None, None] * Hs)
         return grad, H
@@ -577,7 +681,7 @@ class LPipe2D:
         touching = g < thr
         nrm = grad[touching]
         nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-14)
-        nodes = self.compute_signed_clearance(np.asarray(q[:2 * self.nv]).reshape(-1, 2),
+        nodes = self.compute_signed_clearance(np.asarray(q[:self.D * self.nv]).reshape(-1, self.D),
                                               smooth=False)
         return {
             "min_clearance": float(g.min()),
@@ -603,7 +707,7 @@ class LPipe2D:
         L = float(wl @ (pen * pen))
         idx = np.nonzero(pen > 0.0)[0]
         if idx.size == 0:
-            return L, np.zeros(2 * self.nv)
+            return L, np.zeros(self.D * self.nv)
         dLdg = -2.0 * wl[idx] * pen[idx]
         return L, self._scatter_vec(idx, dLdg[:, None] * Gg[idx])
 
@@ -698,3 +802,117 @@ class LPipe2D:
             b = self.P0 + sgn * (self.r_in + span) * lat
             ax.plot([a[0], b[0]], [a[1], b[1]], color=color, lw=2, zorder=1)
         ax.plot(c[:, 0], c[:, 1], ':', color=color, lw=1, alpha=0.8, zorder=1)
+
+
+# =============================================================================
+# DLO -- rigid-wall contact: a 90-degree corner pipe in space (3D)
+# =============================================================================
+
+class LPipe3D(LPipe2D):
+    """Two cylindrical bores meeting at a right angle, in space.
+
+    The 3D counterpart of :class:`LPipe2D`'s ``l_corner_2d``: bore A of
+    radius ``inner_radius`` runs from the entry face at ``entry_position``
+    along ``entry_direction`` to the far wall of bore C, bore C runs from the
+    near wall of bore A along ``exit_direction`` for ``second_segment_length``
+    and is closed at the end.  The channel-wall terms of the 2D corner become
+    *radial* distances from the bore axes (``r_eff - rho``), the end planes,
+    the entry face and the C2 soft max / min blends are the same, and so are
+    the sampling along the edges, the penalty energy and the whole-rod
+    ``rod_contact`` hook.  Only the sharp corner is implemented (the rounded
+    elbow would need a torus).
+    """
+
+    D = 3
+
+    def __init__(self, *args, geometry_type="l_corner_3d", **kwargs):
+        if geometry_type != "l_corner_3d":
+            raise ValueError("the 3D pipe is the sharp corner only: pipe.geometry_type: l_corner_3d")
+        super().__init__(*args, geometry_type="l_corner_2d", **kwargs)
+        self.geometry_type = "l_corner_3d"
+
+    # ------------------------------------------------------------ geometry
+
+    def _radial(self, rel, axis, n):
+        """``r_eff - rho`` with gradient and Hessian, rho the distance from the axis."""
+        a = rel @ axis
+        w = rel - a[:, None] * axis[None, :]
+        rho = np.linalg.norm(w, axis=1)
+        ok = rho > 1e-12
+        nrm = np.zeros_like(w)
+        nrm[ok] = w[ok] / rho[ok, None]
+        G = -nrm
+        H = np.zeros((n, 3, 3))
+        I3 = np.eye(3)
+        P = I3 - np.outer(axis, axis)
+        H[ok] = -(P[None] - nrm[ok, :, None] * nrm[ok, None, :]) / rho[ok, None, None]
+        return self.r_eff - rho, G, H
+
+    def compute_signed_clearance(self, P, derivs=0, smooth=True):
+        P = np.atleast_2d(np.asarray(P, dtype=float))
+        n = P.shape[0]
+        tau = self.tau if smooth else 0.0
+        rel = P - self.P0
+        a = rel @ self.d1
+        rel2 = P - self.P1
+        a2 = rel2 @ self.d2
+        face = self._plane(-a - self.r_rod, -self.d1, n)
+        lat_A = self._radial(rel, self.d1, n)
+        end_A = self._plane(self.L1 + self.r_in - self.r_rod - a, -self.d1, n)
+        lat_C = self._radial(rel2, self.d2, n)
+        start_C = self._plane(a2 + self.r_in - self.r_rod, self.d2, n)
+        end_C = self._plane(self.L2 - self.r_rod - a2, -self.d2, n)
+        ch_A = self._smin2(lat_A, end_A, tau)
+        ch_C = self._smin2(self._smin2(lat_C, start_C, tau), end_C, tau)
+        g, grad, hess = self._smax2(self._smax2(ch_A, ch_C, tau), face, tau)
+        if not derivs:
+            return g
+        if derivs == 1:
+            return g, grad
+        return g, grad, hess
+
+    def arclength(self, p):
+        p = np.asarray(p, dtype=float).reshape(3)
+        a = float((p - self.P0) @ self.d1)
+        a2 = float((p - self.P1) @ self.d2)
+        rel, rel2 = p - self.P0, p - self.P1
+        rho_A = float(np.linalg.norm(rel - a * self.d1))
+        rho_C = float(np.linalg.norm(rel2 - a2 * self.d2))
+        dA = rho_A if a <= self.L1 else float(np.linalg.norm(rel2))
+        dC = rho_C if a2 >= 0.0 else float(np.linalg.norm(rel2))
+        if dA <= dC:
+            return a, self.d1.copy()
+        return float(self.L1 + a2), self.d2.copy()
+
+    def piece_of(self, p):
+        s = self.arclength(p)[0]
+        return self.PIECES[0 if s < self.s_bend_start else 1 if s <= self.s_bend_end else 2]
+
+    def far_wall_point(self, s2):
+        """Point on the centerline-reachable far (outer) wall of bore C, ``s2``
+        along the exit direction from the corner: where a rod pushed round
+        the corner ends up, since it cannot leave that wall again."""
+        return self.P1 + self.r_eff * self.d1 + float(s2) * self.d2
+
+    # ------------------------------------------------------------ drawing
+
+    def draw(self, ax, color="steelblue", alpha=0.15, n=40):
+        """The two bores as translucent cylinders, plus the centerline."""
+        def basis(axis):
+            a = np.array([1.0, 0.0, 0.0]) if abs(axis[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+            e1 = np.cross(axis, a); e1 /= np.linalg.norm(e1)
+            return e1, np.cross(axis, e1)
+
+        th = np.linspace(0, 2 * np.pi, n)
+        for start, axis, length in ((self.P0, self.d1, self.L1 + self.r_in),
+                                    (self.P1 - self.r_in * self.d2, self.d2, self.L2 + self.r_in)):
+            e1, e2 = basis(axis)
+            s = np.linspace(0.0, length, 2)
+            ring = self.r_in * (np.cos(th)[:, None] * e1 + np.sin(th)[:, None] * e2)
+            X = start[None, None, :] + s[None, :, None] * axis[None, None, :] + ring[:, None, :]
+            ax.plot_surface(X[..., 0], X[..., 1], X[..., 2], color=color, alpha=alpha,
+                            linewidth=0, shade=False)
+            for k in (0, 1):
+                ax.plot(X[:, k, 0], X[:, k, 1], X[:, k, 2], color=color, lw=1, alpha=0.6)
+        c = np.array([self.P0, self.P1, self.P3])
+        ax.plot(c[:, 0], c[:, 1], c[:, 2], ':', color=color, lw=1, alpha=0.8)

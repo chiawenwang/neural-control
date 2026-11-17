@@ -55,6 +55,11 @@ _RENAMED = {
     "train.adjoint_mode": "train.grad_method: `local` is now `state`; `branch` "
                           "summed the future losses twice and is gone (`proxy` is "
                           "what it meant to compute)",
+    "newton.stability_perturbation": "nothing: the nudge-and-resolve fix is gone. "
+                                     "`newton.stability_check` now factors J_ff by "
+                                     "Cholesky, `newton.continuation` subdivides the "
+                                     "step, and `newton.snap_rule` descends the energy "
+                                     "(its `snap_kick` breaks an exact symmetry)",
 }
 
 
@@ -94,14 +99,21 @@ def _suggest(key, default):
 def check_values(cfg) -> None:
     """Raise on a value outside the set its key allows.
 
-    ``train.grad_method`` picks the adjoint gradient; anything but a known
-    method is an error rather than a silent fall-back to the default.  (The
-    scripts' ``--grad-method`` flag is checked by argparse's ``choices``.)
+    ``train.grad_method`` picks the adjoint gradient and ``train.optimizer``
+    the update made from it; anything but a known value is an error rather
+    than a silent fall-back to the default.  (The scripts' ``--grad-method``
+    and ``--optimizer`` flags are checked by argparse's ``choices``.)
     """
     from implicit_grad_tools import GRAD_METHODS
-    value = (cfg.get("train") or {}).get("grad_method")
+    from neural_control import OPTIMIZERS
+    train = cfg.get("train") or {}
+    value = train.get("grad_method")
     if value not in GRAD_METHODS:
         raise ValueError(f"train.grad_method must be one of {', '.join(GRAD_METHODS)}, "
+                         f"got {value!r}")
+    value = train.get("optimizer")
+    if value not in OPTIMIZERS:
+        raise ValueError(f"train.optimizer must be one of {', '.join(OPTIMIZERS)}, "
                          f"got {value!r}")
 
 

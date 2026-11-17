@@ -246,6 +246,21 @@ task:
     # comparison verifies for feasibility.
     trajectory_type: segment
     weight: 1.0                # per-step loss weight
+    # Parameters of trajectory_type: sine_xz (3D, scripts/train_tracking.py; see
+    # configs/task_tracking_peg_3d.yaml). A sine in the vertical x-z plane that starts at the mid node's ready
+    # position m0 and drifts by (dx, dy) over the horizon:
+    #   x(t) = m0_x + dx * t
+    #   y(t) = m0_y + dy * t                      (t = k/N in [0, 1])
+    # (then x is bowed by `bow`, see below)
+    #   z(t) = m0_z + amp * sin(2 pi * periods * t)   (periods 0.5, amp < 0: one shallow dip)
+    sine_xz:
+      amp: 0.05                # [m] z amplitude
+      periods: 1.5             # full sine periods over the horizon
+      dx: -0.02                # [m] x drift over the horizon
+      dy: 0.04                 # [m] y drift over the horizon
+      bow: 0.0                 # x additionally follows the bowed rod's surface,
+                               # x -= bow * ((y^2 + z^2) - (m0_y^2 + m0_z^2));
+                               # ~1.43 for the 1 m soft_strip. 0 -> off
   # Read only by scripts/train_pipe.py: drive the free tip (2D, grasp_mode:
   # right) through `pipe` to target_xy.
   pipe:
@@ -292,6 +307,20 @@ pipe:
   bend_radius: 0.15              # centerline radius of the bend [m]; > inner_radius
   first_segment_length: 0.6      # entry face -> start of the bend [m]
   second_segment_length: 0.3     # end of the bend -> closed far end [m]
+
+# Rigid peg: a cylinder whose axis is parallel to y, i.e. perpendicular to the
+# vertical x-z plane (contact.PegObstacle, built by env_factory.attach_peg; see
+# configs/task_tracking_peg_3d.yaml). Seen in the x-z plane it is a circle of
+# `radius` at `center_xz`; along y it spans center_y +- half_length_y. 3D only.
+# Contact is node-based like the sphere obstacle, so keep radius above the node
+# spacing (rod_length / (nv - 1)) or the rod can slip between two nodes.
+peg:
+  enabled: false
+  center_xz: [0.30, -0.075]    # [m] x, z of the axis
+  center_y: 0.0                # [m]
+  half_length_y: 0.15          # [m] extent along the axis, each side
+  radius: 0.03                 # [m]
+  k_contact: 1.0e+7            # [N/m^2] penalty stiffness, as for the sphere
 
 # Normal contact between the rod and rigid geometry (currently: `pipe`).
 #   E_c = k_contact/2 * sum_i w_i * [smoothing * softplus(-g_i/smoothing)]^2
@@ -382,18 +411,59 @@ newton:
                            # 0 -> regularize only when the line search stalls.
                            # Raise to ~1.0e-8 for a persistently stiff/unstable setup.
   verbose: false           # print a one-line diagnosis for each failed step
-  max_substeps: 0          # 2D, quasi-static only: retry a failed solve by moving
-                           # the clamped ends there in 2, 4, ... up to this many
-                           # increments (continuation along the equilibrium branch,
-                           # e.g. through a snap-through in contact). 0 -> off, the
-                           # original behaviour.
-  stability_check: false   # 2D, quasi-static only: if a converged state is an
-                           # unstable equilibrium (the free-DOF Hessian has a
-                           # negative eigenvalue -- e.g. a straight rod pushed past
-                           # its Euler load), nudge it along that mode and re-solve,
-                           # so the rod buckles as a real one would instead of
-                           # staying on the saddle. false -> the original behaviour.
-  stability_perturbation: 1.0e-3   # [m] size of that nudge at its largest node
+
+  # --- the physics of the rollout (paper Sec. III-A; src/continuation.py) ---
+  # Quasi-static stepping should (1) leave from an equilibrium, (2) follow
+  # the continuous boundary path so the branch it realizes does not depend on
+  # the number of control steps, (3) keep only stable equilibria, and (4) fall
+  # into a definite neighbouring valley when the path crosses a fold. The
+  # four switches below are on by default; with all of them off a step is the
+  # single warm-started Newton solve it used to be, bit for bit. They apply to
+  # both environments, 2D and 3D, and only to quasi-static steps.
+  initial_equilibrium: true   # scripts solve the equilibrium at the initial
+                              # control u0 (and require it to be stable) before
+                              # taking the rollout checkpoint, so the rollout
+                              # starts from an equilibrium, not from the
+                              # undeformed rod. Tracking's ready pose already
+                              # does this and is unchanged.
+  continuation: true          # when Newton fails or lands on an unstable point,
+                              # cut the step into 2, 4, 8, ... substeps along the
+                              # straight pose path from the previous command,
+                              # each warm-started from the last. The substeps
+                              # interpolate the end-effector pose u and map it
+                              # through Gamma, so the clamped edge keeps its
+                              # length.
+  max_substeps: 64            # cap on that subdivision (a power of two is
+                              # natural; the finest level tried is the largest
+                              # power of two not above it)
+  stability_check: true       # after every converged solve, main step and
+                              # substep alike, factor J_ff by Cholesky: success
+                              # means a strict local minimum of the energy
+                              # (Assumption 2). Failure triggers the subdivision,
+                              # and at the finest level the snap rule.
+  snap_rule: true             # when the finest substep still has no stable
+                              # equilibrium, descend the total potential
+                              # E + E_contact - W.q from the last stable state
+                              # under that substep's boundary (Newton with a
+                              # shifted Hessian, Armijo on the potential, final
+                              # Cholesky), i.e. the overdamped snap-through; the
+                              # remaining substeps continue from the minimum it
+                              # reaches. The step is reported as `snap` with the
+                              # energy drop and the largest node displacement.
+  snap_max_iter: 500          # descent iterations per snap
+  snap_kick: 1.0e-3           # [m] step along the most negative curvature when
+                              # the descent starts exactly on a stationary point
+                              # (a symmetric buckling problem with nothing to
+                              # break the symmetry); deterministic sign
+  # A fold crossed with a small step is often resolved by Newton itself, which
+  # lands directly on the stable equilibrium of the next valley; that is the
+  # same snap-through, so it is flagged by the paper's displacement indicator
+  # (eq. 23): the free nodes moved by more than snap_disp_ratio times the
+  # clamped nodes plus snap_disp_eps rod lengths. On the twist example a steep
+  # but continuous response (buckling onset) stays below 13x and 0.03 m, an
+  # arch flipping over reaches 90-470x and 0.4-0.6 m.
+  snap_disp_ratio: 10.0       # kappa of eq. (23)
+  snap_disp_eps: 0.05         # epsilon of eq. (23), as a fraction of rod_length
 
 # Optimization / training.
 train:
@@ -415,6 +485,28 @@ train:
   #          and attached to the rate r_j; exact only while S stays constant
   #          along the path, and finer steps do not remove the error
   grad_method: state
+  # Which update the training loop makes from that gradient. All task scripts
+  # read it; their --optimizer flag overrides it, and the choice is written to
+  # the run log and summary.
+  #   adam        the original loop: Adam at the fixed lr with gradient-norm
+  #               clipping, every step accepted
+  #   linesearch  Algorithm 1 of the paper: the descent direction is Adam's
+  #               preconditioned step (the moment estimates are updated once
+  #               per round with the current gradient; d = -g if that is not a
+  #               descent direction), and the step length is found by
+  #               backtracking from tau = 1 on full rollouts: a trial is
+  #               accepted only if it satisfies the Armijo condition
+  #               L(xi + tau d) <= L(xi) + c tau g.d AND the task's rule -- any
+  #               Newton failure, unstable state or command outside the
+  #               workspace rejects it (no straight-through projection in this
+  #               mode); a snap-through is admitted for a terminal objective
+  #               (point-to-point, shape) and rejected for a trajectory one
+  #               (tracking, pipe). The accepted trial's rollout is reused for
+  #               the next gradient; training stops when tau < tau_min.
+  optimizer: adam
+  linesearch:
+    c: 1.0e-4                 # Armijo constant
+    tau_min: 1.0e-4           # smallest step fraction tried before giving up
 
 # Output / logging.
 output:

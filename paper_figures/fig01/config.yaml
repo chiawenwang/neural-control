@@ -74,9 +74,17 @@ panel_a:
     n_s_plot: 120               # s samples of the rasterized surface
     s_margin: 0.005             # [L] the surface ends this far right of the right well
     process:                    # 2D layer over the surface (inches)
-      head_in: [0.05, 0.045]    # arrowhead [length, width]
-      head_edge_pt: 0.4         # white edge of the arrowheads on the path
-      gap_in: 0.01              # between an arrow tip and the ball it points at
+      links:                    # dashed lines between consecutive balls (the path)
+        lw_pt: 0.75
+        dash_pt: [1.4, 1.0]     # dash, gap; stretched so each link holds whole dashes
+        min_dashes: 2
+        clear_in: 0.006         # free space at each ball
+      head_in: [0.045, 0.034]   # arrowhead [length, width], every arrow (line: style.LW_ARROW)
+      beside:                   # one arrow beside each branch of the path, on the right
+        offset_in: 0.065        # of the direction of travel, this far from the path
+        trim: [0.12, 0.06]      # fractions of the branch left out at the tail and the head
+        smooth_in: 0.03         # Gaussian smoothing (rounds corners of the path)
+      gap_in: 0.01              # between the snap arrow's ends and the balls
       snap_arc: {depart_deg: 110, arrive_deg: 85, height_in: 0.35}   # cubic: leaves the
                                 # fold ball, comes down onto the landing ball
       labels:                   # offset from the anchor [in] and horizontal alignment;
@@ -89,6 +97,14 @@ panel_a:
       s_label_in: [0.0, -0.22]  # s/L label, from the middle of the s axis
       lambda_label_in: [0.15, -0.12]  # lambda label, from the middle of the lambda axis
       energy_label_in: 0.07     # energy label, left of the energy axis
+    saddle:                     # the saddle branch (barrier between the valleys, ends at the fold)
+      lw_pt: 0.75
+      dashes: [3.0, 2.0]        # on, off, in line widths
+      halo_pt: 1.7              # white halo under the dashes ...
+      halo_alpha: 0.6           # ... and its opacity
+      label: saddle             # axes variant: name along the line ...
+      label_at: 0.5             # ... at this fraction of its length ...
+      label_offset_in: 0.045    # ... this far above it
   rods:
     size_in: [3.5, 0.5]
     placement_in: [0.0, 1.95]
@@ -114,7 +130,7 @@ panel_a:
       ghost_lw_pt: 0.8          # ... and line width
       label_x_in: 0.13          # centers of the names
       arrow_gap_in: 0.075       # arrows stop this far from the names' center lines
-      head_in: [0.045, 0.035]   # arrowhead [length, width]
+      head_in: [0.045, 0.034]   # arrowhead [length, width], as on the surface
   colorbar:
     horizontal_bar_in: [1.2, 0.08]
     horizontal_canvas_in: [1.62, 0.16]  # "0 [bar] 1 lambda", labels inline

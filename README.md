@@ -7,9 +7,9 @@ rather than an explicit forward dynamics model.
 
 This branch (`neural-control-core`) contains only the core method: the
 equilibrium simulator, the adjoint gradient tools, and one training script per
-task — the paper's point-to-point and trajectory-tracking tasks, plus pipe
-insertion. All three are the same adjoint neural control under different
-losses.
+task — the paper's point-to-point, trajectory-tracking and shape-formation
+tasks, plus pipe insertion. All four are the same adjoint neural control under
+different losses.
 
 ## How it works
 
@@ -21,8 +21,11 @@ boundary-actuation controller with those gradients:
 1. **`src/SimulatorEnv_2D.py` / `src/SimulatorEnv_3D.py`** — simulate the rod
    by solving for its equilibrium at each timestep, warm-started from the
    previous step so the solver stays on one equilibrium branch instead of
-   jumping between them. Pick one with `env.dim` in the config (see
-   [2D vs. 3D](#2d-vs-3d)).
+   jumping between them. `src/continuation.py` makes that literal: every
+   step follows the boundary path by continuation, keeps only stable
+   equilibria, and lets the rod fall into the next valley at a fold (see
+   [Quasi-static stepping](#quasi-static-stepping-continuation-stability-snap-through)).
+   Pick one with `env.dim` in the config (see [2D vs. 3D](#2d-vs-3d)).
 2. **`src/implicit_grad_tools.py`** — computes the adjoint gradient of the
    loss w.r.t. the controls, chaining the per-step equilibrium sensitivities
    across the whole horizon (`multistep_adjoint_gradient()`).
@@ -30,11 +33,14 @@ boundary-actuation controller with those gradients:
    (frozen tangent); see
    [Adjoint gradient: state or proxy](#adjoint-gradient-state-or-proxy).
 3. **`src/neural_control.py`** — the controller and the training step, shared
-   by all three task scripts: an MLP maps a continuation parameter
+   by all task scripts: an MLP maps a continuation parameter
    `λ ∈ [0, 1]` (progress through the control horizon) to boundary actuation
    rates, the rates are integrated into commands, and the adjoint gradient is
    handed to autograd as a surrogate, attached to the commands (`state`) or
-   to the rates (`proxy`). The three tasks differ only in their loss.
+   to the rates (`proxy`). The tasks differ only in their loss. What is done
+   with the gradient is `train.optimizer`: Adam at a fixed rate, or the
+   paper's backtracking line search on full rollouts (see
+   [Optimizer](#optimizer-adam-or-the-line-search-of-algorithm-1)).
 4. **Receding-horizon control (RHC)** — optional (`rhc.enabled` in
    `configs/default.yaml`). Splits the horizon into shorter segments,
    optimized and committed one at a time, warm-started from the previous
@@ -51,15 +57,17 @@ neural-control/
 ├── configs/
 │   ├── default.yaml            # Global config: rod/task/start pose/RHC/training params
 │   ├── example_3d.yaml         # Minimal 3D override (and example_3d_twist.yaml, with torsion)
-│   ├── task_90deg_pipe.yaml    # The pipe task
+│   ├── task_90deg_pipe.yaml    # The pipe task (and task_90deg_pipe_3d.yaml, in space)
 │   └── workspace_3d.yaml       # Gripper workspace variants (and no_workspace.yaml)
 ├── src/
 │   ├── SimulatorEnv_2D.py      # Equilibrium (Newton-Raphson) rod simulator, 2D
 │   ├── SimulatorEnv_3D.py      # Equilibrium (Newton-Raphson) rod simulator, 3D
-│   ├── newton.py               # The globalized Newton solve both simulators share
+│   ├── newton.py               # The globalized Newton solve both simulators share,
+│   │                           #   the stability test and the energy descent of the snap rule
+│   ├── continuation.py         # Quasi-static stepping: continuation, stability check, snap rule
 │   ├── energy.py               # Pluggable elastic-energy models (der, der3d, der3d_twist)
 │   ├── rodframes.py            # Bishop frame + twist holonomy (torsion)
-│   ├── contact.py              # Penalty-based obstacle contact forces (Circle/Sphere/pipe)
+│   ├── contact.py              # Penalty-based obstacle contact forces (Circle/Sphere, LPipe2D/LPipe3D)
 │   ├── implicit_grad_tools.py  # Adjoint / implicit-gradient computation (2D and 3D)
 │   ├── neural_control.py       # The controller, the rollout and the adjoint update
 │   ├── dlo_rrt.py              # RRT on a coarse rod, for the global-planning start
@@ -74,9 +82,12 @@ neural-control/
 │   ├── train_point_to_point.py # Task 1: the mid node reaches a target
 │   ├── train_tracking.py       # Task 2: the mid node follows a path
 │   ├── train_pipe.py           # Task 3: a free tip is pushed through a 90-degree pipe
+│   ├── train_shape.py          # Task 4: 3D shape formation, Adam vs the line search
 │   ├── check_twist.py          # Finite-difference validation of the torsion model
 │   ├── check_pipe_contact.py   # Finite-difference validation of the pipe contact model
-│   ├── check_grad_method.py    # The two adjoint gradients vs finite differences / by hand
+│   ├── check_grad_method.py    # The two adjoint gradients vs finite differences / by hand,
+│   │                           #   also across subdivided steps and a snap-through
+│   ├── check_continuation.py   # Regression of the quasi-static stepping (compression, flip)
 │   ├── snapshot_overlay.py     # Multi-frame DLO configuration visualization
 │   └── test_gpu.py             # MPS/GPU availability check
 ├── img/                        # README figures
@@ -483,9 +494,66 @@ Check in this order: the control is compressing the rod far past buckling
 rod is too stiff for the step size (`rod.E_al`, `rod.R_outer`); or the target
 is simply unreachable, so the policy drives the ends to extremes.
 
+## Quasi-static stepping: continuation, stability, snap-through
+
+A converged Newton solve is any stationary point of the potential
+`Π(q) = E + E_contact − W·q`, saddles included. Compressing a straight rod is
+the classic case: the straight, compressed configuration stays an exact
+equilibrium past the Euler load, Newton holds it, and the state-based
+gradient is then built on an equilibrium the rod would never be in. Which
+branch a rollout lands on also used to depend on the step size (`rod.dt`,
+`rod.total_time`): with fine steps the warm start followed the branch, with
+coarse ones Newton jumped. [`src/continuation.py`](src/continuation.py) makes
+the stepping satisfy the assumptions of the paper's Sec. III-A instead
+(`newton:` in the config; all on by default):
+
+| key | what it does |
+|---|---|
+| `initial_equilibrium` | the scripts solve the equilibrium at the initial control `u0` (by continuation from the pose that clamps the undeformed rod), require it to be stable, and take the rollout checkpoint there: the rollout starts from an equilibrium, not from the straight rod. `env.settle(u)` does it without advancing the horizon. Tracking's ready pose already did this and is unchanged. |
+| `continuation`, `max_substeps` | when Newton fails or lands on an unstable point, the step is cut into 2, 4, 8, … (up to `max_substeps`) substeps along the straight *pose* path from the previous command `u_prev` (kept in the env's state), each mapped through `Γ = _control_node_from_pose` and warm-started from the last. Interpolating the clamped nodes directly would change the length of the clamped edge. The branch is then set by the continuous boundary path, not by `N`. |
+| `stability_check` | after every converged solve, substeps included, `J_ff` is factored by Cholesky; success means a strict local minimum (Assumption 2). Failure triggers the subdivision, and at the finest level the snap rule. `info["stable"]` reports it (None when the check is off). |
+| `snap_rule`, `snap_max_iter`, `snap_kick` | when the finest substep still has no stable equilibrium, the boundary path has crossed a fold: `Π` is descended under that substep's boundary from the last stable state — Newton with the Hessian shifted until positive definite, Armijo backtracking on `Π` itself (not on the residual norm), a final Cholesky — which is the overdamped snap-through, and the remaining substeps continue from the minimum reached. A start that is itself a stationary point (the symmetric compressed rod) is left along the most negative curvature by `snap_kick` metres with a deterministic sign, so a symmetric buckling problem buckles. `SphereObstacle`/`CircleObstacle` gained the energy this needs. |
+| `snap_disp_ratio`, `snap_disp_eps` | a fold crossed with a small step is often resolved by Newton itself, landing straight on the next valley's minimum; the paper's displacement indicator (eq. 23) flags that too: free nodes moving by more than `snap_disp_ratio` × the clamped nodes + `snap_disp_eps` rod lengths. On the twist example the onset of buckling stays below 13× and 0.03 m per step; an arch flipping over reaches 90–470× and 0.4–0.6 m. |
+
+`env.step()` returns, besides `q`, `J` and `converged`: `substeps`,
+`newton_iterations` (summed over every solve the step made), `stable`,
+`snap` with `snap_by` (`descent`, `displacement` or `both`) and `snaps` (energy
+drop, largest node displacement, position along the step), and the step's
+free-node and clamped-node displacements. `J` is always the Jacobian at the
+state the step ends in, after substeps and snaps, since the adjoint consumes
+it. `env.n_unstable` and `env.n_snaps` count across a run.
+
+With all four switches off a step is the single warm-started Newton solve it
+used to be, bit for bit (checked on scripted rollouts in 2D, 3D, 3D + twist
+and the pipe, and on three-epoch training runs of all three task scripts).
+The former 2D-only `max_substeps` retry and the `stability_check` nudge
+(`stability_perturbation`) are folded into these switches; a config that
+still sets `stability_perturbation` is rejected with a pointer here, and
+`configs/task_90deg_pipe.yaml` now lists the switches it needs.
+
+`python scripts/check_continuation.py` is the regression: on
+`configs/example_3d_twist.yaml` (nv = 21) the right end is pushed 0.3 m along
+−x from the equilibrium at `u0` in N = 10, 50 and 200 steps. Every step is
+stable, the rod bends *down* to a mid node at z = −0.303 m, and the three
+final shapes agree to 1e-4 mm; the old flow (no equilibrium at `u0`, every
+switch off, N = 10) ends on the compressed straight rod, an unstable state.
+Turning the arch's end tangent down then flips it to the upward arch through
+a snap, flagged at the fold for N = 25 … 200, with the same landing shape to
+1e-4 mm. `check_grad_method.py` (its check 6) verifies the state gradient
+across a step that had to be subdivided and across a snap-through: the snap
+happens at the same step for the policy and both finite-difference
+perturbations, and the gradient matches central differences to 6e-11 and
+5e-11 (tolerance 1e-6) — on one branch the end state is a function of the
+current boundary, and after the snap the rollout is on the next branch,
+where that holds again.
+
+Cost: a step that crosses a fold climbs the whole subdivision ladder before
+the descent runs (the flip above takes 60–110 s per rollout at nv = 21),
+while a regular step costs what it did.
+
 ## Usage
 
-Run everything from the `neural-control/` directory. All three tasks are the
+Run everything from the `neural-control/` directory. All four tasks are the
 same adjoint neural control; they differ in their loss.
 
 ```bash
@@ -497,9 +565,17 @@ python scripts/train_tracking.py
 
 # Task 3: pipe insertion -- a free tip is pushed round a 90-degree bend
 python scripts/train_pipe.py --config configs/task_90deg_pipe.yaml
+python scripts/train_pipe.py --config configs/task_90deg_pipe_3d.yaml --optimizer linesearch   # in space
+
+# Task 4: 3D shape formation -- every free node reaches a target shape
+python scripts/train_shape.py targets --out experiments/shape_formation
+python scripts/train_shape.py --target S1 --optimizer linesearch --seed 0 --out experiments/shape_formation
 
 # Any of them with a custom config (2D or 3D, set env.dim there)
 python scripts/train_point_to_point.py --config configs/my_experiment.yaml
+
+# The optimizer (train.optimizer): adam, or the paper's line search
+python scripts/train_point_to_point.py --optimizer linesearch
 
 # Visualize a scripted boundary motion as overlaid snapshots (2D)
 python scripts/snapshot_overlay.py --traj moving_forward
@@ -533,6 +609,158 @@ python scripts/train_tracking.py report --out experiments/tracking
 A fitted policy is already close, so fine-tuning wants a smaller learning rate
 than training from scratch (`--lr 1e-4`); at the default `1e-3` the first
 updates knock it off the plan. Tracking does this for `rrt_nc` by default.
+
+## Optimizer: Adam, or the line search of Algorithm 1
+
+`train.optimizer` (default `adam`), overridden by `--optimizer` on every task
+script, picks what the training loop does with the gradient; the choice is
+printed at startup and recorded in the run's `config.yaml`, `summary.json`
+and `<job>.json` (line-search jobs get a `_ls` suffix).
+
+- `adam` — the original loop, unchanged: Adam at `train.lr`, gradient-norm
+  clipping at 1, every step accepted; the workspace is a straight-through
+  projection plus a penalty.
+- `linesearch` — Algorithm 1 of the paper (`neural_control.LineSearch`).
+  Each round takes the `state` gradient `g` at the current weights `ξ`, forms
+  the direction `d` as the step Adam *would* take (the moment estimates are
+  updated once per round with this `g`; the step is computed, not applied)
+  and falls back to `d = −g` when `g·d ≥ 0`. Then, from `τ = 1`, the trial
+  `ξ + τ d` is rolled out and accepted only if the Armijo condition
+  `L(ξ + τ d) ≤ L(ξ) + c τ g·d` **and** the task's rule hold; otherwise τ is
+  halved, and below `τ_min` training stops with the reason recorded
+  (`train.linesearch.c`, `train.linesearch.tau_min`). The accepted trial's
+  rollout (its `q` and `J`) is the one the next gradient is built from, so
+  only rejected trials cost extra rollouts. Single-horizon training only.
+
+The rule (`neural_control.trial_rule`): any Newton failure, any step that
+ended on an unstable equilibrium, or any executed command outside the
+workspace rejects the trial — there is no projection in this mode, the policy
+has to keep the gripper inside — and so does a rollout that leaves the
+model's domain (the gripper tangent turned vertical, where the yaw director
+is singular). A snap-through is admitted for a terminal objective
+(point-to-point, shape) when it passes Armijo, and rejected for a trajectory
+objective (tracking, pipe), which has to stay on the branch of the initial
+equilibrium. The runs record, per round, the accepted τ, the rejected trials
+and their reasons, the cumulative number of rollouts, and the snaps of the
+accepted rollout.
+
+## Shape formation: Adam versus the line search
+
+`scripts/train_shape.py` is the comparison. The loss is the mean over the
+non-clamped nodes of the squared distance to a target shape (the gripper yaws
+do not enter it), on `configs/example_3d_twist.yaml` (nv = 21, 100 steps)
+with the workspace off, no obstacles, and the `state` gradient. The targets
+are reachable by construction: each is the end shape of a scripted gripper
+path rolled out with the full stepping above — S1 and S2 compress the rod and
+move the gripper out of the plane with a yaw, S3 compresses the rod into the
+downward arch and then turns the tangent down, so its reference path flips
+the arch through a snap-through (flagged at steps 54–55 of 100). Both
+optimizers start from the same random policy per seed, at Adam's learning
+rate (0.005), for 100 epochs, three seeds per target.
+
+```bash
+python scripts/train_shape.py targets --out experiments/shape_formation
+python scripts/train_shape.py jobs --out experiments/shape_formation --epochs 100 > jobs.txt
+cat jobs.txt | xargs -P 14 -I{} bash -c "{}"
+python scripts/train_shape.py report --out experiments/shape_formation
+```
+
+Each job writes `<job>.png` (final rod against the target) and, with
+`output.save_gif`, `<job>.gif` (the final rollout frame by frame). `report`
+writes `report.md` with the per-run table (final and best rms error,
+rollouts, rejected trials, snaps, Newton failures, unstable steps, time),
+`curves.png` (error against updates, rollouts and wall time) and
+`shapes.png` (final shapes against the targets). Every figure and animation
+of every task draws the obstacles translucently and the gripper frames at
+the clamped ends (x along the tangent, y the yaw director, z = x × y;
+`utils.draw_obstacles`, `utils.draw_gripper_frames`). With torsion the
+animation also shows the material frame of the *middle edge* -- t, m1, m2 --
+at that edge's midpoint: in the discrete elastic rod (Bergou et al. 2008,
+Sec. 4.2) frames belong to edges, a vertex carries only curvature and twist,
+so there is no "orientation of the mid node" to draw.
+
+Results (100 epochs, 3 seeds; final rms shape error in mm per seed, then the totals over the three seeds):
+
+| target | optimizer | final rms, seeds 0 / 1 / 2 [mm] | rollouts | rejected trials | snaps in rollouts | Newton failures | unstable steps | train time [min] |
+|---|---|---|---|---|---|---|---|---|
+| S1 | Adam | 27.5 / 18.8 / 10.4 | 300 | 0 | 39 | 0 | 0 | 111 |
+| S1 | line search | 23.1 / 47.3* / 16.2 | 452 | 222 | 0 | 0 | 0 | 138 |
+| S2 | Adam | 14.1 / 15.3 / 10.4 | 300 | 0 | 2 | 0 | 0 | 123 |
+| S2 | line search | 9.3 / 17.0 / 2.9 | 710 | 407 | 0 | 0 | 0 | 216 |
+| S3 | Adam | 14.1 / 5.4 / 6.5 | 300 | 0 | 155 | 0 | 0 | 102 |
+| S3 | line search | 4.8 / 54.6* / 8.8 | 512 | 288 | 59 | 0 | 0 | 124 |
+
+`*` = the line search stopped before epoch 100: S3 seed 1 at epoch 21 (no
+step passed Armijo down to τ_min; its rollouts snapped on every round, and
+across a snap the loss is not continuous in ξ), S1 seed 1 at epoch 27 (the
+policy had turned the gripper tangent to the vertical, where the yaw
+director is singular and every trial rolls out into an error; the gripper
+workspace, off in this experiment, is what normally keeps |φ| ≤ 60°).
+
+What the runs show (`experiments/shape_formation/report.md`, `curves.png`,
+`shapes.png`):
+
+- Both optimizers reach the targets to 3–28 mm (median final error 14.1 mm
+  for Adam, 16.2 mm for the line search), with no Newton failure and no
+  unstable step in any of the 18 runs: the stepping kept every rollout on
+  stable equilibria, snaps included.
+- The line search is monotone by construction; Adam's error oscillates by up
+  to 2× between consecutive epochs. Per update the line search is ahead early
+  (on S3 it reaches 10 mm in 9 updates where Adam needs 61), per rollout and
+  per wall time the two are comparable: the line search spends about half of
+  its rollouts on rejected trials (median 185 rollouts and 98 rejections per
+  100 epochs, 1.5× Adam's wall time), almost all of them Armijo rejections.
+  That is the cost of restarting from τ = 1 each round with Adam's direction,
+  whose length is set by the learning rate rather than by the gradient, so
+  late in training the full step overshoots and τ settles at 1/32.
+- On S3, whose target lies past a fold, the accepted rollouts snap: Adam's
+  did so on 71–82 of 100 epochs for two seeds, the line search admitted 5
+  snapping rollouts for one seed and ended best there (4.8 mm). Where a snap
+  sits on the boundary of the current branch the loss jumps, and the line
+  search stops rather than stepping across (S3 seed 1); Adam steps across
+  regardless.
+
+## Pipe insertion in space
+
+`configs/task_90deg_pipe_3d.yaml` is the pipe task in 3D: two cylindrical
+bores of radius 0.1 m meeting at a right angle (`contact.LPipe3D`, the sharp
+corner of the 2D task with the channel walls replaced by radial distances
+from the bore axes, same C2 blends, sampling, penalty and Hessian; its force
+and Jacobian match finite differences to 1e-10), the rod gripped at the right
+end only (`env.grasp_mode: right`, now allowed in 3D without torsion -- a
+free end has no yaw), five gripper DOFs. The target is **on the far wall of
+the second bore**, not on its centerline: a rod pushed round the corner
+presses against the outer wall and cannot spring back to the middle, so
+centerline points past the corner are unreachable. `LPipe3D.far_wall_point(s)`
+gives such points; the config's target is 0.25 m below the corner, 1 mm off
+the wall (exactly on it the clearance is zero and the feasibility check
+reads it as unreachable). `train_pipe.py` runs both dimensions; the 3D
+figure and animation draw the bores translucently with the gripper frame.
+
+Results (`configs/task_90deg_pipe_3d.yaml`, 60 epochs, lr 1e-3, 100 steps, nv = 51):
+
+| optimizer | epochs run | rollouts | best loss (epoch) | final tip error [mm] | tip past the corner | max penetration [mm] | snaps | unstable steps | stopped |
+|---|---|---|---|---|---|---|---|---|---|
+| Adam | 60 | 60 | 6.55e-04 (32) | 16.1 | yes (second bore, on the far wall) | 0.059 | 69 | 0 | - |
+| line search | 9 | 59 (50 rejected) | 6.65e-02 (8) | 249.7 | no (jammed in the corner) | 0.000 | 0 | 0 | epoch 8: no step accepted down to tau = 0.00012207 (last: workspace) |
+
+Adam (the policy of its best epoch, 32, is the one executed) steers the tip
+round the corner and down the far wall of the second bore to 16 mm of the
+target (the tip ends at x = −0.248 m, pressed on the wall as expected; the
+remaining error is along the bore), just outside the 10 mm tolerance, with
+every step converged and stable. Its loss curve is two-valued: in 9 of
+60 epochs the rollout turns the tip down the second bore (loss ~1e-3), in
+the others it jams in the corner (loss ~0.1), and Adam's fixed step keeps
+crossing between the two outcomes -- the branch the contact selects is not
+continuous in the weights. The line search stops at epoch 8: the policy has
+pushed the gripper to the workspace's x limit (0.48 m, 0.52 m of rod fed)
+while the rod jams and buckles in the corner, the gradient still asks for
+more feed, and under the hard workspace rule every trial along that
+direction leaves the box, down to τ_min. That is Algorithm 1 as specified
+(every accepted iterate inside W, stop when no step is accepted); what the
+task needs there is a tilt of the gripper, not more feed, and the gradient
+at the boundary does not say so. A soft barrier near the workspace boundary
+in line-search mode, or a wider box, would be the ways out.
 
 ## Adjoint gradient: state or proxy
 
@@ -574,7 +802,8 @@ Pipe runs each get their own time-stamped directory.
 
 `python scripts/check_grad_method.py` checks both on 21-node rods in 2D, 3D
 and 3D + twist. `state` matches central differences of the rollout loss to
-1e-9 or better, and `proxy` matches its own formula assembled by hand from
+1e-9 or better (also across a subdivided step and a snap-through, its check
+6), and `proxy` matches its own formula assembled by hand from
 explicit `S_j` to ~1e-11. On those 8-step rollouts (a random policy, no
 workspace) the two gradients differ by 40–270%: their cosine is 0.88–0.99,
 except for a terminal loss in 3D and 3D + twist, where it drops to 0.18 and
@@ -719,6 +948,10 @@ the whole horizon rather than the last segment.
   rather than the paper's 101, for faster iteration.
 - The pipe task and the RRT global-planning start are additions, not part of
   the paper.
+- The quasi-static stepping (continuation, stability check, snap rule) and
+  the line search are the paper's Sec. III-A and Algorithm 1; the snap rule's
+  energy descent is this repository's way of making the post-fold state
+  definite, and the displacement indicator is the paper's eq. (23).
 
 ## Torsion and gripper yaw
 

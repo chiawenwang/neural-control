@@ -28,6 +28,7 @@ LW_DATA = 1.0                   # curves, rods
 LW_DATA_THIN = 0.8              # snapshots, secondary data
 LW_DATA_THICK = 1.2             # final shape, realized path
 LW_AUX = 0.5                    # outlines, axes, dashed guides
+LW_ARROW = 0.6                  # process arrows (one style for all of them)
 
 # --- colors -----------------------------------------------------------------
 INK = "#1A1A1A"                 # text and axes
