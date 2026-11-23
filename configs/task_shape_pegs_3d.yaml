@@ -1,0 +1,87 @@
+# =============================================================================
+# Shape formation in 3D with gravity and two pegs: every free node of the rod
+# reaches a target shape that rests on both pegs; the start touches neither.
+#
+#   python scripts/train_shape.py targets --config configs/task_shape_pegs_3d.yaml --out DIR
+#   python scripts/train_shape.py --config configs/task_shape_pegs_3d.yaml --target P1 --out DIR
+#
+# Start pose (as configs/task_tracking_peg_3d.yaml): the left end is clamped
+# at the origin pointing straight UP (phi = pi/2), the right gripper is
+# horizontal (tangent +x) at (0.62, 0, 0.62): a quarter arc, convex towards
+# upper-left. train_shape.py starts from the equilibrium at u0
+# (newton.initial_equilibrium), no ready motion.
+#
+# Pegs and targets were FOUND and CHECKED by
+#   python scripts/check_targets.py --config configs/task_shape_pegs_3d.yaml --mode shape
+# (2026-11-20, experiments/target_check/shape_pegs_3d): 6323 sampled stable
+# shapes of the free rod; the peg pair 259 of them touch (one peg on the
+# clamp-side half, one on the gripper-side half, start rod >= 3 cm from both);
+# 12 straight moves rolled out by train_shape.build_target, free and with the
+# pegs; 5 passed, P1-P3 are the 3 farthest apart. Each target: every step
+# converged and stable, no snap, neither peg touched in the first 30 % of the
+# path, both touched at the end (contact forces 1.5-3.1 N; the free move
+# would end 5-20 mm inside each peg). Both pegs sit on the convex side of the
+# arc: moving the gripper in and down bulges the rod onto them, the lower one
+# at node 8 (s = 0.27 m), the upper one at node 18-19 (s = 0.6 m).
+#   P1  y -> -0.18 m, rms change from the start 141 mm (pegs: 9 mm of it)
+#   P2  y -> +0.13 m, tangent tilted down (phi +0.39), 122 mm (pegs: 16 mm)
+#   P3  nearly in-plane, 57 mm (pegs: 30 mm)
+# The pegs cannot sit where the build-time straight rod (x-axis) would cut
+# them: build_env checks them against it, before the start pose exists.
+# =============================================================================
+env:
+  dim: 3
+  grasp_mode: both              # left end fixed at u_left_*, right end driven
+rod:
+  material: soft_strip          # EI = 0.127 N*m^2, sags visibly under gravity
+  twist: true
+  nv: 31                        # node spacing 3.3 cm (< peg radius); a 100-step rollout ~15 s
+  dt: 0.01
+  total_time: 1.0               # -> 100 control steps, as the S1-S3 experiment
+  rod_length: 1.0
+  max_newton_iter: 200
+  gravity: [0.0, 0.0, -9.81]
+start:
+  u_left_3d:  [0.0, 0.0, 0.0, 0.0, 1.5708]   # (x, y, z, theta, phi): tangent straight up
+  u_right_3d: [0.62, 0.0, 0.62, 0.0, 0.0]    # horizontal gripper, tangent +x
+  u_left_twist:  [0.0, 0.0, 0.0, 0.0, 1.5708, 0.0]
+  u_right_twist: [0.62, 0.0, 0.62, 0.0, 0.0, 0.0]
+task:
+  shape_targets:                # straight moves u0 -> u0 + du of the right gripper (x, y, z, theta, phi, yaw)
+    P1:
+      du: [-0.0821, -0.1843, -0.0367, -0.0124, 0.1182, 0.0000]
+      description: "straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (touching from steps [62, 60], nodes [8, 19])"
+    P2:
+      du: [-0.0851, 0.1299, 0.0326, -0.0160, 0.3858, 0.0000]
+      description: "straight move du = [-0.085, 0.13, 0.033, -0.016, 0.386, 0.0] onto both pegs (touching from steps [64, 63], nodes [8, 19])"
+    P3:
+      du: [-0.0496, -0.0173, -0.0412, -0.0342, 0.0464, 0.0000]
+      description: "straight move du = [-0.05, -0.017, -0.041, -0.034, 0.046, 0.0] onto both pegs (touching from steps [80, 82], nodes [8, 18])"
+peg:
+  enabled: true
+  center_xz: [-0.030, 0.280]    # clamp side: left of the rising part, 30 mm from the start rod
+  center_y: 0.0
+  half_length_y: 0.25           # a 0.5 m bar across the x-z plane of the start
+  radius: 0.04                  # > node spacing 0.033 m
+  k_contact: 1.0e+7
+  extra:
+    - {center_xz: [0.160, 0.560], center_y: 0.0}   # gripper side: above the arc, 37 mm from the start rod
+workspace:
+  enabled: true                 # check_targets.py samples in it; train_shape.py switches it off
+  position_min_3d: [0.20, -0.40, 0.20]   # the gripper starts at (0.62, 0, 0.62)
+  position_max_3d: [1.00, 0.40, 0.95]
+  orientation_limits_3d: [[-1.0, 1.0], [-1.0, 1.0]]   # theta, phi [rad]
+newton:
+  continuation: true
+  max_substeps: 64
+  stability_check: true
+  snap_rule: true
+train:
+  grad_method: state
+  optimizer: adam
+  epochs: 100
+  lr: 0.005                     # as the S1-S3 experiment; not tuned for this scene
+  device: auto
+output:
+  experiment_name: shape_pegs_3d
+  save_gif: true

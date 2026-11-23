@@ -31,6 +31,14 @@ Usage
     python scripts/train_shape.py --target S1 --optimizer linesearch --seed 0 --out DIR
     python scripts/train_shape.py jobs --out DIR             # the 18 commands of the comparison
     python scripts/train_shape.py report --out DIR           # table, curves, shape figures
+
+A config with ``task.shape_targets`` brings its own targets instead of S1-S3
+(straight gripper moves ``u0 -> u0 + du``), e.g. P1-P3 of
+configs/task_shape_pegs_3d.yaml.  Pass that config to every command:
+
+    python scripts/train_shape.py targets --config configs/task_shape_pegs_3d.yaml --out DIR
+    python scripts/train_shape.py train   --config configs/task_shape_pegs_3d.yaml --out DIR --target P2
+    python scripts/train_shape.py train --out DIR --help     # lists the targets built in DIR
 """
 import sys
 from pathlib import Path
@@ -92,6 +100,27 @@ TARGET_PATHS = {
 }
 
 
+def target_paths(cfg):
+    """The config's ``task.shape_targets`` as ``{name: (description, path)}``, or ``TARGET_PATHS``.
+
+    A config target is the straight move ``lambda * du`` of the right gripper.
+    """
+    named = (cfg.get("task") or {}).get("shape_targets") or {}
+    if not named:
+        return TARGET_PATHS
+    return {name: (t.get("description", f"straight move du = {list(t['du'])}"),
+                   lambda l, du=np.array(t["du"], dtype=float): l * du)
+            for name, t in named.items()}
+
+
+def check_names(names, paths):
+    """``names`` (all of ``paths`` when None), each one of them."""
+    bad = [n for n in (names or []) if n not in paths]
+    if bad:
+        raise SystemExit(f"unknown target(s) {bad}; this config has {sorted(paths)}")
+    return list(names or paths)
+
+
 def experiment_config(path):
     """The experiment's config: the twist example, workspace off, state gradient."""
     cfg = load_config(path)
@@ -124,16 +153,16 @@ def shape_rms(env, X, target_shape, nodes):
     return float(np.sqrt(np.mean(np.sum(d * d, axis=1))))
 
 
-def build_target(cfg, env, checkpoint, u0, name):
+def build_target(env, checkpoint, u0, name, desc, path):
     """Roll the scripted path out and record its end shape and what happened on the way."""
-    desc, path = TARGET_PATHS[name]
+    k_end = len(u0) // 2                          # first DOF of the right gripper
     N = env.Nsteps
     env.set_state(checkpoint)
     U, shapes, steps = [], [], []
     t0 = time.time()
     for k in range(1, N + 1):
         u = u0.copy()
-        u[6:] += path(k / N)
+        u[k_end:] += path(k / N)
         _, _, info = env.step(u)
         if not info["converged"]:
             raise RuntimeError(f"target {name}: Newton failed at step {k} ({info['reason']})")
@@ -168,19 +197,23 @@ def cmd_targets(args):
     u0 = initial_control(cfg)
     out = Path(args.out) / "targets"
     out.mkdir(parents=True, exist_ok=True)
-    print(f"Rod: {material_summary(cfg)}\nHorizon: {env.Nsteps} steps, nv = {env.nv}")
-    for name in (args.targets or TARGET_PATHS):
-        rec, arrs = build_target(cfg, env, checkpoint, u0, name)
+    paths = target_paths(cfg)
+    names = check_names(args.targets, paths)
+    print(f"Rod: {material_summary(cfg)}\nHorizon: {env.Nsteps} steps, nv = {env.nv}, "
+          f"{len(env.obstacles)} obstacle(s)")
+    for name in names:
+        rec, arrs = build_target(env, checkpoint, u0, name, *paths[name])
+        rec["config"] = str(args.config)              # train names it if the configs differ
         np.savez_compressed(out / f"{name}.npz", **arrs)
         json.dump(rec, open(out / f"{name}.json", "w"), indent=1, default=float)
         print(f"[{name}] {rec['description']}\n       mid {np.round(rec['mid_final'], 3).tolist()}, "
               f"y in {np.round(rec['extent']['y'], 3).tolist()}, z in {np.round(rec['extent']['z'], 3).tolist()}; "
               f"snaps at steps {rec['snap_steps'] or 'none'}, max substeps {rec['max_substeps']}, "
               f"{rec['newton_iterations']} Newton iterations, {rec['rollout_time']:.0f}s", flush=True)
-    plot_targets(out, list(args.targets or TARGET_PATHS))
+    plot_targets(out, names, env)
 
 
-def plot_targets(out, names):
+def plot_targets(out, names, env=None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -194,13 +227,27 @@ def plot_targets(out, names):
             ax.plot(S[k, :, 0], S[k, :, 1], S[k, :, 2], color=INK2, lw=0.6, alpha=0.35)
         ax.plot(z["shape"][:, 0], z["shape"][:, 1], z["shape"][:, 2], color=INK, lw=2.2)
         ax.plot([0], [0], [0], "s", color=INK2, ms=5)
-        _axes3d(ax, f"{name}" + (f" (snap at step {rec['snap_steps'][0]})" if rec["snap_steps"] else ""))
+        if env is not None:
+            draw_obstacles(ax, env)
+        _axes3d(ax, f"{name}" + (f" (snap at step {rec['snap_steps'][0]})" if rec["snap_steps"] else ""),
+                pts=S.reshape(-1, 3) if env is not None and env.obstacles else None)
     fig.tight_layout()
     fig.savefig(out / "targets.png", dpi=140)
     plt.close(fig)
 
 
+def built_targets(out):
+    """Names of the targets built in ``out``/targets (both .json and .npz there)."""
+    d = Path(out) / "targets"
+    if not d.is_dir():
+        return []
+    return sorted(p.stem for p in d.glob("*.json") if (d / f"{p.stem}.npz").exists())
+
+
 def load_target(out, name):
+    if not (Path(out) / "targets" / f"{name}.json").exists():
+        raise SystemExit(f"no target {name} in {Path(out) / 'targets'}; build it with the "
+                         "`targets` command (or scripts/check_targets.py --mode shape)")
     z = np.load(Path(out) / "targets" / f"{name}.npz")
     rec = json.load(open(Path(out) / "targets" / f"{name}.json"))
     return z["shape"], rec
@@ -362,6 +409,14 @@ def cmd_train(args):
     settle_initial(env, cfg)
     checkpoint = env.get_state()
     target_shape, target_rec = load_target(args.out, args.target)
+    # A target belongs to the config it was built with: P1-P3 to
+    # task_shape_pegs_3d.yaml, S1-S3 to the default config.  The nv/N check
+    # below cannot tell such configs apart, so check the name first.
+    names = target_paths(cfg)
+    if args.target not in names:
+        hint = target_rec.get("config") or "configs/task_shape_pegs_3d.yaml"
+        raise SystemExit(f"target {args.target} is not a target of {args.config}, which has "
+                         f"{sorted(names)}; pass the config it was built with: --config {hint}")
     if target_rec["nv"] != env.nv or target_rec["N"] != env.Nsteps:
         raise SystemExit(f"target {args.target} was built for nv={target_rec['nv']}, "
                          f"N={target_rec['N']}; this config has nv={env.nv}, N={env.Nsteps}")
@@ -381,6 +436,11 @@ def cmd_train(args):
                     enabled=bool((cfg.get("output") or {}).get("run_log", True)))
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    # This run's own folder, OUT/runs/<time>-<name>/: its figure, gif and data
+    # are kept there, so a rerun never overwrites them.  OUT/<name>.json/.npz
+    # stay the latest result of this job, which `report` collects.
+    run_dir = Path(run.artifact_dir) if getattr(run, "artifact_dir", None) else out
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     print("Task: 3D shape formation  (adjoint neural control)")
     print(f"Optimizer: {optimizer}  ({'--optimizer' if args.optimizer else 'train.optimizer'})"
@@ -388,7 +448,8 @@ def cmd_train(args):
              if optimizer == "linesearch" else ""))
     print(f"Adjoint gradient: {cfg.train.grad_method}")
     print(f"Environment: {type(env).__name__}  (dim={dim}, twist={twist}, "
-          f"control={control_dim(dim, twist)}D), workspace off, no obstacles")
+          f"control={control_dim(dim, twist)}D), workspace off, "
+          f"{len(env.obstacles) or 'no'} obstacle(s)")
     print(f"Rod material: {material_summary(cfg)}")
     print(f"Target: {args.target} -- {target_rec['description']}"
           + (f"; its reference path snaps at step {target_rec['snap_steps']}" if target_rec["snap_steps"] else ""))
@@ -427,14 +488,15 @@ def cmd_train(args):
               "epoch_u_paths": np.array(hist["u_paths"], dtype=np.float32)}
     if "shape" in final:
         arrays["final_shape"] = final["shape"]
-    np.savez_compressed(out / f"{name}.npz", **arrays)
-    json.dump(summary, open(out / f"{name}.json", "w"), indent=1, default=float)
+    for d in dict.fromkeys([run_dir, out]):       # this run's copy, then the latest for `report`
+        np.savez_compressed(d / f"{name}.npz", **arrays)
+        json.dump(summary, open(d / f"{name}.json", "w"), indent=1, default=float)
 
     if "shape" in final:
-        plot_shape_result(out / f"{name}.png", target_shape, final["q"], env,
+        plot_shape_result(run_dir / name, target_shape, final["q"], env,      # .pdf/.svg/.png
                           f"{name}: rms {final['rms'] * 1e3:.1f} mm")
-    # The final rollout, frame by frame, next to the job's png (output.save_gif).
-    maybe_save_trajectory_gif(cfg, final["q_list"], env, None, save_path=str(out),
+    # The final rollout, frame by frame, next to the run's figure (output.save_gif).
+    maybe_save_trajectory_gif(cfg, final["q_list"], env, None, save_path=str(run_dir),
                               filename=f"{name}.gif", title=f"shape formation {name}",
                               gripper_node=env.nv - 1, target_shape=target_shape)
     run.finish(task="shape", target_name=args.target, optimizer=optimizer,
@@ -447,6 +509,7 @@ def cmd_train(args):
     print(f"[{name}] done: final rms {('%.2f mm' % (final['rms'] * 1e3)) if 'rms' in final else 'n/a'}, "
           f"{summary['rollouts_total']} rollouts, {summary['rejected_total']} rejected, "
           f"{env.n_snaps} snaps, {env.n_unstable} unstable steps, train {t_train:.0f}s", flush=True)
+    print(f"[{name}] figure, gif, data -> {run_dir}", flush=True)
 
 
 # ---------------------------------------------------------------- figures
@@ -472,40 +535,45 @@ def _style(ax):
     ax.tick_params(colors=INK2, labelsize=8)
 
 
-def _axes3d(ax, title):
+def _axes3d(ax, title, pts=None):
+    """Axis labels and limits: the S1-S3 box, or a box around ``pts`` (n, 3) at equal scale."""
     ax.set_xlabel("x [m]", color=INK2, fontsize=8)
     ax.set_ylabel("y [m]", color=INK2, fontsize=8)
     ax.set_zlabel("z [m]", color=INK2, fontsize=8)
-    ax.set_xlim(-0.05, 1.05)
-    ax.set_ylim(-0.4, 0.4)
-    ax.set_zlim(-0.45, 0.45)
+    if pts is None:
+        lims = np.array([[-0.05, 1.05], [-0.4, 0.4], [-0.45, 0.45]])
+    else:
+        pts = np.asarray(pts, dtype=float)
+        lo, hi = pts.min(0) - 0.08, pts.max(0) + 0.08
+        c, h = 0.5 * (lo + hi), 0.5 * (hi - lo)
+        h[1] = max(h[1], 0.25)
+        lims = np.column_stack([c - h, c + h])
+    ax.set_xlim(*lims[0])
+    ax.set_ylim(*lims[1])
+    ax.set_zlim(*lims[2])
     ax.tick_params(labelsize=7, colors=INK2)
     try:
-        ax.set_box_aspect((1.1, 0.8, 0.9))
+        ax.set_box_aspect(tuple(lims[:, 1] - lims[:, 0]))
     except AttributeError:
         pass
     ax.set_title(title, color=INK, fontsize=9)
 
 
-def plot_shape_result(path, target_shape, q, env, title):
+def plot_shape_result(path, target_shape, q, env, title, view=(22, -58), workspace="off",
+                      margin=0.04, limits=None):
     """Final rod (from the full DOF vector ``q``) against the target, with the
-    obstacles and the gripper frames."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    shape = env.positions(q)
-    fig = plt.figure(figsize=(6, 5))
-    ax = fig.add_subplot(111, projection="3d")
-    ax.plot(target_shape[:, 0], target_shape[:, 1], target_shape[:, 2], color=INK, lw=2.4, label="target")
-    ax.plot(shape[:, 0], shape[:, 1], shape[:, 2], color=COLORS["adam"], lw=1.6, label="final rollout")
-    draw_obstacles(ax, env)
-    draw_gripper_frames(ax, env, q, 0.1 * env.rod_length)
-    gripper_frame_legend(ax, 3)
-    _axes3d(ax, title)
-    ax.legend(fontsize=7, frameon=False)
-    fig.tight_layout()
-    fig.savefig(path, dpi=130)
-    plt.close(fig)
+    obstacles and the gripper frames -- paper figure, drawn by
+    ``utils.paper_scene`` in the IEEE T-RO style of every task figure:
+    ``path`` .pdf/.svg (editable text) + .png; returns the paths.
+
+    ``workspace="off"``: this experiment always switches the workspace off
+    (``experiment_config``), so the config's box is not a constraint here and
+    is not drawn."""
+    from utils import paper_scene
+    return paper_scene(path, env, rod_final=q, rod_labels=("Initial rod", "Final shape"),
+                       curves=[(target_shape, "reference", "Target shape")], frames_q=q,
+                       title=title, view=view, workspace=workspace, margin=margin,
+                       limits=limits)
 
 
 # ---------------------------------------------------------------- report
@@ -551,9 +619,10 @@ def report(out, config=None):
     targets = sorted({r["target_name"] for r in runs})
     opts = [o for o in ("adam", "linesearch") if any(r["optimizer"] == o for r in runs)]
     N, nv = runs[0]["N"], runs[0]["nv"]
+    obstacles = f"{len(env.obstacles)} obstacle(s)" if env.obstacles else "no obstacles"
     L = ["# 3D shape formation: Adam versus the line search of Algorithm 1", "",
-         f"Rod of {nv} nodes with twist (configs/example_3d_twist.yaml), {N} control steps, workspace "
-         "off, no obstacles, `state` gradient. Loss = mean over the free nodes of |x_i - x_i*|^2; "
+         f"Rod of {nv} nodes with twist ({config or DEFAULT_CONFIG}), {N} control steps, workspace "
+         f"off, {obstacles}, `state` gradient. Loss = mean over the free nodes of |x_i - x_i*|^2; "
          "'rms' is its square root. Both optimizers start from the same random policy per seed "
          "(same initialization, learning rate = Adam's). 'epoch k' = the rollout before the k-th "
          "update; 'final' = the policy after the last accepted update. 'rollouts' counts every "
@@ -666,7 +735,8 @@ def report(out, config=None):
         draw_obstacles(ax, env)
         ax.plot([0], [0], [0], "s", color=INK2, ms=5)
         gripper_frame_legend(ax, 3)
-        _axes3d(ax, f"{t}: final shape (best seed solid, others faint) vs target")
+        _axes3d(ax, f"{t}: final shape (best seed solid, others faint) vs target",
+                pts=tgt if (env.obstacles and tgt is not None) else None)
         ax.legend(fontsize=7, frameon=False, loc="upper left")
     fig.tight_layout()
     fig.savefig(out / "shapes.png", dpi=140)
@@ -683,7 +753,7 @@ def report(out, config=None):
 
 def cmd_jobs(args):
     out = Path(args.out)
-    for t in (args.targets or list(TARGET_PATHS)):
+    for t in check_names(args.targets, target_paths(load_config(args.config))):
         for o in ("adam", "linesearch"):
             for s in args.seeds:
                 print(f"python scripts/train_shape.py --config {args.config} --target {t} --optimizer {o} "
@@ -699,18 +769,34 @@ def main():
     argv = sys.argv[1:]
     cmd = argv.pop(0) if argv and argv[0] in cmds else "train"
 
+    # The valid target names depend on --out (what is built in OUT/targets) and
+    # on --config (its task.shape_targets), so read those two first.
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--out", default=None)
+    pre.add_argument("--config", default=str(DEFAULT_CONFIG))
+    known, _ = pre.parse_known_args(argv)
+    built = built_targets(known.out) if known.out else []
+    try:
+        defined = list(target_paths(load_config(known.config)))
+    except Exception:                                   # noqa: BLE001 -- reported later
+        defined = []
+
     ap = argparse.ArgumentParser(description=f"3D shape formation by neural control ({cmd})")
     ap.add_argument("--out", required=True, help="experiment directory (targets/ lives in it)")
     ap.add_argument("--config", default=str(DEFAULT_CONFIG),
                     help="YAML config over configs/default.yaml (workspace is switched off and "
                          "the state gradient selected regardless)")
     if cmd in ("targets", "jobs"):
-        ap.add_argument("--targets", nargs="+", choices=sorted(TARGET_PATHS), default=None)
+        ap.add_argument("--targets", nargs="+", choices=defined or None, default=None,
+                        help="default: all of the config's (task.shape_targets, else S1-S3)")
     if cmd == "jobs":
         ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
         ap.add_argument("--epochs", type=int, default=None)
     if cmd == "train":
-        ap.add_argument("--target", choices=sorted(TARGET_PATHS), required=True)
+        ap.add_argument("--target", required=True, choices=built or None,
+                        help="which target to train on: one built in OUT/targets"
+                             + (f" ({', '.join(built)})" if built else
+                                " -- none there yet, build them with the `targets` command"))
         ap.add_argument("--optimizer", choices=OPTIMIZERS, default=None,
                         help="adam or linesearch; default: train.optimizer")
         ap.add_argument("--seed", type=int, default=0, help="policy init seed")

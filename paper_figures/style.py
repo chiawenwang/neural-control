@@ -36,6 +36,8 @@ OBSTACLE_FILL = "#D9D9D9"
 OBSTACLE_EDGE = "#4D4D4D"
 CLAMP = "#404040"               # fixed clamp and gripper glyphs (dark gray)
 ACCENT = "#D55E00"              # Okabe-Ito vermillion: contacting edges
+BALL_RING = "#D7191C"            # red outline of the balls on the surface: stands out on viridis blues/greens
+BALL_RING_LW = 0.9              # [pt]
 AUX_GRAY = "#8C8C8C"            # dashed guides (local maxima)
 PLACEHOLDER = "#BFBFBF"         # placeholder tile border and text
 

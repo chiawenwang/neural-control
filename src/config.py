@@ -46,8 +46,9 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 #: Subtrees whose keys are open-ended, so an unknown name there is legitimate:
-#: user-defined materials, and the kwargs forwarded to a custom energy class.
-_OPEN_SUBTREES = {("materials",), ("energy", "params")}
+#: user-defined materials, the kwargs forwarded to a custom energy class, and
+#: the named shape targets.
+_OPEN_SUBTREES = {("materials",), ("energy", "params"), ("task", "shape_targets")}
 
 #: Keys that were replaced, with what to write instead, so an old config says
 #: how to fix itself instead of getting a lookalike suggestion.

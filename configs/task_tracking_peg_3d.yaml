@@ -1,34 +1,36 @@
 # =============================================================================
-# Path tracking in 3D with gravity and a peg: the mid node follows a sine in the
-# vertical x-z plane (with a small drift in y) while the rod rests on, and lifts
-# off, a fixed peg. PRELIMINARY -- see "Status" below.
+# Path tracking in 3D with gravity and a peg: the mid node follows a gentle
+# half-sine in the x-z plane (with a drift in y) while the rod touches a fixed peg.
+# Reachability was checked by scripts/check_targets.py; training is not tested.
 #
 #   python scripts/train_tracking.py --config configs/task_tracking_peg_3d.yaml
 #
-# Scenario: the left end is clamped at the origin, the right end is driven by the
-# policy (5 DOFs: x, y, z, theta, phi), gravity pulls the rod down (-z) so it
-# sags. The peg is a cylinder along y (perpendicular to the x-z plane) under the
-# left half of the rod. The reference z(t) oscillates about the ready pose:
-#   * mid-way  -> the mid node dips, the rod comes down onto the peg and bends
-#                 over it (contact on),
-#   * the ends -> the mid node is back at its ready height, the rod is clear of
-#                 the peg (contact off),
-# so one rollout contains both phases.
+# Start pose: the rod is already bent, not a taut horizontal line. The left end
+# is clamped at the origin pointing straight UP (phi = pi/2), the right gripper
+# is horizontal (tangent +x) at (0.62, 0, 0.62): a quarter arc, convex towards
+# upper-left (a circle of radius 0.62 m has arc length 0.974 m, so ~2.6 % slack).
+# Its mid node sits at (0.150, 0, 0.4625).
 #
-# Status: the peg (contact.PegObstacle, env_factory.attach_peg, drawn in every
-# png/gif) and trajectory_type sine_xz (env_factory.make_target_trajectory, used
-# by train_tracking.py without --path) are implemented but NOT yet run. The
-# geometry is a first guess from the 1 m soft_strip sag (mid node ~6 cm below
-# the clamps in the ready pose, x ~ 0.5). Check the first figure: the peg should
-# be touched around the middle of the path only. If it is touched all the time, lower
-# center_xz[1] or shrink amp; if never, raise it or increase amp.
+# Path and peg were CHECKED with scripts/check_targets.py (sampled stable states of
+# the free rod, picked a smooth half-sine they support, tracked it on the free rod
+# to record the rod's exact shapes, placed the peg on those shapes, then tracked
+# the path again with the peg and contact physics on):
+#   python scripts/check_targets.py --config configs/task_tracking_peg_3d.yaml
+#   x(t) = x0 - 0.125 t, y(t) = -0.12 t, z(t) = z0 + 0.01 sin(pi t),  x0, y0, z0 = (0.150, 0, 0.463)
+# With twist on (start.u_*_twist), a damped least-squares tracker followed it with
+# rms 0.7 mm (max 5 mm) and the rod was on the peg 79 % of the steps (3 on/off
+# changes): it is reachable WITH contact, but contact is the rule here, not the
+# exception. Whether the trained policy gets there is a separate question. The
+# path is anchored at the ready-pose mid node, so it moves with start.*, rod.twist
+# and --ready-dx. The first step (straight rod -> this
+# pose) is a large move, hence newton.max_substeps 64.
 # =============================================================================
 env:
   dim: 3
   grasp_mode: both              # left end fixed at u_left_3d, right end driven
 rod:
   material: soft_strip          # EI = 0.127 N*m^2, sags visibly under gravity
-  twist: false
+  twist: true
   nv: 51                        # node spacing 2 cm
   dt: 0.01
   total_time: 2.0               # -> 200 control steps
@@ -36,45 +38,47 @@ rod:
   max_newton_iter: 1000
   gravity: [0.0, 0.0, -9.81]    # z is up; the rod sags in the x-z plane
 start:
-  u_left_3d:  [0.0, 0.0, 0.0, 0.0, 0.0]
-  u_right_3d: [1.0, 0.0, 0.0, 0.0, 0.0]
+  u_left_3d:  [0.0, 0.0, 0.0, 0.0, 1.5708]   # (x, y, z, theta, phi): tangent straight up
+  u_right_3d: [0.62, 0.0, 0.62, 0.0, 0.0]    # horizontal gripper, tangent +x
+  # read instead of the two lines above when rod.twist: true (a yaw is added to each end);
+  # without these the start falls back to the default straight horizontal rod
+  u_left_twist:  [0.0, 0.0, 0.0, 0.0, 1.5708, 0.0]
+  u_right_twist: [0.62, 0.0, 0.62, 0.0, 0.0, 0.0]
 task:
-  target_xyz: [0.475, 0.04, -0.0626]   # end of the fallback `segment` path only
+  target_xyz: [0.025, -0.12, 0.47]     # end of the fallback `segment` path only
   tracking:
     trajectory_type: sine_xz
     weight: 1.0
-    sine_xz:                    # half a sine period: one smooth dip
-      amp: -0.07                # [m] z dips 7 cm below m0_z (-0.0626) mid-way, back at the end
-      periods: 0.5              # half period -> a single arch, no oscillation
-      dx: 0.0                   # no x motion of its own: x only ever moves towards the
-                                # fixed end (negative), through `bow`, never away from it
-      dy: 0.25                  # displacement out of the x-z plane; the longer run keeps the
-                                # curvature at amp * (pi / 0.25)^2 ~ 11 1/m (radius ~ 9 cm)
-      bow: 1.43                 # x -= 1.43 * (d(y^2 + z^2)): the rod bows as the mid node
-                                # moves, so x falls ~ 6 cm at the end and ~ 3 cm more at the
-                                # bottom of the dip, which keeps the rod from being stretched
+    sine_xz:                    # half a sine period: one smooth bump, no oscillation
+      amp: 0.01                 # [m] z; the reachable region is a thin band in x-z, so
+                                # z can only follow x (see scripts/check_targets.py)
+      periods: 0.5
+      dx: -0.125                # x only ever decreases (towards the vertical clamp axis)
+      dy: -0.12                 # out of the x-z plane
+      bow: 0.0
 peg:
   enabled: true
-  center_xz: [0.30, -0.075]     # top of the peg at z = -0.045, about 1 cm under
-                                # the rod there in the ready pose (guess)
-  center_y: 0.0
-  half_length_y: 0.20           # covers the 0 .. 0.25 m y run
+  center_xz: [0.345, 0.618]     # from scripts/check_targets.py, placed on the exact rod shapes of
+                                # the free rollout: ~0.2 m from the mid node, above the rod's
+                                # upper (gripper-side) part, which it touches during the path
+  center_y: -0.060              # the path's y at t = 0.5
+  half_length_y: 0.12           # covers y in [-0.18, 0.06]
   radius: 0.03                  # > node spacing 0.02 m
   k_contact: 1.0e+7
 workspace:
   enabled: true                 # tracking needs the bounded workspace
-  position_min_3d: [0.20, -0.40, -0.30]
-  position_max_3d: [1.05, 0.40, 0.30]
-  orientation_limits_3d: [[-0.8, 0.8], [-0.8, 0.8]]   # theta, phi [rad]
+  position_min_3d: [0.20, -0.40, 0.20]   # the gripper starts at (0.62, 0, 0.62)
+  position_max_3d: [1.00, 0.40, 0.95]
+  orientation_limits_3d: [[-1.0, 1.0], [-1.0, 1.0]]   # theta, phi [rad]
 newton:
   continuation: true
-  max_substeps: 16
+  max_substeps: 64
   stability_check: true
   snap_rule: true
 train:
   grad_method: state
   optimizer: adam
-  epochs: 20
+  epochs: 100
   lr: 0.0001                    # 1e-3 oscillated in earlier tracking runs
   device: auto
 output:

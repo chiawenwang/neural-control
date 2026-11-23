@@ -7,8 +7,8 @@
 Each task in ``panel_b.tasks`` is read from ``data/rollouts/<task>/`` (format:
 :mod:`paper_figures.common.rollout_io`). A missing task becomes a placeholder
 tile (dashed light gray border, task name centered). Every tile is exported as
-``b_tile_<name>_bare`` (graphics only) and ``b_tile_<name>_label`` (with the
-task name), at 0.82 x 0.82 in.
+``b_tile_<name>_bare`` (graphics only) and ``b_tile_<name>_label`` (the task
+name only, on the same canvas: stack it on the bare tile), at 0.82 x 0.82 in.
 
 Rendering: 2D rollouts are drawn in the plane, 3D ones with an orthographic
 projection (no axes, panes or grid). A few snapshots in the lambda colors
@@ -296,6 +296,8 @@ def export_tile(ex, cfg, name, task, slot, task_dir, status):
         render = render_2d if scene["dim"] == 2 else render_3d
         ax, scale, pts = render(fig, r, scene, tcfg)
         if variant == "label":
+            for a in fig.axes:               # text only: the drawing is the bare tile
+                a.set_visible(False)
             lab = fig.add_axes([0, 0, 1, 1])
             lab.set_axis_off()
             tile_label(lab, title, tcfg, tile)
@@ -314,7 +316,8 @@ def export_placeholder(ex, cfg, task, slot):
     title = tcfg["titles"].get(task, task)
     for variant in ("bare", "label"):
         fig = plt.figure(figsize=(tile, tile))
-        draw.placeholder(fig, title, with_text=variant == "label")
+        draw.placeholder(fig, title, with_text=variant == "label",
+                         with_border=variant == "bare")
         ex.save(fig, f"b_tile_{task}_{variant}", variant=variant,
                 placement=slot_placement(cfg, slot), status="placeholder",
                 notes=f"{title}: no rollout in {rel(ROLLOUTS_DIR / task)} yet",

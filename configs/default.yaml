@@ -283,6 +283,13 @@ task:
       contact: 1.0e+4
       control: 1.0e-4
       workspace: 100.0
+  # Read only by scripts/train_shape.py: the shape targets of this scene, each
+  # the end shape of the straight gripper move u0 -> u0 + du (right end only,
+  # (x, y, z, theta, phi[, yaw]) increments), rolled out with the full physics:
+  #   P1: {du: [-0.1, 0.05, 0.0, 0.2, -0.1, 0.0], description: "..."}
+  # Empty -> the script's built-in S1-S3. scripts/check_targets.py --mode shape
+  # finds them (see configs/task_shape_pegs_3d.yaml).
+  shape_targets: {}
 
 # Rigid 90-degree L-shaped pipe (src/contact.py: LPipe2D). 2D only.
 #
@@ -321,6 +328,10 @@ peg:
   half_length_y: 0.15          # [m] extent along the axis, each side
   radius: 0.03                 # [m]
   k_contact: 1.0e+7            # [N/m^2] penalty stiffness, as for the sphere
+  extra: []                    # further pegs (with enabled: true), each a dict of
+                               # center_xz and center_y; radius, half_length_y and
+                               # k_contact default to the values above. See
+                               # configs/task_shape_pegs_3d.yaml (two pegs).
 
 # Normal contact between the rod and rigid geometry (currently: `pipe`).
 #   E_c = k_contact/2 * sum_i w_i * [smoothing * softplus(-g_i/smoothing)]^2

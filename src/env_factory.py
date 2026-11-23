@@ -313,29 +313,42 @@ def attach_pipe(env, cfg):
     return pipe
 
 
-def attach_peg(env, cfg):
-    """Add the ``peg:`` cylinder (axis along y) to ``env.obstacles``; 3D only.
+_PEG_KEYS = ("center_xz", "center_y", "radius", "half_length_y", "k_contact")
 
-    Returns the peg, or None when ``peg.enabled`` is false.  A rod that starts
-    inside the peg is rejected rather than left to be pushed out.
+
+def attach_peg(env, cfg):
+    """Add the ``peg:`` cylinders (axis along y) to ``env.obstacles``; 3D only.
+
+    The ``peg:`` block is the first peg; each ``peg.extra`` entry is another,
+    with the block's radius, half length and stiffness unless it sets its own.
+    Returns the pegs (empty when ``peg.enabled`` is false).  A rod that starts
+    inside a peg is rejected rather than left to be pushed out.
     """
     p = cfg.get("peg") or {}
     if not p.get("enabled", False):
-        return None
+        return []
     if env_dim(cfg) != 3:
         raise ValueError("peg.enabled: true needs env.dim: 3 (the peg is a cylinder along y)")
     from contact import PegObstacle
-    cx, cz = (float(v) for v in p["center_xz"])
-    peg = PegObstacle(cx, float(p["center_y"]), cz, float(p["radius"]),
-                      float(p["half_length_y"]), k_contact=float(p["k_contact"]))
     spacing = cfg.rod.rod_length / (cfg.rod.nv - 1)
-    if peg.radius <= spacing:
-        raise ValueError(f"peg.radius {peg.radius} m is not above the node spacing "
-                         f"{spacing:.4g} m: the rod could slip between two nodes")
-    if any(peg.node_energy(*x) > 0.0 for x in env.nodes.reshape(-1, 3)):
-        raise ValueError("the initial rod penetrates the peg; move peg.center_xz / center_y")
-    env.add_obstacle(peg)
-    return peg
+    pegs = []
+    for i, extra in enumerate([{}] + list(p.get("extra") or [])):
+        bad = sorted(set(extra) - set(_PEG_KEYS))
+        if bad:
+            raise ValueError(f"peg.extra[{i - 1}] sets {bad}; a peg takes {list(_PEG_KEYS)}")
+        q = {key: extra.get(key, p[key]) for key in _PEG_KEYS}
+        cx, cz = (float(v) for v in q["center_xz"])
+        peg = PegObstacle(cx, float(q["center_y"]), cz, float(q["radius"]),
+                          float(q["half_length_y"]), k_contact=float(q["k_contact"]))
+        name = "peg" if i == 0 else f"peg.extra[{i - 1}]"
+        if peg.radius <= spacing:
+            raise ValueError(f"{name} radius {peg.radius} m is not above the node spacing "
+                             f"{spacing:.4g} m: the rod could slip between two nodes")
+        if any(peg.node_energy(*x) > 0.0 for x in env.nodes.reshape(-1, 3)):
+            raise ValueError(f"the initial rod penetrates {name}; move its center_xz / center_y")
+        env.add_obstacle(peg)
+        pegs.append(peg)
+    return pegs
 
 
 def reset_env(env, cfg):

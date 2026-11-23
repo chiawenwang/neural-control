@@ -3,6 +3,12 @@
 * ``visualize_results``  -> neural_control_result.png in the run directory (final shape + loss curve)
 * ``save_trajectory_gif`` -> <name>.gif there too (the whole control rollout, frame by frame)
 * ``maybe_save_trajectory_gif`` -> the same, but only if ``output.save_gif`` is on
+* ``paper_scene`` -> the scene figure of every task for the manuscript: single
+  column, IEEE T-RO style (src/tro_style.py), .pdf/.svg with editable text
+  plus a .png preview.  The training scripts only say what to draw (rods,
+  paths, markers); pipe, obstacles, workspace and gripper frames come from
+  here, so all task figures look the same.  The other functions are the
+  quick-look diagnostics and are unchanged.
 
 Both draw the environment's obstacles translucently (``draw_obstacles``) and
 the gripper frames at the clamped ends (``draw_gripper_frames``: x along the
@@ -623,3 +629,152 @@ def visualize_pipe_task(q_traj, env, target_pos, losses, tip_node=0, q_init=None
     plt.close(fig)
     print(f"Saved to {out}")
     return out
+
+
+# ---------------------------------------------------------------------------
+# Paper figures (IEEE T-RO style)
+# ---------------------------------------------------------------------------
+
+def obstacle_bounds(env):
+    """``[(2, dim) array of lo/hi], ...`` of the obstacles ``draw_obstacles`` draws."""
+    dim = getattr(env, "dim", 2)
+    out = []
+    for obs in getattr(env, "obstacles", []) or []:
+        if hasattr(obs, "bounds"):
+            out.append(np.stack(obs.bounds()).astype(float)[:, :dim])
+        elif hasattr(obs, "radius") and not hasattr(obs, "draw"):
+            c = np.array([obs.cx, obs.cy] + ([obs.cz] if dim == 3 else []), dtype=float)
+            out.append(np.stack([c - obs.radius, c + obs.radius]))
+    return out
+
+
+#: draw order of the curve roles (pipe/obstacles 1 < workspace < rods 3 < paths < markers)
+_ROLE_Z = {"reference": 4.1, "achieved": 4.0, "gripper_path": 3.9}
+
+
+def paper_scene(path, env, *, dim=None, rod_init=None, rod_final=None, rod_snaps=(),
+                rod_labels=("Initial rod", "Final rod"), curves=(), points=(), frames_q=None,
+                extent=(), title=None, view=(22, -58), workspace="auto", margin=0.04,
+                limits=None, height=3.0, ncol=3):
+    """Single-column scene figure for the manuscript; returns the written paths.
+
+    Parameters
+    ----------
+    path : output path; ``.pdf``, ``.svg`` and a ``.png`` preview are written.
+    env : the environment, for the pipe (``env.pipe.draw``), the obstacles
+        (``draw_obstacles``), ``env.workspace_box`` and the gripper frames.
+        May be None (then ``dim`` is needed and rods must be node arrays).
+    rod_init, rod_final : a DOF vector (``_positions`` splits off torsion
+        DOFs) or a node array ``(nv, dim)``; light gray / blue.
+    rod_snaps : intermediate rods, drawn in a gray ramp (light -> dark).
+    curves : ``[(points (n, dim), role, label), ...]``, ``role`` a key of
+        ``tro_style.ROLE`` ("reference", "achieved", "gripper_path", ...) or a
+        style dict.  ``points`` : the same for single markers ("start",
+        "goal", "gripper"); ``label=None`` keeps one out of the legend.
+    frames_q : DOF vector whose gripper frames are drawn (x/y/z triads).
+    extent : more point sets the view has to contain.
+    workspace : how the gripper workspace (``env.workspace_box``) is shown --
+        "fit": the view contains the whole box; "clip": the view is fitted to
+        the scene and the box drawn where it reaches into it (faces cut by
+        the view boundary drawn fainter); "off": not drawn; "auto": "fit"
+        if the box is at most 1.6x the scene, else "off".
+    margin : room around the scene, as a fraction of its largest side (0.04);
+        with "clip", a larger margin shows more of the workspace.
+    limits : ``(lo, hi)`` -- the exact view box instead (equal scale); the
+        workspace is then clipped to it.  Keep the scene inside: 3D axes do
+        not clip lines.
+    """
+    import tro_style as ts
+    dim = int(dim or getattr(env, "dim", 2))
+    pos = lambda x: (np.asarray(x, dtype=float) if np.ndim(x) == 2    # noqa: E731
+                     else np.asarray(_positions(x, env, dim), dtype=float))
+    co = lambda A: [np.asarray(A, dtype=float).reshape(-1, dim)[:, i] for i in range(dim)]  # noqa: E731
+    style = lambda r: dict(ts.ROLE[r]) if isinstance(r, str) else dict(r)                   # noqa: E731
+    with ts.style():
+        fig = plt.figure(figsize=(ts.COL_W, height))
+        if dim == 3:
+            ax = fig.add_subplot(111, projection="3d")
+            ts.style_3d(ax, view=view)
+        else:
+            ax = fig.add_subplot(111)
+            ts.style_2d(ax)
+            ax.set_xlabel(r"$x$ (m)")
+            ax.set_ylabel(r"$y$ (m)")
+        ext = [np.asarray(e, dtype=float).reshape(-1, dim) for e in extent if np.size(e)]
+        scene = []                                    # legend entries that are not plain lines
+        # ---- rigid geometry, restyled to one quiet tone; always under the rod
+        pipe = getattr(env, "pipe", None) if env is not None else None
+        if pipe is not None:
+            before = ts.snapshot(ax)
+            pipe.draw(ax)
+            lo, hi = ts.data_extent(ax)               # nothing else is drawn yet: the pipe
+            # LPipe*.draw also draws the centerline (dotted); here it would double
+            # the "Reference" curve, which is that centerline, so it goes.
+            for a in list(ax.lines):
+                if id(a) not in before and a.get_linestyle() == ":":
+                    a.remove()
+            if dim == 3:                              # translucent bores, shaded
+                if ts.restyle_scene(ax, before, alpha=0.3):
+                    scene.append(ts.scene_handle("Pipe", alpha=0.3))
+            elif ts.restyle_scene(ax, before, alpha=0.6, line_width=0.8):   # channel + walls
+                scene.append(ts.scene_handle("Pipe", alpha=0.6, edgecolor=ts.GRAY,
+                                             linewidth=0.8))
+            if lo is not None:
+                ext.append(np.stack([lo, hi]))
+        if env is not None:
+            before = ts.snapshot(ax)
+            draw_obstacles(ax, env, alpha=0.55, color=ts.OBSTACLE)
+            if ts.restyle_scene(ax, before):
+                scene.append(ts.scene_handle("Obstacle"))
+            ext += obstacle_bounds(env)
+        # ---- the rod: start (light), intermediate states (gray ramp), end (blue)
+        if rod_init is not None:
+            X = pos(rod_init)
+            ax.plot(*co(X), **ts.ROLE["rod_init"], zorder=ts.Z_ROD, label=rod_labels[0])
+            ext.append(X)
+        snaps = [pos(x) for x in rod_snaps] if rod_snaps is not None else []
+        for X, c in zip(snaps, ts.snapshot_colors(len(snaps))):
+            ax.plot(*co(X), color=c, linewidth=0.7, zorder=ts.Z_ROD - 0.5)
+            ext.append(X)
+        if rod_final is not None:
+            X = pos(rod_final)
+            ax.plot(*co(X), **ts.ROLE["rod"], zorder=ts.Z_ROD, label=rod_labels[1])
+            ext.append(X)
+        # ---- paths and markers
+        for P, role, label in curves:
+            z = _ROLE_Z.get(role, ts.Z_PATH) if isinstance(role, str) else ts.Z_PATH
+            ax.plot(*co(P), **style(role), zorder=z, label=label)
+            ext.append(np.asarray(P, dtype=float).reshape(-1, dim))
+        for P, role, label in points:
+            ax.plot(*co(P), **style(role), zorder=ts.Z_MARK, label=label)
+            ext.append(np.asarray(P, dtype=float).reshape(-1, dim))
+        # ---- gripper frames (x/y/z triads), one legend entry
+        if frames_q is not None and env is not None:
+            L = 0.1 * env.rod_length
+            before = ts.snapshot(ax)
+            draw_gripper_frames(ax, env, frames_q, L, linewidth=1.0)
+            for a in list(ax.collections) + list(ax.lines):
+                if id(a) not in before:
+                    a.set_zorder(ts.Z_MARK)
+            scene.append(ts.triad_handle(_GRIPPER_AXIS_COLORS[:dim]))
+            for origin, _ in gripper_frames(env, frames_q):
+                ext.append(np.stack([origin - L, origin + L]))
+        # ---- view, workspace, legend
+        box = getattr(env, "workspace_box", None) if env is not None else None
+        ws_lo, ws_hi = ((np.asarray(box[0], dtype=float)[:dim], np.asarray(box[1], dtype=float)[:dim])
+                        if box is not None else (None, None))
+        mode = ts.workspace_mode(workspace, ws_lo, ws_hi, ext) if ws_lo is not None else "off"
+        if limits is not None and mode == "fit":    # the view is given: show what is in it
+            mode = "clip"
+        if mode == "fit":
+            ext.append(np.stack([ws_lo, ws_hi]))
+        ts.fit_box(ax, ext, pad=margin, limits=limits)
+        if mode in ("fit", "clip"):
+            h = ts.draw_box(ax, ws_lo, ws_hi, label="Gripper workspace")
+            if h is not None:
+                scene.append(h)
+        handles, _ = ax.get_legend_handles_labels()
+        ts.legend_top(fig, ax, handles=handles + scene, ncol=ncol, title=title)
+        paths = ts.save(fig, path, width=ts.COL_W)
+        plt.close(fig)
+    return paths

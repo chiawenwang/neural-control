@@ -47,6 +47,11 @@ Usage
     python scripts/train_point_to_point.py --optimizer linesearch
     python scripts/train_point_to_point.py --target T1 --method rrt_nc --out DIR
     python scripts/train_point_to_point.py report --out DIR
+    python scripts/train_point_to_point.py figure --npz RUN.npz [--config C] [--view 18 -70]
+
+Every run also writes ``p2p_result`` (paper figure, IEEE T-RO style via
+``utils.paper_scene``) and ``loss_curve`` as .pdf/.svg + .png; ``figure``
+re-renders them from the run's .npz without training.
 """
 import sys
 from pathlib import Path
@@ -87,7 +92,8 @@ from neural_control import (
     get_parameters, set_parameters,
 )
 from runlog import RunLogger
-from utils import visualize_results, maybe_save_trajectory_gif
+from utils import visualize_results, maybe_save_trajectory_gif, paper_scene, _positions
+import tro_style as ts
 
 #: Redundancy audit for the inner-loop kernels.  Disabled (and unpatched)
 #: unless `audit.enabled` is set in the config or --audit is passed.
@@ -569,6 +575,47 @@ def plan_once(cfg, args, rrt_seed, env, checkpoint, u0_np, target, bounds=None):
 
 # ------------------------------------------------------------------- run
 
+def plot_p2p_result(path, env, q_init, q_list, target, title=None, view=(22, -58),
+                    workspace="auto"):
+    """Point-to-point result (paper figure): the rod at the start and at the
+    end with its gripper frames, the mid node's path and the target -- drawn
+    by ``utils.paper_scene`` in the IEEE T-RO style of every task figure.
+    Writes ``path`` .pdf/.svg (editable text) + .png; returns the paths."""
+    dim = env.dim
+    mid = env.mid_node
+    mids = np.array([_positions(q, env, dim)[mid] for q in [q_init] + list(q_list)])
+    return paper_scene(
+        path, env, rod_init=q_init, rod_final=q_list[-1],
+        curves=[(mids, "achieved", "Mid node")],
+        points=[(mids[0], "start", "Start"), (np.asarray(target, dtype=float), "goal", "Target")],
+        frames_q=q_list[-1], title=title, view=view, workspace=workspace)
+
+
+def cmd_figure(args):
+    """Re-render a finished run's paper figures from its .npz -- no training.
+
+    The .npz must come from a ``train`` with this version (``q_init``,
+    ``q_traj``, ``target``); the environment is rebuilt from ``--config``
+    for the scene geometry and the node positions.
+    """
+    npz = Path(args.npz)
+    z = np.load(npz)
+    missing = [k for k in ("q_init", "q_traj", "target") if k not in z.files]
+    if missing:
+        raise SystemExit(f"{npz} has no {', '.join(missing)} (written before the figure data "
+                         "was saved); run the training again")
+    cfg = load_config(args.config)
+    env = build_env(cfg)
+    reset_env(env, cfg)
+    stem = Path(args.stem) if args.stem else npz.with_name(npz.stem)
+    plot_p2p_result(f"{stem}_result", env, z["q_init"], list(z["q_traj"]), z["target"],
+                    title=None if args.no_title else "Point-to-point", view=tuple(args.view),
+                    workspace=args.workspace)
+    if "losses" in z.files and z["losses"].size:
+        ts.loss_curve(z["losses"], f"{stem}_loss", ylabel="Loss",
+                      title=None if args.no_title else "Training loss")
+
+
 def cmd_train(args):
     cfg = load_config(args.config)
     if args.grad_method is not None:        # the command line wins over the YAML
@@ -767,6 +814,12 @@ def cmd_train(args):
     summary["unstable_steps_total"] = int(env.n_unstable)
     summary["snaps_total"] = int(env.n_snaps)
     summary["status"] = "done"
+    if q_list:      # the figure data (``figure`` re-renders without training)
+        as_np = lambda q: np.asarray(q.detach().cpu() if hasattr(q, "detach") else q, dtype=float)  # noqa: E731
+        arrays["q_init"] = as_np(checkpoint["q"])
+        arrays["q_traj"] = np.stack([as_np(q) for q in q_list])
+        arrays["target"] = np.asarray(target, dtype=float)
+        arrays["losses"] = np.asarray(losses, dtype=float)
     np.savez_compressed(out / f"{name}.npz", **arrays)
     json.dump(summary, open(out / f"{name}.json", "w"), indent=1, default=float)
 
@@ -780,19 +833,16 @@ def cmd_train(args):
               + os.path.join(run.artifact_dir, 'compute_audit.txt'))
 
     if results['final_q'] is not None:
-        visualize_results(results, env, target, save_path=str(run.artifact_dir))
+        visualize_results(results, env, target, save_path=str(run.artifact_dir))   # quick look
+        if q_list:                                                                  # paper figure
+            plot_p2p_result(Path(run.artifact_dir) / "p2p_result", env, checkpoint["q"], q_list,
+                            target, title=f"Point-to-point ({args.target})")
         maybe_save_trajectory_gif(cfg, q_list, env, target, save_path=str(run.artifact_dir),
                                   title='DLO point-to-point')
-    if losses:
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.plot(np.arange(len(losses)), losses, linewidth=1.5, color="steelblue")
-        ax.set_xlabel("RHC segment" if cfg.rhc.enabled else "Epoch")
-        ax.set_ylabel("Loss")
-        ax.set_title("Training Loss Curve")
-        ax.grid(True, linestyle="--", alpha=0.5)
-        fig.tight_layout()
-        fig.savefig(os.path.join(run.artifact_dir, 'loss_curve.png'), dpi=150)
-        plt.close(fig)
+    if losses:      # IEEE T-RO style (src/tro_style.py): .pdf/.svg + .png preview
+        ts.loss_curve(losses, os.path.join(run.artifact_dir, "loss_curve"),
+                      xlabel="RHC segment" if cfg.rhc.enabled else "Epoch", ylabel="Loss",
+                      title="Training loss")
 
     run.finish(task="point_to_point",
                mode="rhc" if cfg.rhc.enabled else "single_horizon",
@@ -1266,7 +1316,7 @@ def _tangent(angles):
 # ---------------------------------------------------------------- main
 
 def main():
-    cmds = ("train", "report")
+    cmds = ("train", "report", "figure")
     argv = sys.argv[1:]
     cmd = argv.pop(0) if argv and argv[0] in cmds else "train"
 
@@ -1310,9 +1360,21 @@ def main():
                              "(src/compute_audit.py)")
         ap.add_argument("--audit-kernels", action="store_true",
                         help="with --audit, also instrument the per-stencil kernels")
+    if cmd == "figure":
+        ap.add_argument("--npz", required=True, help="the run's .npz (from train)")
+        ap.add_argument("--stem", default=None,
+                        help="output path without extension; default: next to the .npz")
+        ap.add_argument("--view", type=float, nargs=2, default=(22.0, -58.0),
+                        metavar=("ELEV", "AZIM"), help="3D view angles [deg]")
+        ap.add_argument("--workspace", choices=("auto", "fit", "clip", "off"), default="auto",
+                        help="gripper workspace: whole box, clipped, or left out "
+                             "(auto: whole box if it is not much larger than the scene)")
+        ap.add_argument("--no-title", action="store_true")
     args = ap.parse_args(argv)
 
-    if cmd == "report":
+    if cmd == "figure":
+        cmd_figure(args)
+    elif cmd == "report":
         if args.out is None:
             raise SystemExit("report needs --out, the directory holding the job files")
         report(Path(args.out), args.config)

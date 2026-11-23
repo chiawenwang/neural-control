@@ -205,7 +205,7 @@ def pipe_obstacle(ax, params, *, wall, gid, zorder=1):
     return patch
 
 
-def placeholder(fig, name, *, with_text):
+def placeholder(fig, name, *, with_text, with_border=True):
     """Dashed light gray border inside the canvas, task name centered (7 pt)."""
     ax = fig.add_axes([0, 0, 1, 1])
     ax.set_axis_off()
@@ -218,7 +218,8 @@ def placeholder(fig, name, *, with_text):
     patch = PathPatch(rect, fc="none", ec=style.PLACEHOLDER, lw=style.LW_AUX,
                       ls=(0, (3, 2)), clip_on=False)
     patch.set_gid("placeholder_border")
-    ax.add_patch(patch)
+    if with_border:
+        ax.add_patch(patch)
     if with_text:
         t = ax.text(0.5, 0.5, name, ha="center", va="center", fontsize=style.FONT_SIZE,
                     color="#8C8C8C")

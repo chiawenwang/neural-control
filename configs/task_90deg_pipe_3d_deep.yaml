@@ -30,7 +30,7 @@ rod:
   total_time: 1.0              # -> 100 control steps
   rod_length: 1.0
   max_newton_iter: 200
-  gravity: [0.0, 0.0, 0.0]     # as in 2D: the rod lies in the pipe, no sag
+  gravity: [0.0, 0.0, -9.81]     # as in 2D: the rod lies in the pipe, no sag
 start:
   u_left_3d:  [0.0, 0.0, 0.0, 0.0, 0.0]   # unused with grasp_mode: right
   u_right_3d: [1.0, 0.0, 0.0, 0.0, 0.0]   # gripper starts at the rod's right end
@@ -58,9 +58,9 @@ newton:
   stability_check: true
   snap_rule: true
 workspace:
-  enabled: true
-  position_min_3d: [0.48, -0.05, -0.05]   # 3 cm short of the entry face
-  position_max_3d: [1.05, 0.05, 0.05]
+  enabled: false
+  position_min_3d: [0.48, -0.2, -0.2]   # 3 cm short of the entry face
+  position_max_3d: [1.0, 0.2, 0.2]
   orientation_limits_3d: [[-0.35, 0.35], [-0.35, 0.35]]   # theta, phi [rad]
 task:
   target_xyz: [-0.246, 0.0, -0.30]   # far wall of the second bore, 0.30 m below the corner (deeper than the base 0.25 m), y = 0
@@ -81,7 +81,7 @@ task:
 train:
   grad_method: state
   optimizer: adam              # this scenario is run with Adam only
-  epochs: 50
+  epochs: 100
   lr: 0.001
   device: cpu
 output:

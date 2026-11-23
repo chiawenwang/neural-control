@@ -11,7 +11,8 @@ The physics is in :mod:`landscape_compute`, cached by a hash of the settings
 (``--force`` recomputes).
 
 Components (``out/fig01/components``), every plot as ``*_bare`` (graphics only)
-and ``*_axes`` (minimal axes):
+and ``*_axes`` (axis lines and ticks, no text where marked below); text lives in
+its own layer on the same canvas (``a_surface_text``, ``a_rods_column_label``):
 
 a_surface_*              E(s, lambda) as a rasterized surface (main style), the
                          realized path on top: balls joined by dashed links, a thin
@@ -278,19 +279,19 @@ def draw_ridgeline(fig, ridge, cfg, variant):
                           gid=f"valley_path_{name}_solid", zorder=4)
         ax.set_axis_off()
         return ax
-    for (s, E), lam, tag in zip(ridge.curves, ridge.lams, ridge.tags):
+    for (s, E), lam, tag in (zip(ridge.curves, ridge.lams, ridge.tags) if variant != "axes" else ()):
         line = draw.polyline(ax, np.column_stack([s, E + ridge.c * lam]),
                              color=style.lambda_color(lam), lw=style.LW_DATA, gid=f"curve_lam_{tag}",
                              zorder=2)
         line.set_solid_capstyle("butt")
-    if ridge.saddle is not None and len(ridge.saddle) > 1:
+    if variant != "axes" and ridge.saddle is not None and len(ridge.saddle) > 1:
         draw.polyline(ax, ridge.saddle[:, :2], color=style.AUX_GRAY, lw=style.LW_AUX,
                       ls=(0, (2.5, 1.5)), gid="local_maxima", zorder=3)
-    for name, (xy, lam) in (("pre", ridge.pre), ("post", ridge.post)):
+    for name, (xy, lam) in ((("pre", ridge.pre), ("post", ridge.post)) if variant != "axes" else ()):
         if len(xy) > 1:
             draw.lambda_path(ax, xy, lam, lw=style.LW_DATA_THICK, gid=f"valley_path_{name}",
                              zorder=4)
-    for (s, y, lam), tag in zip(ridge.balls, ridge.tags):
+    for (s, y, lam), tag in (zip(ridge.balls, ridge.tags) if variant != "axes" else ()):
         draw.ball(ax, s, y, color=style.lambda_color(lam), gid=f"ball_lam_{tag}",
                   size_pt=pa["ball_size_pt"])
     if variant == "bare":
@@ -423,15 +424,17 @@ def surface_overlay(fig, ax, sc, cfg, variant, box, saddle=None):
     ov.set_zorder(ax.get_zorder() + 1)
     ov.set_gid("overlay")
     p, lam, ksn = sc["path"], sc["lam"], sc["k_snap"]
+    graphics = variant != "text"             # bare / axes: vectors only
+    labels = variant == "text"               # text: every string and nothing else
     xyz = np.column_stack([p["s"], lam, p["E"]])
     balls = surface_balls(sc)
     C = {k: project(fig, ax, xyz[[k]])[0] for k in balls}
-    r = 0.5 * pa["ball_size_pt"] * style.PT + 0.5 * style.LW_AUX * style.PT
+    r = 0.5 * pa["ball_size_pt"] * style.PT + 0.5 * style.BALL_RING_LW * style.PT
     # dashed links between consecutive balls along the projected valley floor; the
     # dash pattern is fitted to each link so it starts and ends with a whole dash
     lk = ann["links"]
     d0, g0 = lk["dash_pt"]
-    for ka, kb in zip(balls[:-1], balls[1:]):
+    for ka, kb in (zip(balls[:-1], balls[1:]) if graphics else ()):
         if ka < ksn <= kb:
             continue                         # the snap: its own arrow
         P = project(fig, ax, xyz[ka:kb + 1])
@@ -448,13 +451,14 @@ def surface_overlay(fig, ax, sc, cfg, variant, box, saddle=None):
     # one thin arrow beside each branch, on the right of the direction of travel
     # (outside the right valley, below the left one: clear of the snap arrow)
     bs = ann["beside"]
-    for name, ka, kb in (("pre", balls[0], ksn - 1), ("post", ksn, balls[-1])):
+    for name, ka, kb in ((("pre", balls[0], ksn - 1), ("post", ksn, balls[-1])) if graphics else ()):
         Q = _beside(project(fig, ax, xyz[ka:kb + 1]), bs["offset_in"], bs["trim"], bs["smooth_in"])
         draw.arrow(ov, Q, head_in=ann["head_in"], gid=f"arrow_{name}")
     # the snap: a curved arrow over the landscape, ball to ball, coming down steeply
     # onto the landing ball (clear of the path that leaves it)
     B = _snap_curve(C[ksn - 1], C[ksn], ann["snap_arc"], r + ann["gap_in"])
-    draw.arrow(ov, B, head_in=ann["head_in"], gid="snap_arrow")
+    if graphics:
+        draw.arrow(ov, B, head_in=ann["head_in"], gid="snap_arrow")
     if variant == "bare":
         return ov
     # hand-placed axes: s along the front edge, lambda along the right edge,
@@ -472,7 +476,7 @@ def surface_overlay(fig, ax, sc, cfg, variant, box, saddle=None):
     o_e = project(fig, ax, [[s_lo, 0.0, zlo], [s_lo, 0.0, zhi]])
     out_s = unit(-(o_l[1] - o_l[0]))          # ticks of s point toward the viewer
     out_l = unit(o_s[1] - o_s[0])             # ticks of lambda point along +s
-    for name, P in (("s", o_s), ("lambda", o_l), ("energy", o_e)):
+    for name, P in ((("s", o_s), ("lambda", o_l), ("energy", o_e)) if graphics else ()):
         draw.polyline(ov, P, color=style.INK, lw=style.LW_AUX, gid=f"axis_{name}")
     gap = ann["ticklabel_gap_in"]
     # tick labels sit below (s) or right of (lambda) the tick ends, so a tick never
@@ -484,10 +488,15 @@ def surface_overlay(fig, ax, sc, cfg, variant, box, saddle=None):
         for v in vals:
             q = project(fig, ax, [pt(v)])[0]
             end = q + tick * out
-            draw.polyline(ov, [q, end], color=style.INK, lw=style.LW_AUX, gid=f"tick_{name}_{v:g}")
-            lab = f"{v:g}".replace("-", "−")
-            t = ov.text(*(end + np.array(off)), lab, fontsize=fs, ha=ha, va=va)
-            t.set_gid(f"ticklabel_{name}_{v:g}")
+            if graphics:
+                draw.polyline(ov, [q, end], color=style.INK, lw=style.LW_AUX,
+                              gid=f"tick_{name}_{v:g}")
+            if labels:
+                lab = f"{v:g}".replace("-", "−")
+                t = ov.text(*(end + np.array(off)), lab, fontsize=fs, ha=ha, va=va)
+                t.set_gid(f"ticklabel_{name}_{v:g}")
+    if not labels:
+        return ov
     mid_s = 0.5 * (o_s[0] + o_s[1]) + np.array(ann["s_label_in"])
     t = ov.text(*mid_s, r"$s/L$", fontsize=style.LABEL_SIZE, ha="center", va="center")
     t.set_gid("label_s")
@@ -546,8 +555,8 @@ def draw_surface(fig, sc, ridge, cfg, variant):
     balls = surface_balls(sc)                # on the overlay
     for kk, tag in zip(balls, lam_tags([sc["lam"][k] for k in balls])):
         (b,) = ax.plot([p["s"][kk]], [sc["lam"][kk]], [p["E"][kk]], ls="none", marker="o",
-                       ms=pa["ball_size_pt"], mfc=style.lambda_color(sc["lam"][kk]), mec=style.INK,
-                       mew=style.LW_AUX, zorder=5)
+                       ms=pa["ball_size_pt"], mfc=style.lambda_color(sc["lam"][kk]), mec=style.BALL_RING,
+                       mew=style.BALL_RING_LW, zorder=5)
         b.set_gid(f"ball_lam_{tag}")
     saddle = None
     if ridge.saddle is not None and len(ridge.saddle) > 1:
@@ -567,6 +576,8 @@ def draw_surface(fig, sc, ridge, cfg, variant):
     ax.set_axis_off()                        # axes are drawn by hand on the overlay
     fig.canvas.draw()
     surface_overlay(fig, ax, sc, cfg, variant, box, saddle)
+    if variant == "text":
+        ax.set_visible(False)                # the 3D layer only served the projection
     return ax
 
 
@@ -761,10 +772,11 @@ def export_rod_column(ex, sc, cfg, tag_suffix, alt):
                     near = np.abs(o[:, 0] - cx) <= r_in
                     y_max = ys[i] + o[near, 1].min() - col["clearance_in"]
                 y_max /= scale
-            draw_rod(ax, nodes + shift, lam[k], sc["theta"][k], rcfg, scale, tag, ob, y_max=y_max,
-                     alpha=1.0 if named else col["ghost_alpha"],
-                     lw=style.LW_DATA_THICK if named else col["ghost_lw_pt"],
-                     zorder=3 if named else 2)
+            if variant == "bare":
+                draw_rod(ax, nodes + shift, lam[k], sc["theta"][k], rcfg, scale, tag, ob,
+                         y_max=y_max, alpha=1.0 if named else col["ghost_alpha"],
+                         lw=style.LW_DATA_THICK if named else col["ghost_lw_pt"],
+                         zorder=3 if named else 2)
             pts[f"rod_lam_{tag}_left_end"] = (col["rod_left_in"], ys[j],
                                               {"lambda": float(lam[k]), "k": int(k),
                                                "name": names.get(k)})
@@ -772,7 +784,7 @@ def export_rod_column(ex, sc, cfg, tag_suffix, alt):
                 t = ax.text(col["label_x_in"] / scale, ys[j] / scale, names[k], ha="center",
                             va="center", fontsize=style.FONT_SIZE)
                 t.set_gid(f"label_{names[k]}")
-        for ja, jb in zip(key[:-1], key[1:]):
+        for ja, jb in (zip(key[:-1], key[1:]) if variant == "bare" else ()):
             d = np.sign(ys[jb] - ys[ja])            # up or down the column
             a = np.array([col["label_x_in"], ys[ja] + d * col["arrow_gap_in"]]) / scale
             b = np.array([col["label_x_in"], ys[jb] - d * col["arrow_gap_in"]]) / scale
@@ -790,8 +802,9 @@ def export_rod_column(ex, sc, cfg, tag_suffix, alt):
                             "left_rod_end_x_in": col["rod_left_in"]},
                 notes="the process as a stack of rods (" + ("bottom to top" if up else "top down") +
                       ") at the lambdas of the surface balls; start, snap, end solid, the frames "
-                      "between translucent" + ("; labels and arrows" if variant == "label"
-                                               else "; arrows only"))
+                      "between translucent" + ("; the names only, on the same canvas as the bare "
+                                               "variant" if variant == "label"
+                                               else "; with the arrows"))
         ex.annotate(stem, pts)
 
 
@@ -832,7 +845,13 @@ def export_colorbars(ex, cfg):
             ax.set_axis_off()
             ax.set_xlim(0, W)
             ax.set_ylim(0, H)
-            _bar_patches(ax, x0, y0, bw, bh, n, orient == "horizontal")
+            if variant == "bare":
+                _bar_patches(ax, x0, y0, bw, bh, n, orient == "horizontal")
+                if orient == "vertical":
+                    for v, lab in ((0.0, "0"), (1.0, "1")):
+                        y = y0 + v * bh
+                        draw.polyline(ax, [[x0 + bw, y], [x0 + bw + 0.03, y]], color=style.INK,
+                                      lw=style.LW_AUX, gid=f"colorbar_tick_{lab}")
             if variant == "axes":
                 if orient == "horizontal":
                     ym = y0 + 0.5 * bh
@@ -842,10 +861,6 @@ def export_colorbars(ex, cfg):
                     tl = ax.text(x0 + bw + 0.13, ym, r"$\lambda$", ha="left", va="center",
                                  fontsize=style.LABEL_SIZE)
                 else:
-                    for v, lab in ((0.0, "0"), (1.0, "1")):
-                        y = y0 + v * bh
-                        draw.polyline(ax, [[x0 + bw, y], [x0 + bw + 0.03, y]], color=style.INK,
-                                      lw=style.LW_AUX, gid=f"colorbar_tick_{lab}")
                     t0 = ax.text(x0 + bw + 0.065, y0, "0", ha="left", va="center",
                                  fontsize=style.FONT_SIZE)
                     t1 = ax.text(x0 + bw + 0.065, y0 + bh, "1", ha="left", va="center",
@@ -1004,18 +1019,20 @@ def main(argv=None):
                       "lambda_snap -> lambda_post on the second",
                 extra={"lambda_ranges": [[float(ridge.pre[1][0]), float(ridge.pre[1][-1])],
                                          [float(ridge.post[1][0]), float(ridge.post[1][-1])]]})
-        for variant in ("bare", "axes"):
+        for variant in ("bare", "axes", "text"):
             fig = plt.figure(figsize=(W, H))
             ax = draw_surface(fig, sc, ridge, cfg, variant)
             fig.canvas.draw()
             pts = surface_annotations(fig, ax, sc, ridge)
             stem = f"a_surface{suffix}_{variant}"
-            ex.save(fig, stem, variant=variant, placement=dict(plc, alternative=alt),
+            ex.save(fig, stem, variant={"bare": "bare", "axes": "graphic", "text": "label"}[variant],
+                    placement=dict(plc, alternative=alt),
                     data_scale={"projection": "orthographic", **pa["surface"],
                                 "energy_clip_EI_over_L": round(ridge.clip, 5)},
                     notes="E(s, lambda) surface (rasterized); balls, dashed links along the "
                           "valley floor, process arrows and the saddle line (barrier, up to "
-                          "the fold) as vectors")
+                          "the fold) as vectors; _axes adds the axis lines and ticks, _text is "
+                          "all the text (same canvas, no graphics): stack it on _bare")
             ex.annotate(stem, pts)
         singles = [{"panel": "a", "x_in": rc["column_x_in"], "y_in": y, "anchor": "lower-left",
                     "alternative": True} for y in rc["column_y_in"]]

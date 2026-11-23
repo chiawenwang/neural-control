@@ -64,6 +64,12 @@ Usage
     python scripts/train_tracking.py --path line_a --method rrt_nc --plan-seed 0 --out DIR
     python scripts/train_tracking.py jobs --out DIR      # the commands for a sweep
     python scripts/train_tracking.py report --out DIR
+    python scripts/train_tracking.py figure --npz RUN.npz [--config C] [--view 18 -75] [--snapshots 3]
+
+Figures (src/tro_style.py, IEEE T-RO style): every run writes
+``tracking_result``, ``tracking_error`` and ``loss_curve`` as .pdf/.svg with
+editable text plus a .png preview.  ``figure`` re-renders them from a run's
+.npz (view angle, snapshots, title) without training again.
 """
 import sys
 from pathlib import Path
@@ -100,6 +106,7 @@ from neural_control import (
 )
 from runlog import RunLogger
 from utils import maybe_save_trajectory_gif
+import tro_style as ts
 
 
 #: Candidate reference paths, all starting at the mid node's position m0 in
@@ -595,61 +602,52 @@ def train_track_rhc(env, checkpoint, net, u0, ref, cfg, device, lr, bounds, ws_w
     return losses, q_traj, time.time() - t_start
 
 
-def plot_tracking(ref, mids, dim, title, path, env=None, q_init=None, q_final=None):
-    """Reference against what the mid node actually did.
+def plot_tracking(ref, mids, dim, title, path, env=None, q_init=None, q_final=None,
+                  q_snaps=None, view=(22, -58), workspace="auto"):
+    """Reference against what the mid node actually did (paper figure).
 
-    With ``env`` the scene is drawn around the two paths: the gripper
-    workspace, the obstacles (the peg), the pipe, and -- from ``q_init`` /
-    ``q_final`` -- the rod at the start and at the end of the rollout.
+    The scene (peg, pipe, gripper workspace) and the rod at the start, at the
+    end and optionally at ``q_snaps``, drawn by ``utils.paper_scene`` in the
+    IEEE T-RO style of every task figure; writes ``path`` .pdf/.svg + .png
+    and returns the paths.  ``workspace``: auto / fit / clip / off (auto
+    leaves out a workspace much larger than the scene).  ``title=None`` leaves
+    the title out (the caption replaces it).
     """
-    import utils
-    fig = plt.figure(figsize=(7, 6))
-    ax = fig.add_subplot(111) if dim == 2 else fig.add_subplot(111, projection='3d')
-    coords = lambda p: [p[:, c] for c in range(dim)]       # noqa: E731
-    extent = [ref, mids]
-    if env is not None:
-        utils.draw_obstacles(ax, env)
-        utils.draw_workspace(ax, env)
-        if getattr(env, 'pipe', None) is not None:
-            env.pipe.draw(ax)
-        if getattr(env, 'workspace_box', None) is not None:
-            extent.append(np.stack(env.workspace_box))
-        for obs in getattr(env, 'obstacles', []) or []:
-            if hasattr(obs, 'bounds'):
-                extent.append(np.stack(obs.bounds()))
-        for q, style, label in ((q_init, dict(color='0.6', lw=1.2), "Initial rod"),
-                                (q_final, dict(color='k', lw=1.8), "Final rod")):
-            if q is not None:
-                P = utils._positions(q, env, dim)
-                ax.plot(*coords(P), label=label, **style)
-                extent.append(P)
-    ax.plot(*coords(ref), 'b--', linewidth=2, label="Reference path")
-    ax.plot(*coords(mids), 'r-', linewidth=1.5, label="Mid node")
-    ax.plot(*[[v] for v in ref[0]], 'go', markersize=7, label="Start")
-    ax.plot(*[[v] for v in ref[-1]], 'bx', markersize=10, markeredgewidth=2.5, label="Path end")
-    if dim == 2:
-        ax.set_aspect('equal')
-    else:
-        pts = np.vstack(extent)
-        lo, hi = pts.min(0), pts.max(0)
-        half = 0.55 * (hi - lo).max()
-        ctr = 0.5 * (lo + hi)
-        ax.set_xlim(ctr[0] - half, ctr[0] + half)
-        ax.set_ylim(ctr[1] - half, ctr[1] + half)
-        ax.set_zlim(ctr[2] - half, ctr[2] + half)
-        ax.set_zlabel("z")
-        try:
-            ax.set_box_aspect((1, 1, 1))
-        except AttributeError:      # matplotlib < 3.3
-            pass
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_title(title)
-    ax.legend(fontsize=8, loc='upper left', bbox_to_anchor=(1.0, 1.0), frameon=False)
-    ax.grid(True, linestyle="--", alpha=0.4)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    from utils import paper_scene
+    return paper_scene(
+        path, env, dim=dim, rod_init=q_init, rod_final=q_final, rod_snaps=q_snaps,
+        curves=[(mids, "achieved", "Mid node"), (ref, "reference", "Reference")],
+        points=[(ref[0], "start", "Start"), (ref[-1], "goal", "End")],
+        title=title, view=view, workspace=workspace)
+
+
+def plot_tracking_error(ref, mids, path, title=None):
+    """Tracking error |m_k - r_k| (mm) against the step k, single column.
+
+    A 3D view cannot show millimetre errors; this strip goes under the scene
+    figure (or next to it).  Writes .pdf/.svg/.png, returns the paths.
+    """
+    err = 1e3 * np.linalg.norm(mids[1:] - ref[1:len(mids)], axis=1)
+    k = np.arange(1, len(err) + 1)
+    with ts.style():
+        fig, ax = plt.subplots(figsize=(ts.COL_W, 1.35))
+        ax.plot(k, err, **ts.ROLE["achieved"])
+        fin = err[np.isfinite(err)]
+        if fin.size:
+            rms = float(np.sqrt(np.mean(fin ** 2)))
+            ax.axhline(rms, **ts.ROLE["reference"])
+            ax.text(0.99, rms, f"RMS {rms:.2f} mm", transform=ax.get_yaxis_transform(),
+                    ha="right", va="bottom", fontsize=ts.FS_TICK)
+        ax.set_xlim(0, len(err))
+        ax.set_ylim(bottom=0)
+        ax.set_xlabel(r"Step $k$")
+        ax.set_ylabel("Error (mm)")
+        if title:
+            ax.set_title(title)
+        ts.style_2d(ax)
+        paths = ts.save(fig, path, width=ts.COL_W)
+        plt.close(fig)
+    return paths
 
 
 def build_reference(cfg, env, args, m0):
@@ -785,6 +783,10 @@ def cmd_train(args):
                        "epoch_mid_paths": np.array(hist["mid_paths"], dtype=np.float32),
                        "epoch_u_paths": np.array(hist["u_paths"], dtype=np.float32)})
 
+    # rod states for the figures (``figure`` re-renders them without training)
+    as_np = lambda q: np.asarray(q.detach().cpu() if hasattr(q, "detach") else q, dtype=float)  # noqa: E731
+    arrays["q_init"] = as_np(checkpoint["q"])
+    arrays["q_traj"] = np.stack([as_np(q) for q in q_traj])
     summary.update({"train_time": t_train, "final": final, "status": "done",
                     "newton_failures_total": int(env.n_newton_failures),
                     "unstable_steps_total": int(env.n_unstable),
@@ -792,19 +794,15 @@ def cmd_train(args):
     np.savez_compressed(out / f"{name}.npz", **arrays)
     json.dump(summary, open(out / f"{name}.json", "w"), indent=1, default=float)
 
+    fig_dir = Path(run.artifact_dir)
     plot_tracking(ref, arrays["final_mid"], dim, f"Mid-node tracking ({ref_name})",
-                  os.path.join(run.artifact_dir, "tracking_result.png"),
-                  env=env, q_init=checkpoint["q"], q_final=q_traj[-1])
+                  fig_dir / "tracking_result", env=env, q_init=checkpoint["q"],
+                  q_final=q_traj[-1])
+    plot_tracking_error(ref, arrays["final_mid"], fig_dir / "tracking_error")
     if losses:
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.plot(np.arange(len(losses)), losses, linewidth=1.5, color="steelblue")
-        ax.set_xlabel("RHC segment" if cfg.rhc.enabled else "Epoch")
-        ax.set_ylabel("Tracking loss")
-        ax.set_title(f"Tracking loss ({ref_name})")
-        ax.grid(True, linestyle="--", alpha=0.5)
-        fig.tight_layout()
-        fig.savefig(os.path.join(run.artifact_dir, "loss_curve.png"), dpi=150)
-        plt.close(fig)
+        ts.loss_curve(losses, fig_dir / "loss_curve",
+                      xlabel="RHC segment" if cfg.rhc.enabled else "Epoch",
+                      ylabel="Tracking loss", title=f"Tracking loss ({ref_name})")
     maybe_save_trajectory_gif(cfg, q_traj, env, ref[1:], save_path=str(run.artifact_dir),
                               title=f'DLO tracking ({ref_name})')
 
@@ -1069,8 +1067,47 @@ def cmd_jobs(args):
                   f"> {out}/logs/{p}_nc_s{s}_lr.log 2>&1")
 
 
+def cmd_figure(args):
+    """Re-render a finished run's figures from its .npz -- no training.
+
+    The .npz must come from a ``train`` with this version (it stores
+    ``q_init`` and ``q_traj``); the environment is rebuilt from ``--config``
+    only for the scene geometry (obstacles, pipe, workspace) and the node
+    positions.  Use it to try view angles and snapshots for the paper.
+    """
+    npz = Path(args.npz)
+    z = np.load(npz)
+    missing = [k for k in ("ref", "final_mid", "q_init", "q_traj") if k not in z.files]
+    if missing:
+        raise SystemExit(f"{npz} has no {', '.join(missing)} (written before the figure data "
+                         "was saved); run the training again")
+    meta_f = npz.with_suffix(".json")
+    meta = json.load(open(meta_f)) if meta_f.exists() else {}
+    cfg = load_config(args.config)
+    dim = env_dim(cfg)
+    env = build_env(cfg)
+    reset_env(env, cfg)
+    ref, mids, q_traj = z["ref"], z["final_mid"], z["q_traj"]
+    snaps = None
+    if args.snapshots > 0:
+        idx = np.linspace(0, len(q_traj) - 1, args.snapshots + 2)[1:-1].round().astype(int)
+        snaps = [q_traj[i] for i in idx]
+    name = meta.get("path") or npz.stem
+    stem = Path(args.stem) if args.stem else npz.with_name(npz.stem)
+    title = None if args.no_title else f"Mid-node tracking ({name})"
+    plot_tracking(ref, mids, dim, title, f"{stem}_tracking", env=env, q_init=z["q_init"],
+                  q_final=q_traj[-1], q_snaps=snaps, view=tuple(args.view),
+                  workspace=args.workspace)
+    plot_tracking_error(ref, mids, f"{stem}_error")
+    losses = meta.get("epoch_loss") or meta.get("segment_loss")
+    if losses:
+        ts.loss_curve(losses, f"{stem}_loss",
+                      xlabel="RHC segment" if "segment_loss" in meta else "Epoch",
+                      ylabel="Tracking loss")
+
+
 def main():
-    cmds = ("train", "verify", "jobs", "report")
+    cmds = ("train", "verify", "jobs", "report", "figure")
     argv = sys.argv[1:]
     cmd = argv.pop(0) if argv and argv[0] in cmds else "train"
 
@@ -1112,6 +1149,19 @@ def main():
         ap.add_argument("--shortcuts", type=int, default=10)
         ap.add_argument("--plan-nv", type=int, default=11)
         ap.add_argument("--plan-newton-iter", type=int, default=100)
+    if cmd == "figure":
+        ap.add_argument("--npz", required=True, help="the run's .npz (from train)")
+        ap.add_argument("--config", default=None, help="the config the run was trained with")
+        ap.add_argument("--stem", default=None,
+                        help="output path without extension; default: next to the .npz")
+        ap.add_argument("--view", type=float, nargs=2, default=(22.0, -58.0),
+                        metavar=("ELEV", "AZIM"), help="3D view angles [deg]")
+        ap.add_argument("--snapshots", type=int, default=0,
+                        help="intermediate rod states to draw (gray, light -> dark)")
+        ap.add_argument("--workspace", choices=("auto", "fit", "clip", "off"), default="auto",
+                        help="gripper workspace: whole box, clipped to the scene, or left out "
+                             "(auto: whole box if it is not much larger than the scene)")
+        ap.add_argument("--no-title", action="store_true")
     if cmd == "jobs":
         ap.add_argument("--paths", nargs="+", choices=sorted(PATHS), default=None,
                         help="default: every verified path")
@@ -1130,6 +1180,8 @@ def main():
         cmd_jobs(args)
     elif cmd == "report":
         report(Path(args.out))
+    elif cmd == "figure":
+        cmd_figure(args)
     else:
         if args.method == "rrt_nc" and args.path is None:
             raise SystemExit("rrt_nc needs --path: the plan is verified per named path")
