@@ -267,3 +267,57 @@ Initial trajectory: rms 14.61 mm, max 21.32 mm, contact 34 % of the steps, snaps
 [P2_net_state_lbfgs_s2 it 254] rms=   0.108 mm  rollouts=278  snaps=0  pen=0.021 mm  t= 8370.0s  alpha=1 ls=1
 [P2_net_state_lbfgs_s2 it 255] rms=   0.108 mm  rollouts=279  snaps=0  pen=0.021 mm  t= 8400.3s  alpha=1 ls=1
 [P2_net_state_lbfgs_s2 it 256] rms=   0.108 mm  rollouts=280  snaps=0  pen=0.021 mm  t= 8430.0s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 257] rms=   0.107 mm  rollouts=281  snaps=0  pen=0.021 mm  t= 8459.7s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 258] rms=   0.107 mm  rollouts=282  snaps=0  pen=0.021 mm  t= 8489.6s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 259] rms=   0.107 mm  rollouts=283  snaps=0  pen=0.021 mm  t= 8519.9s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 260] rms=   0.107 mm  rollouts=284  snaps=0  pen=0.021 mm  t= 8549.9s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 261] rms=   0.107 mm  rollouts=285  snaps=0  pen=0.021 mm  t= 8579.5s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 262] rms=   0.107 mm  rollouts=286  snaps=0  pen=0.021 mm  t= 8610.7s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 263] rms=   0.107 mm  rollouts=287  snaps=0  pen=0.021 mm  t= 8641.9s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 264] rms=   0.107 mm  rollouts=288  snaps=0  pen=0.021 mm  t= 8672.9s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 265] rms=   0.107 mm  rollouts=289  snaps=0  pen=0.021 mm  t= 8703.0s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 266] rms=   0.107 mm  rollouts=290  snaps=0  pen=0.021 mm  t= 8733.2s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 267] rms=   0.107 mm  rollouts=291  snaps=0  pen=0.021 mm  t= 8763.0s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 268] rms=   0.107 mm  rollouts=292  snaps=0  pen=0.021 mm  t= 8792.2s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 269] rms=   0.107 mm  rollouts=293  snaps=0  pen=0.021 mm  t= 8822.3s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 270] rms=   0.107 mm  rollouts=294  snaps=0  pen=0.021 mm  t= 8853.4s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 271] rms=   0.107 mm  rollouts=295  snaps=0  pen=0.021 mm  t= 8883.1s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 272] rms=   0.107 mm  rollouts=296  snaps=0  pen=0.021 mm  t= 8913.9s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 273] rms=   0.107 mm  rollouts=297  snaps=0  pen=0.021 mm  t= 8943.4s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 274] rms=   0.107 mm  rollouts=298  snaps=0  pen=0.021 mm  t= 8974.0s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 275] rms=   0.107 mm  rollouts=302  snaps=0  pen=0.021 mm  t= 9094.9s  alpha=0.0499 ls=4
+[P2_net_state_lbfgs_s2 it 276] rms=   0.107 mm  rollouts=303  snaps=0  pen=0.021 mm  t= 9125.0s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 277] rms=   0.107 mm  rollouts=304  snaps=0  pen=0.021 mm  t= 9154.6s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 278] rms=   0.106 mm  rollouts=305  snaps=0  pen=0.021 mm  t= 9184.2s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 279] rms=   0.106 mm  rollouts=306  snaps=0  pen=0.021 mm  t= 9213.8s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 280] rms=   0.106 mm  rollouts=307  snaps=0  pen=0.021 mm  t= 9243.2s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 281] rms=   0.106 mm  rollouts=308  snaps=0  pen=0.021 mm  t= 9272.9s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 282] rms=   0.106 mm  rollouts=309  snaps=0  pen=0.021 mm  t= 9303.4s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 283] rms=   0.106 mm  rollouts=310  snaps=0  pen=0.021 mm  t= 9333.4s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 284] rms=   0.106 mm  rollouts=311  snaps=0  pen=0.021 mm  t= 9363.3s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 285] rms=   0.106 mm  rollouts=312  snaps=0  pen=0.021 mm  t= 9394.2s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 286] rms=   0.106 mm  rollouts=313  snaps=0  pen=0.021 mm  t= 9424.2s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 287] rms=   0.106 mm  rollouts=314  snaps=0  pen=0.021 mm  t= 9453.9s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 288] rms=   0.106 mm  rollouts=315  snaps=0  pen=0.021 mm  t= 9484.5s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 289] rms=   0.106 mm  rollouts=316  snaps=0  pen=0.021 mm  t= 9515.3s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 290] rms=   0.106 mm  rollouts=317  snaps=0  pen=0.021 mm  t= 9545.4s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 291] rms=   0.106 mm  rollouts=318  snaps=0  pen=0.021 mm  t= 9576.0s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 292] rms=   0.106 mm  rollouts=319  snaps=0  pen=0.021 mm  t= 9606.0s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 293] rms=   0.106 mm  rollouts=321  snaps=0  pen=0.021 mm  t= 9665.3s  alpha=0.146 ls=2
+[P2_net_state_lbfgs_s2 it 294] rms=   0.106 mm  rollouts=322  snaps=0  pen=0.021 mm  t= 9695.2s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 295] rms=   0.106 mm  rollouts=323  snaps=0  pen=0.021 mm  t= 9726.5s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 296] rms=   0.105 mm  rollouts=324  snaps=0  pen=0.021 mm  t= 9755.9s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 297] rms=   0.105 mm  rollouts=325  snaps=0  pen=0.021 mm  t= 9786.1s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 298] rms=   0.105 mm  rollouts=326  snaps=0  pen=0.021 mm  t= 9815.9s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 299] rms=   0.105 mm  rollouts=327  snaps=0  pen=0.021 mm  t= 9846.7s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 300] rms=   0.105 mm  rollouts=328  snaps=0  pen=0.021 mm  t= 9877.3s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 301] rms=   0.105 mm  rollouts=329  snaps=0  pen=0.021 mm  t= 9906.9s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 302] rms=   0.105 mm  rollouts=330  snaps=0  pen=0.021 mm  t= 9937.0s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 303] rms=   0.105 mm  rollouts=331  snaps=0  pen=0.021 mm  t= 9967.2s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 304] rms=   0.105 mm  rollouts=332  snaps=0  pen=0.021 mm  t= 9997.8s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 305] rms=   0.105 mm  rollouts=333  snaps=0  pen=0.021 mm  t=10028.5s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 306] rms=   0.105 mm  rollouts=334  snaps=0  pen=0.021 mm  t=10058.9s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 307] rms=   0.105 mm  rollouts=335  snaps=0  pen=0.021 mm  t=10089.0s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 308] rms=   0.105 mm  rollouts=336  snaps=0  pen=0.021 mm  t=10118.7s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 309] rms=   0.105 mm  rollouts=337  snaps=0  pen=0.021 mm  t=10148.5s  alpha=1 ls=1
+[P2_net_state_lbfgs_s2 it 310] rms=   0.105 mm  rollouts=338  snaps=0  pen=0.021 mm  t=10178.9s  alpha=1 ls=1
