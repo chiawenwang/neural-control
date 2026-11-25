@@ -93,6 +93,7 @@ def _descend(env, q_from, control_node):
         n_pos=getattr(env, "n_pos", None),
         max_iter=int(cfg.get("snap_max_iter", 500)),
         kick=float(cfg.get("snap_kick", 1.0e-3)),
+        max_node_step=cfg.get("max_node_step"),
         verbose=bool(cfg.get("verbose", False)),
     )
     return q, flag, J, info
@@ -166,6 +167,16 @@ def tangent_prediction(env, control_node):
     q = env.q.copy()
     q[free] += dxf
     q[fixed] = xb_new
+    # Near a fold S is large and the linear prediction can throw the rod far
+    # -- across a peg, onto a state the penalty cannot push back from. No
+    # prediction then: Newton starts from the previous equilibrium.
+    cap = (getattr(env, "newton_cfg", {}) or {}).get("max_node_step")
+    from contact import any_crossed, step_cap_factor
+    npos = int(getattr(env, "n_pos", q.size))
+    if cap and step_cap_factor((q - env.q)[:npos], env.dim, 2.0 * float(cap)) < 1.0:
+        return env.q
+    if any_crossed(env.obstacles, env.q, q):
+        return env.q
     return q
 
 

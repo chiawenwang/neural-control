@@ -525,6 +525,12 @@ newton:
   # clamped nodes plus snap_disp_eps rod lengths. On the twist example a steep
   # but continuous response (buckling onset) stays below 13x and 0.03 m, an
   # arch flipping over reaches 90-470x and 0.4-0.6 m.
+  max_node_step: null         # [m] with obstacles: no node moves more than this per Newton or
+                              # descent iteration, and an iterate that passes the rod through a
+                              # peg is halved (the penalty acts on states only, so an unguarded
+                              # step can jump the rod across a peg). The tangent predictor is
+                              # skipped if it would move a node by more than twice this, or
+                              # through a peg. null: off.
   predictor: none             # none: Newton starts from the previous equilibrium (with the new
                               # boundary); tangent: from x_prev + S dx_b, the first-order
                               # prediction along the branch (continuation.tangent_prediction),

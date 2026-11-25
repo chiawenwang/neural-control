@@ -118,6 +118,7 @@ newton:
   stability_check: true
   snap_rule: true
   predictor: tangent            # first-order predictor of each step's Newton start
+  max_node_step: 0.02           # [m] half a peg radius: no jump of the rod across a peg
 train:
   grad_method: state            # state (ours) | proxy (frozen tangent baseline)
   optimizer: adam               # adam | lbfgs (RSS protocol; --optimizer overrides)

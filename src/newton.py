@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from contact import get_contact_energy, get_contact_forces
+from contact import get_contact_energy, get_contact_forces, any_crossed, step_cap_factor
 
 
 def solve_equilibrium(q_start, *,
@@ -66,8 +66,14 @@ def solve_equilibrium(q_start, *,
                       reg=0.0,
                       max_reg_escalations=6,
                       max_stalled_steps=10,
+                      max_node_step=None,
                       verbose=False):
     """Solve ``f(q_free) = 0`` starting from ``q_start`` (boundary DOFs already set).
+
+    ``max_node_step`` [m] (``newton.max_node_step``): with obstacles, no node
+    moves more than this in one iteration, and an iterate that would pass the
+    rod through an obstacle is halved -- the penalty acts on states only, so
+    an unguarded step can jump the rod across a peg.
 
     Returns ``(q, flag, J, info)`` where ``flag`` is 1 on convergence and -1
     otherwise, ``J`` is the equilibrium Jacobian at the returned ``q`` (the
@@ -136,10 +142,19 @@ def solve_equilibrium(q_start, *,
                 continue
 
             r_ref = max(recent)
+            guard = bool(max_node_step) and bool(obstacles)
             alpha = 1.0
+            if guard:
+                full = np.zeros_like(q)
+                full[free] = dq
+                npos_ = q.size if n_pos is None else int(n_pos)
+                alpha = step_cap_factor(full[:npos_], dim, max_node_step)
             for b in range(max_backtrack if line_search else 1):
                 q_try = q.copy()
                 q_try[free] = q[free] - alpha * dq
+                if guard and any_crossed(obstacles, q, q_try):
+                    alpha *= 0.5
+                    continue
                 f_try, _ = residual(q_try, False)
                 r_try = float(np.linalg.norm(f_try[free]))
                 if np.isfinite(r_try) and (r_try <= r_ref or not line_search):
@@ -254,8 +269,12 @@ def minimize_potential(q_start, *,
                        kick=1.0e-3,
                        max_kicks=4,
                        max_shift_escalations=12,
+                       max_node_step=None,
                        verbose=False):
     """Descend the total potential over the free DOFs from ``q_start``.
+
+    ``max_node_step``: as in :func:`solve_equilibrium` (step cap and no
+    passing through an obstacle).
 
     The boundary DOFs of ``q_start`` are held.  The direction is the Newton
     step on ``Pi`` with the Hessian made positive definite by a shift,
@@ -367,11 +386,19 @@ def minimize_potential(q_start, *,
                 return finish(it, -1, "no descent direction")
 
         gd = float(g @ d)
+        guard = bool(max_node_step) and bool(obstacles)
         alpha = 1.0
+        if guard:
+            full = np.zeros_like(q)
+            full[free] = d
+            alpha = step_cap_factor(full[:npos], dim, max_node_step)
         accepted = False
         for b in range(max_backtrack):
             q_try = q.copy()
             q_try[free] = q[free] + alpha * d
+            if guard and any_crossed(obstacles, q, q_try):
+                alpha *= 0.5
+                continue
             Pi_try = potential(q_try)
             if np.isfinite(Pi_try) and Pi_try <= Pi + armijo_c * alpha * gd:
                 accepted = True

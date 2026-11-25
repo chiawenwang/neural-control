@@ -412,6 +412,29 @@ class PegObstacle:
                 "force": force,
                 "end_contact": bool(np.any(touch & beyond))}
 
+    def crossed(self, q_prev, q_new):
+        """Whether moving the rod from ``q_prev`` to ``q_new`` passes it THROUGH the peg.
+
+        The penalty acts on states only, so one large step (a Newton step, a
+        predictor, a descent step) can carry part of the rod across the peg.
+        Every quadrature point's straight segment from its old to its new
+        position is tested against the solid core (axis distance < radius,
+        rod radius not included, within the axis range).  Reliable for
+        displacements small against the radius, which the solvers enforce
+        with ``newton.max_node_step``.
+        """
+        a = self.sample_points(q_prev)
+        b = self.sample_points(q_new)
+        c = np.array([self.cx, self.cz])
+        A, B = a[:, [0, 2]] - c, b[:, [0, 2]] - c
+        D = B - A
+        dd = np.sum(D * D, 1)
+        t = np.where(dd > 1e-18, np.clip(-np.sum(A * D, 1) / np.maximum(dd, 1e-300), 0.0, 1.0), 0.0)
+        P = A + t[:, None] * D
+        y = a[:, 1] + t * (b[:, 1] - a[:, 1])
+        return bool(np.any((np.linalg.norm(P, axis=1) < self.radius)
+                           & (np.abs(y - self.cy) <= self.half_length)))
+
     def bounds(self):
         """``(lo, hi)`` corners of the box around the peg."""
         c = self.center
@@ -427,6 +450,22 @@ class PegObstacle:
                                self.cz + self.radius * np.sin(T), color=color, alpha=alpha,
                                linewidth=0, shade=True)
         return [surf]
+
+
+def any_crossed(obstacles, q_prev, q_new):
+    """Whether a step from ``q_prev`` to ``q_new`` passes the rod through any obstacle
+    that can tell (``crossed``; the pegs)."""
+    return any(o.crossed(q_prev, q_new) for o in obstacles if hasattr(o, "crossed"))
+
+
+def step_cap_factor(dq_pos, dim, max_node_step):
+    """Largest factor in (0, 1] keeping every node's move ``|factor * dq|`` within
+    ``max_node_step`` (None or 0: no cap)."""
+    if not max_node_step:
+        return 1.0
+    d = np.asarray(dq_pos, dtype=float).reshape(-1, dim)
+    m = float(np.linalg.norm(d, axis=1).max()) if d.size else 0.0
+    return 1.0 if m <= max_node_step else float(max_node_step) / m
 
 
 def get_contact_forces(q, obstacles, dim=2, forces_only=False, n_pos=None):

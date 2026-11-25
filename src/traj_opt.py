@@ -240,6 +240,38 @@ def pegs_of(env):
     return [o for o in env.obstacles if hasattr(o, "report")]
 
 
+def tunneled(peg, q_prev, q_new):
+    """Whether the rod passed through ``peg`` between two committed states
+    (contact.PegObstacle.crossed); the solvers already prevent it step by
+    step with ``newton.max_node_step``, this is the final guard."""
+    return peg.crossed(q_prev, q_new)
+
+
+def self_clearance(X, r_rod, skip=2):
+    """Smallest surface-to-surface distance between non-neighbouring edges of the rod.
+
+    ``X`` (nv, 3) node positions; edges i and j with ``|i - j| > skip`` are
+    compared (closer ones share a node or bend smoothly into each other).
+    Self-contact is not modeled, so a negative value means the rod passes
+    through itself and the state is not physical.
+    """
+    P0, P1 = X[:-1], X[1:]
+    n = len(P0)
+    I, J = np.triu_indices(n, k=skip + 1)
+    a0, a1, b0, b1 = P0[I], P1[I], P0[J], P1[J]
+    d1, d2, r = a1 - a0, b1 - b0, a0 - b0
+    A = np.sum(d1 * d1, 1); E = np.sum(d2 * d2, 1); F = np.sum(d2 * r, 1)
+    C = np.sum(d1 * r, 1); B = np.sum(d1 * d2, 1)
+    den = A * E - B * B
+    s = np.where(den > 1e-14, np.clip((B * F - C * E) / np.maximum(den, 1e-300), 0, 1), 0.0)
+    t = (B * s + F) / E
+    t = np.clip(t, 0, 1)
+    s = np.clip((B * t - C) / A, 0, 1)
+    t = np.clip((B * s + F) / E, 0, 1)
+    d = np.linalg.norm(a0 + d1 * s[:, None] - b0 - d2 * t[:, None], axis=1)
+    return float(d.min() - 2.0 * r_rod) if d.size else np.inf
+
+
 def rollout(env, checkpoint, U, keep_J="last", record=False):
     """Execute the commands ``U`` from ``checkpoint``; stop at the first failed step.
 
@@ -257,6 +289,7 @@ def rollout(env, checkpoint, U, keep_J="last", record=False):
     out = {"ok": True, "reason": "", "steps": 0, "J_list": [None] * M, "snaps": 0, "snap_steps": [],
            "max_substeps": 0, "newton_iterations": 0, "unstable": 0, "max_penetration": 0.0,
            "max_strain": 0.0, "max_abs_holonomy": 0.0, "end_contact": False,
+           "min_self_clearance": np.inf,
            "onset": [None] * len(pegs), "q_list": []}
     if record:
         out["rec"] = {"min_clearance": np.full((M, len(pegs)), np.nan),
@@ -280,16 +313,23 @@ def rollout(env, checkpoint, U, keep_J="last", record=False):
             out["unstable"] += 1
             out.update(ok=False, reason=f"unstable at step {k}")
             break
+        q = info["q"]
+        q_prev = out["q_list"][-1] if out["q_list"] else checkpoint["q"]
+        hit = [j for j, peg in enumerate(pegs) if tunneled(peg, q_prev, q)]
+        if hit:
+            out.update(ok=False, reason=f"tunneled through peg {hit} at step {k}")
+            break
         if info.get("snap"):
             out["snaps"] += 1
             out["snap_steps"].append(k)
-        q = info["q"]
         out["q_list"].append(q)
         if keep_J == "all" or k == M - 1:
             out["J_list"][k] = info["J"]
         X = env.positions(q)
         strain = np.abs(np.linalg.norm(np.diff(X, axis=0), axis=1) / env.deltaL - 1.0).max()
         out["max_strain"] = max(out["max_strain"], float(strain))
+        out["min_self_clearance"] = min(out["min_self_clearance"],
+                                        self_clearance(X, getattr(env, "R_outer", 0.0)))
         H = float(env.energy.holonomy(q)) if getattr(env, "twist", False) else 0.0   # lifted
         out["max_abs_holonomy"] = max(out["max_abs_holonomy"], abs(H))
         for j, peg in enumerate(pegs):
@@ -344,7 +384,8 @@ class Evaluator:
 
     LOG_KEYS = ("loss", "rms", "gnorm", "ok", "reason", "time", "rollouts", "snaps",
                 "max_substeps", "newton_iterations", "max_penetration", "max_strain",
-                "max_abs_holonomy", "ws_violation", "end_contact", "onset", "final_touching",
+                "max_abs_holonomy", "min_self_clearance", "ws_violation", "end_contact", "onset",
+                "final_touching",
                 "final_force")
 
     def __init__(self, env, checkpoint, param, u0, k_end, target_shape, nodes, *,
@@ -442,7 +483,7 @@ class Evaluator:
         lg["time"].append(time.time() - self.t0)
         lg["rollouts"].append(self.n_rollouts)
         for k in ("snaps", "max_substeps", "newton_iterations", "max_penetration", "max_strain",
-                  "max_abs_holonomy", "ws_violation", "end_contact"):
+                  "max_abs_holonomy", "min_self_clearance", "ws_violation", "end_contact"):
             lg[k].append(res.get(k, np.nan))
         lg["onset"].append([(-1 if o is None else o) for o in res.get("onset", [])])
         lg["final_touching"].append(res.get("final_touching", []))

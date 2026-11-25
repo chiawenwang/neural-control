@@ -109,6 +109,7 @@ def objfun_3d(q_old, u_old, dt, tol, maximum_iter,
         max_backtrack=cfg.get("max_backtrack", 12),
         nonmonotone_memory=cfg.get("nonmonotone_memory", 8),
         reg=cfg.get("reg", 0.0),
+        max_node_step=cfg.get("max_node_step"),
     )
     return q_new, flag, J, info
 

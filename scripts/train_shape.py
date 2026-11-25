@@ -145,12 +145,26 @@ def load_config_copy(cfg):
 # ---------------------------------------------------------------- targets
 
 def target_paths(cfg):
-    """``{name: (description, du)}`` of ``task.shape_targets``."""
+    """``{name: (description, spec)}`` of ``task.shape_targets``.
+
+    A spec is either a straight move ``{du: [6]}`` of the gripper or a path
+    through via points ``{via: [[lam, dx, dy, dz, dtheta, dphi, dyaw], ...]}``
+    (increments over u0 at the given lambda, linear in between, lambda = 1
+    last), optionally with ``touch`` (indices of the pegs the target must
+    touch; default all).
+    """
     named = (cfg.get("task") or {}).get("shape_targets") or {}
     if not named:
         raise SystemExit("this config has no task.shape_targets (see configs/task_shape_pegs_3d.yaml)")
-    return {name: (t.get("description", f"straight move du = {list(t['du'])}"),
-                   np.array(t["du"], dtype=float)) for name, t in named.items()}
+    out = {}
+    for name, t in named.items():
+        spec = dict(t)
+        if "via" not in spec and "du" not in spec:
+            raise SystemExit(f"target {name}: give du (straight move) or via (via points)")
+        desc = t.get("description", f"straight move du = {list(t['du'])}" if "du" in t
+                     else f"path through {len(t['via'])} via points")
+        out[name] = (desc, spec)
+    return out
 
 
 def check_names(names, paths):
@@ -160,11 +174,24 @@ def check_names(names, paths):
     return list(names or paths)
 
 
-def designed_commands(u0, du, M):
-    """The designed straight move: ``u_k = u0 + (k+1)/M * du`` on the gripper."""
+def designed_commands(u0, spec, M):
+    """The designed motion of a target spec, ``u_k`` at ``lambda = (k+1)/M``:
+    the straight move ``u0 + lambda du``, or the piecewise-linear path through
+    the via points (increments over u0)."""
     k_end = len(u0) // 2
-    U = np.repeat(u0[None, :], M, axis=0)
-    U[:, k_end:] += (np.arange(1, M + 1) / M)[:, None] * du[None, :]
+    U = np.repeat(np.asarray(u0, float)[None, :], M, axis=0)
+    lam = np.arange(1, M + 1) / M
+    if isinstance(spec, dict) and "via" in spec:
+        V = np.asarray(spec["via"], dtype=float)
+        knots = np.concatenate([[0.0], V[:, 0]])
+        inc = np.vstack([np.zeros(V.shape[1] - 1), V[:, 1:]])
+        if abs(knots[-1] - 1.0) > 1e-12 or np.any(np.diff(knots) <= 0):
+            raise SystemExit("via points need increasing lambda ending at 1")
+        for c in range(inc.shape[1]):
+            U[:, k_end + c] += np.interp(lam, knots, inc[:, c])
+        return U
+    du = np.asarray(spec["du"] if isinstance(spec, dict) else spec, dtype=float)
+    U[:, k_end:] += lam[:, None] * du[None, :]
     return U
 
 
@@ -185,8 +212,9 @@ def cmd_targets(args):
           f"contact model {cfg.peg.get('model', 'smooth')} (delta {cfg.peg.get('smoothing', 1e-4):g} m)")
     print(f"Start rod: clearance to the pegs {[round(c * 1e3, 1) for c in start_clear]} mm (rod surface)")
     for name in names:
-        desc, du = paths[name]
-        U = designed_commands(u0, du, M)
+        desc, spec = paths[name]
+        U = designed_commands(u0, spec, M)
+        req = [int(i) for i in spec.get("touch", range(len(pegs)))]
         t0 = time.time()
         res = T.rollout(env, checkpoint, U, keep_J="last", record=True)
         if not res["ok"]:
@@ -206,13 +234,27 @@ def cmd_targets(args):
         criteria = {
             # rod SURFACE to peg surface, as stated in the paper (Sec. VII-A)
             "start_clearance_ge_27mm": bool(min(start_clear) >= 0.027),
-            "no_contact_first_30pct": bool(all(o is not None and o >= int(0.3 * M) for o in onset)),
-            "both_touch_at_end": bool(all(res["final_touching"])),
+            # the pegs the target needs (`touch`, default all): not touched in the
+            # first 30 % of the designed motion, touched at its end
+            "no_contact_first_30pct": bool(all(onset[i] is not None and onset[i] >= int(0.3 * M) for i in req)),
+            "required_pegs_touch_at_end": bool(all(res["final_touching"][i] for i in req)),
             "max_penetration_le_0.5mm": bool(res["max_penetration"] <= 5e-4),
             "no_cap_contact": not res["end_contact"],
-            "no_snap": res["snaps"] == 0,
+            "no_self_contact": bool(res["min_self_clearance"] >= 0.0),
+            # a target may admit a snap-through on its designed motion (terminal objective)
+            "no_snap": res["snaps"] == 0 or bool(spec.get("allow_snap", False)),
         }
-        rec_json = {"name": name, "description": desc, "du": du.tolist(), "N": M, "nv": int(env.nv),
+        # How hard (not a criterion; the RSS paper kept a scene only if neither
+        # came within two thresholds): the straight constant-rate move to the
+        # same end pose, and the designed motion without the pegs.
+        Us = designed_commands(u0, {"du": (U[-1] - u0)[len(u0) // 2:]}, M)
+        rs = T.rollout(env, checkpoint, Us, keep_J="last")
+        rms_straight = (float(np.sqrt(np.mean(np.sum((env.positions(rs["q_list"][-1])[nodes]
+                                                      - shape[nodes]) ** 2, axis=1))))
+                        if rs["ok"] else None)
+        rec_json = {"name": name, "description": desc, "du": spec.get("du"), "via": spec.get("via"),
+                    "require_touch": req, "allow_snap": bool(spec.get("allow_snap", False)),
+                    "N": M, "nv": int(env.nv),
                     "config": str(args.config), "contact_model": cfg.peg.get("model", "smooth"),
                     "smoothing": float(cfg.peg.get("smoothing", 1e-4)),
                     "snap_steps": res["snap_steps"], "max_substeps": res["max_substeps"],
@@ -222,7 +264,9 @@ def cmd_targets(args):
                     "final_force": res["final_force"], "touching_nodes_final": touching_nodes,
                     "max_penetration": res["max_penetration"], "max_strain": res["max_strain"],
                     "max_abs_holonomy": res["max_abs_holonomy"],
-                    "rms_free_vs_target": rms_free,
+                    "rms_free_vs_target": rms_free, "min_self_clearance": res["min_self_clearance"],
+                    "rms_straight_vs_target": rms_straight,
+                    "straight_move": "ok" if rs["ok"] else rs["reason"],
                     "rms_start_vs_target": float(np.sqrt(np.mean(np.sum(
                         (env.positions(q0)[nodes] - shape[nodes]) ** 2, axis=1)))),
                     "criteria": criteria, "criteria_ok": bool(all(criteria.values()))}
@@ -234,7 +278,9 @@ def cmd_targets(args):
         print(f"[{name}] {desc}\n   onset steps {onset}, final force {np.round(res['final_force'], 2).tolist()} N, "
               f"touching nodes {touching_nodes}, max penetration {res['max_penetration'] * 1e3:.3f} mm, "
               f"snaps {res['snap_steps'] or 'none'}, start->target rms {rec_json['rms_start_vs_target'] * 1e3:.1f} mm, "
-              f"free (no pegs) end shape vs target {('%.1f mm' % (rms_free * 1e3)) if rms_free is not None else 'failed'}"
+              f"free (no pegs) end shape vs target {('%.1f mm' % (rms_free * 1e3)) if rms_free is not None else 'failed'}, "
+              f"straight move to the end pose: {('%.1f mm' % (rms_straight * 1e3)) if rms_straight is not None else 'infeasible (' + rs['reason'] + ')'}, "
+              f"self clearance {res['min_self_clearance'] * 1e3:.1f} mm"
               f"\n   criteria: {'all OK' if rec_json['criteria_ok'] else {k: v for k, v in criteria.items() if not v}}",
               flush=True)
     plot_targets(out, names, env)
@@ -330,7 +376,8 @@ def calibrated_init(cfg, out_dir, target, seed, env, checkpoint, U_ref, target_s
     ``task.shape_init.rms_band`` (aim: its middle), by the secant-like update
     ``c <- c * aim / rms`` on rollouts with the pegs.  Accepted only if the
     rollout is admissible (converged, stable, in the workspace), has no snap,
-    passes every peg on the same side as the target and -- with
+    passes every peg on the same side as the target, has no snap unless the
+    target admits one (``allow_snap``), and -- with
     ``task.shape_init.require_contact`` (default, as in the RSS paper) --
     ends touching every peg; otherwise the next
     direction is drawn (``seed + 1000 * attempt``).  Cached in
@@ -346,8 +393,10 @@ def calibrated_init(cfg, out_dir, target, seed, env, checkpoint, U_ref, target_s
     lo, hi = (float(v) for v in si.get("rms_band", [0.03, 0.05]))
     aim = 0.5 * (lo + hi)
     need_contact = bool(si.get("require_contact", True))
+    trec = json.load(open(Path(out_dir) / "targets" / f"{target}.json"))
+    req = trec.get("require_touch") or list(range(len(T.pegs_of(env))))
     k_end = len(u0) // 2
-    ws = workspace_bounds(cfg, len(u0) - k_end)
+    ws = workspace_bounds(cfg, len(u0) - k_end) if cfg.train.workspace == "reject" else None
     side_t = peg_sides(env, target_shape)
     tried = []
     for attempt in range(12):
@@ -360,14 +409,15 @@ def calibrated_init(cfg, out_dir, target, seed, env, checkpoint, U_ref, target_s
             wsv = T.workspace_violation(U, k_end, ws)
             row = {"attempt": attempt, "c": c, "ok": res["ok"], "reason": res["reason"],
                    "snaps": res["snaps"], "ws_violation": wsv}
-            if not res["ok"] or wsv > 1e-9 or res["snaps"]:
+            if (not res["ok"] or wsv > 1e-9 or (res["snaps"] and not trec.get("allow_snap"))
+                    or res["min_self_clearance"] < 0):
                 tried.append(row)
                 c *= 0.7                       # too far: shrink and retry
                 continue
             X = env.positions(res["q_list"][-1])
             rms = float(np.sqrt(np.mean(np.sum((X[nodes] - target_shape[nodes]) ** 2, axis=1))))
             same = all(float(a @ b) > 0 for a, b in zip(side_t, peg_sides(env, X)))
-            touch = all(res.get("final_touching") or [True])
+            touch = all((res.get("final_touching") or [True] * (max(req) + 1))[i] for i in req)
             row.update(rms=rms, same_side=same, touching=touch)
             tried.append(row)
             if lo <= rms <= hi and same and (touch or not need_contact):
@@ -460,7 +510,8 @@ def admissible(ev, cfg):
     """The paper's admissibility of a motion (Sec. VII-A, Evaluation)."""
     r = ev["res"]
     checks = {"all_steps_stable": bool(r["ok"]),
-              "in_workspace": r.get("ws_violation", 0.0) <= 1e-9,
+              "in_workspace": cfg.train.workspace != "reject" or r.get("ws_violation", 0.0) <= 1e-9,
+              "no_self_contact": r.get("min_self_clearance", np.inf) >= 0.0,
               "penetration_le_max": r["max_penetration"] <= float(cfg.train.max_penetration),
               "no_cap_contact": not r["end_contact"]}
     return all(checks.values()), checks
@@ -1145,6 +1196,13 @@ def cmd_verify(args):
     bad = 0
     files = sorted(out.glob("*.json"))
     n = 0
+    # the scene, for the physical checks of the saved trajectories (no rod
+    # through a peg between consecutive states, no self-contact)
+    try:
+        env_v = build_env(experiment_config(args.config))
+        pegs_v = T.pegs_of(env_v)
+    except Exception:                                   # noqa: BLE001
+        env_v, pegs_v = None, []
     for js in files:
         try:
             s = json.load(open(js))
@@ -1184,8 +1242,17 @@ def cmd_verify(args):
                 rms = float(np.sqrt(np.mean(np.sum((X[nodes] - z["target_shape"][nodes]) ** 2, axis=1))))
                 if s.get("final_rms") is not None and abs(rms - s["final_rms"]) > 1e-9:
                     problems.append(f"final_rms {s['final_rms']} != recomputed {rms}")
-            if "final_touching" in z.files and z["final_touching"].shape[1:] != (2, nv - 1):
+            if "final_touching" in z.files and z["final_touching"].shape[1] != len(pegs_v or [0, 0]):
                 problems.append(f"final_touching shape {z['final_touching'].shape}")
+            if env_v is not None and "q_traj" in z.files and len(z["q_traj"]) and \
+                    z["q_init"].size == env_v.n_dof:
+                Q = np.vstack([z["q_init"][None, :], z["q_traj"]])
+                tun = [k for k in range(1, len(Q)) for p in pegs_v if p.crossed(Q[k - 1], Q[k])]
+                if tun:
+                    problems.append(f"rod passes through a peg at steps {sorted(set(tun))[:5]}")
+                sc = min(T.self_clearance(env_v.positions(q), env_v.R_outer) for q in Q)
+                if sc < 0:
+                    problems.append(f"self-contact ({sc * 1e3:.1f} mm)")
         # figures: next to the run (greedy, `figure`) or in its run folder (train)
         figs = list(out.glob(f"{js.stem}_shape.pdf"))
         figs += list(Path(_ROOT / "experiments").glob(f"*/runs/*{js.stem}/{js.stem}_shape.pdf"))
