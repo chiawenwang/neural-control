@@ -125,7 +125,9 @@ train:
   max_penetration: 5.0e-4       # [m] admissible penetration of the rod surface
   workspace: reject             # reject: a command outside the box is a failed trial | record: only logged
   adam:
-    lr: 1.0e-4                  # RSS rate; to be swept on seed 0 (see the report)
+    lr: 3.0e-4                  # chosen 2026-11-24 by `train_shape.py sweep` on P1, seed 0, frozen
+                                # tangent: 1e-4 -> 3.91 mm, 3e-4 -> 1.20 mm (both solved), 1e-3 -> 32.4,
+                                # 3e-3 -> 56.3 (20 infeasible), 1e-2 -> 36.5 mm (20 infeasible)
   lbfgs:
     history: 10
     c1: 1.0e-4                  # Armijo
