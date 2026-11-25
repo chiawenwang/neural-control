@@ -31,6 +31,13 @@ Usage
     python scripts/train_shape.py --target S1 --optimizer linesearch --seed 0 --out DIR
     python scripts/train_shape.py jobs --out DIR             # the 18 commands of the comparison
     python scripts/train_shape.py report --out DIR           # table, curves, shape figures
+    python scripts/train_shape.py figure --npz RUN.npz [--config C] [--view 22 -58] [--snapshots 3]
+
+Figures (src/tro_style.py, IEEE T-RO style): every run writes
+``<name>_shape`` (final rod against the target, scene), ``<name>_error``
+(per-node error strip) and ``<name>_loss`` (loss curve) into its run folder
+as .pdf/.svg with editable text plus a .png preview.  ``figure`` re-renders
+them from a run's .npz (view angle, snapshots, title) without training again.
 
 A config with ``task.shape_targets`` brings its own targets instead of S1-S3
 (straight gripper moves ``u0 -> u0 + du``), e.g. P1-P3 of
@@ -56,6 +63,7 @@ import time
 import numpy as np
 import torch
 import torch.optim as optim
+import matplotlib.pyplot as plt
 
 from config import load_config
 from env_factory import (
@@ -69,6 +77,7 @@ from neural_control import (
 )
 from runlog import RunLogger
 from utils import maybe_save_trajectory_gif, draw_obstacles, draw_gripper_frames, gripper_frame_legend
+import tro_style as ts
 
 DEFAULT_CONFIG = _ROOT / "configs" / "example_3d_twist.yaml"
 
@@ -483,18 +492,30 @@ def cmd_train(args):
     for key in ("loss", "rms", "time", "rollouts", "tau", "rejected", "rejected_reasons", "snaps",
                 "fallback", "newton_failures", "unstable", "max_substeps"):
         summary[f"epoch_{key}"] = hist[key]
+    summary["config"] = str(args.config)          # `figure` rebuilds the scene from it
     arrays = {"target_shape": target_shape, "final_U": final["U"],
               "final_q": np.asarray(final["q"]),
               "epoch_u_paths": np.array(hist["u_paths"], dtype=np.float32)}
     if "shape" in final:
         arrays["final_shape"] = final["shape"]
+    # rod states for the figures (``figure`` re-renders them without training)
+    as_np = lambda q: np.asarray(q.detach().cpu() if hasattr(q, "detach") else q, dtype=float)  # noqa: E731
+    arrays["q_init"] = as_np(checkpoint["q"])
+    arrays["q_traj"] = np.stack([as_np(q) for q in final["q_list"]])
     for d in dict.fromkeys([run_dir, out]):       # this run's copy, then the latest for `report`
         np.savez_compressed(d / f"{name}.npz", **arrays)
         json.dump(summary, open(d / f"{name}.json", "w"), indent=1, default=float)
 
+    # paper figures (IEEE T-RO style, .pdf/.svg/.png), as train_tracking.py writes them
     if "shape" in final:
-        plot_shape_result(run_dir / name, target_shape, final["q"], env,      # .pdf/.svg/.png
-                          f"{name}: rms {final['rms'] * 1e3:.1f} mm")
+        plot_shape_result(run_dir / f"{name}_shape", target_shape, final["q"], env,
+                          f"{name}: rms {final['rms'] * 1e3:.1f} mm", q_init=checkpoint["q"])
+        plot_shape_error(target_shape, final["shape"], nodes, run_dir / f"{name}_error")
+    else:
+        print(f"[{name}] the final rollout failed: no shape or error figure", flush=True)
+    if hist["loss"]:
+        ts.loss_curve(hist["loss"], run_dir / f"{name}_loss", xlabel="Epoch",
+                      ylabel="Shape loss", title=f"Shape loss ({args.target}, {optimizer})")
     # The final rollout, frame by frame, next to the run's figure (output.save_gif).
     maybe_save_trajectory_gif(cfg, final["q_list"], env, None, save_path=str(run_dir),
                               filename=f"{name}.gif", title=f"shape formation {name}",
@@ -509,7 +530,7 @@ def cmd_train(args):
     print(f"[{name}] done: final rms {('%.2f mm' % (final['rms'] * 1e3)) if 'rms' in final else 'n/a'}, "
           f"{summary['rollouts_total']} rollouts, {summary['rejected_total']} rejected, "
           f"{env.n_snaps} snaps, {env.n_unstable} unstable steps, train {t_train:.0f}s", flush=True)
-    print(f"[{name}] figure, gif, data -> {run_dir}", flush=True)
+    print(f"[{name}] figures ({name}_shape/_error/_loss), gif, data -> {run_dir}", flush=True)
 
 
 # ---------------------------------------------------------------- figures
@@ -559,21 +580,58 @@ def _axes3d(ax, title, pts=None):
     ax.set_title(title, color=INK, fontsize=9)
 
 
-def plot_shape_result(path, target_shape, q, env, title, view=(22, -58), workspace="off",
-                      margin=0.04, limits=None):
+def plot_shape_result(path, target_shape, q, env, title, q_init=None, q_snaps=None,
+                      view=(22, -58), workspace="off", margin=0.04, limits=None):
     """Final rod (from the full DOF vector ``q``) against the target, with the
     obstacles and the gripper frames -- paper figure, drawn by
     ``utils.paper_scene`` in the IEEE T-RO style of every task figure:
     ``path`` .pdf/.svg (editable text) + .png; returns the paths.
 
+    ``q_init`` is the rod at the start and ``q_snaps`` optional intermediate
+    states (as in ``train_tracking.plot_tracking``); both are passed
+    explicitly, so the figure does not depend on the state ``env`` is left
+    in.  ``title=None`` leaves the title out (the caption replaces it).
     ``workspace="off"``: this experiment always switches the workspace off
     (``experiment_config``), so the config's box is not a constraint here and
     is not drawn."""
     from utils import paper_scene
-    return paper_scene(path, env, rod_final=q, rod_labels=("Initial rod", "Final shape"),
+    return paper_scene(path, env, rod_init=q_init, rod_final=q, rod_snaps=q_snaps,
+                       rod_labels=("Initial rod", "Final shape"),
                        curves=[(target_shape, "reference", "Target shape")], frames_q=q,
                        title=title, view=view, workspace=workspace, margin=margin,
                        limits=limits)
+
+
+def plot_shape_error(target_shape, shape, nodes, path, title=None):
+    """Per-node error |x_i - x_i*| (mm) along the rod, single column.
+
+    The shape counterpart of ``train_tracking.plot_tracking_error``: a 3D view
+    cannot show millimetre errors, so this strip goes under the scene figure
+    (or next to it).  Only the free ``nodes`` enter the loss, so only they are
+    drawn; the RMS line is ``shape_rms``.  Writes .pdf/.svg/.png, returns the
+    paths.
+    """
+    nodes = np.asarray(nodes)
+    err = 1e3 * np.linalg.norm(np.asarray(shape)[nodes] - np.asarray(target_shape)[nodes], axis=1)
+    with ts.style():
+        fig, ax = plt.subplots(figsize=(ts.COL_W, 1.35))
+        ax.plot(nodes, err, **ts.ROLE["achieved"])
+        fin = err[np.isfinite(err)]
+        if fin.size:
+            rms = float(np.sqrt(np.mean(fin ** 2)))
+            ax.axhline(rms, **ts.ROLE["reference"])
+            ax.text(0.99, rms, f"RMS {rms:.2f} mm", transform=ax.get_yaxis_transform(),
+                    ha="right", va="bottom", fontsize=ts.FS_TICK)
+        ax.set_xlim(0, len(target_shape) - 1)
+        ax.set_ylim(bottom=0)
+        ax.set_xlabel(r"Node $i$")
+        ax.set_ylabel("Error (mm)")
+        if title:
+            ax.set_title(title)
+        ts.style_2d(ax)
+        paths = ts.save(fig, path, width=ts.COL_W)
+        plt.close(fig)
+    return paths
 
 
 # ---------------------------------------------------------------- report
@@ -762,10 +820,55 @@ def cmd_jobs(args):
                       + f" > {out}/logs/{t}_{o}_s{s}.log 2>&1")
 
 
+# ---------------------------------------------------------------- figure
+
+def cmd_figure(args):
+    """Re-render a finished run's figures from its .npz -- no training.
+
+    The .npz must come from a ``train`` with this version (it stores
+    ``q_init`` and ``q_traj``); the environment is rebuilt from ``--config``
+    only for the scene geometry (obstacles, gripper frames) and the free
+    nodes.  Use it to try view angles and snapshots for the paper.
+    """
+    npz = Path(args.npz)
+    z = np.load(npz)
+    missing = [k for k in ("target_shape", "q_init", "q_traj") if k not in z.files]
+    if missing:
+        raise SystemExit(f"{npz} has no {', '.join(missing)} (written before the figure data "
+                         "was saved); run the training again")
+    meta_f = npz.with_suffix(".json")
+    meta = json.load(open(meta_f)) if meta_f.exists() else {}
+    cfg = experiment_config(args.config)
+    env = build_env(cfg)
+    reset_env(env, cfg)
+    if z["q_init"].size != env.n_dof:
+        hint = meta.get("config") or "the config the run was trained with"
+        raise SystemExit(f"{npz} was trained on a rod with {z['q_init'].size} DOFs, "
+                         f"{args.config} has {env.n_dof}; pass --config {hint}")
+    target_shape, q_traj = z["target_shape"], z["q_traj"]
+    snaps = None
+    if args.snapshots > 0:
+        idx = np.linspace(0, len(q_traj) - 1, args.snapshots + 2)[1:-1].round().astype(int)
+        snaps = [q_traj[i] for i in idx]
+    name = meta.get("target_name") or npz.stem
+    stem = Path(args.stem) if args.stem else npz.with_name(npz.stem)
+    if "final_shape" in z.files:
+        title = None if args.no_title else f"Shape formation ({name})"
+        plot_shape_result(f"{stem}_shape", target_shape, q_traj[-1], env, title,
+                          q_init=z["q_init"], q_snaps=snaps, view=tuple(args.view),
+                          workspace=args.workspace)
+        plot_shape_error(target_shape, z["final_shape"], free_nodes(env), f"{stem}_error")
+    else:
+        print(f"{npz}: the final rollout failed, no shape or error figure", flush=True)
+    losses = meta.get("epoch_loss")
+    if losses:
+        ts.loss_curve(losses, f"{stem}_loss", xlabel="Epoch", ylabel="Shape loss")
+
+
 # ---------------------------------------------------------------- main
 
 def main():
-    cmds = ("train", "targets", "jobs", "report")
+    cmds = ("train", "targets", "jobs", "report", "figure")
     argv = sys.argv[1:]
     cmd = argv.pop(0) if argv and argv[0] in cmds else "train"
 
@@ -782,7 +885,8 @@ def main():
         defined = []
 
     ap = argparse.ArgumentParser(description=f"3D shape formation by neural control ({cmd})")
-    ap.add_argument("--out", required=True, help="experiment directory (targets/ lives in it)")
+    ap.add_argument("--out", required=cmd != "figure",
+                    help="experiment directory (targets/ lives in it)")
     ap.add_argument("--config", default=str(DEFAULT_CONFIG),
                     help="YAML config over configs/default.yaml (workspace is switched off and "
                          "the state gradient selected regardless)")
@@ -803,6 +907,18 @@ def main():
         ap.add_argument("--epochs", type=int, default=None, help="default: train.epochs")
         ap.add_argument("--lr", type=float, default=None, help="default: train.lr")
         ap.add_argument("--device", default=None, help="default: train.device")
+    if cmd == "figure":
+        ap.add_argument("--npz", required=True, help="the run's .npz (from train)")
+        ap.add_argument("--stem", default=None,
+                        help="output path without extension; default: next to the .npz")
+        ap.add_argument("--view", type=float, nargs=2, default=(22.0, -58.0),
+                        metavar=("ELEV", "AZIM"), help="3D view angles [deg]")
+        ap.add_argument("--snapshots", type=int, default=0,
+                        help="intermediate rod states to draw (gray, light -> dark)")
+        ap.add_argument("--workspace", choices=("auto", "fit", "clip", "off"), default="off",
+                        help="gripper workspace: whole box, clipped to the scene, or left out "
+                             "(default off: this experiment switches the workspace off)")
+        ap.add_argument("--no-title", action="store_true")
     args = ap.parse_args(argv)
 
     if cmd == "targets":
@@ -811,6 +927,8 @@ def main():
         cmd_jobs(args)
     elif cmd == "report":
         report(args.out, args.config)
+    elif cmd == "figure":
+        cmd_figure(args)
     else:
         cmd_train(args)
 

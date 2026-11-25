@@ -290,6 +290,17 @@ task:
   # Empty -> the script's built-in S1-S3. scripts/check_targets.py --mode shape
   # finds them (see configs/task_shape_pegs_3d.yaml).
   shape_targets: {}
+  # Read only by scripts/greedy_helix.py: the target is a helix of `turns`
+  # turns over the whole rod, starting at the left clamp along its tangent
+  # (+x), axis horizontal (in the x-y plane). pitch_ratio = cos of the angle
+  # between tangent and axis = axial rise per unit arc length; one turn of a
+  # 1 m rod then has radius sqrt(1 - h^2) / 2 pi and pitch h. The Bishop
+  # holonomy of one turn is 2 pi (1 - h); keep it under pi (h > 0.5), since
+  # the twist model's holonomy wraps at pi (src/rodframes.py, Limits).
+  helix:
+    pitch_ratio: 0.7
+    turns: 1.0
+    handedness: right          # right | left
 
 # Rigid 90-degree L-shaped pipe (src/contact.py: LPipe2D). 2D only.
 #
@@ -396,6 +407,29 @@ rhc:
   enabled: false
   num_segments: 5
   reinit_policy_each_segment: true   # fresh policy weights + optimizer per segment (as in the original submission)
+
+# Greedy shape control (src/greedy_control.py; scripts/greedy_helix.py), no
+# policy: each step moves the right gripper along a Levenberg-Marquardt step
+# of the linearized shape map and keeps the trial step length whose quasi-
+# static equilibrium has the lowest shape error.
+greedy:
+  schedule: homotopy        # homotopy: target lam -> 1 as the error allows | direct: final target
+  dlam: 0.01                # homotopy: lam increment per step
+  advance_tol: 0.02         # [m] homotopy: advance lam only when the rms error is below this
+  step_cap: 0.01            # trust radius: max |du| per step, scaled (1 cm or 0.1 rad)
+  step_min: 1.0e-4          # stop when the trust radius shrinks below this
+  angle_scale: 0.1          # [m/rad] 0.1 rad of an angle counts as 1 cm
+  alphas: [1.0, 0.5, 0.25]  # trial step lengths along the direction, each a real step
+  damping: 1.0e-4           # LM shift, relative to the mean diagonal of G^T G
+  reg: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # [m^2 / unit^2] penalty on (u_r - u_ref), per DOF
+  ref_final: null           # u_ref: u0_r, or u0_r + lam (ref_final - u0_r) where an entry is
+                            #   given (list, null entries keep u0_r) -- e.g. a yaw feedforward
+  max_steps: 800
+  patience: 50              # stop at lam = 1 when the objective drops by less
+  rel_tol: 1.0e-3           #   than rel_tol (relative) over `patience` steps
+  time_limit: null          # [s] stop a run after this wall time (null: no limit)
+  max_retreats: 0           # homotopy: on a stall before lam = 1, step lam back by
+  retreat: 0.05             #   `retreat`, halve dlam and retry, at most max_retreats times
 
 # Equilibrium (Newton-Raphson) solver.
 #

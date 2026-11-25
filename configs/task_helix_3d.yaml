@@ -1,0 +1,52 @@
+# =============================================================================
+# Greedy shape control into a one-turn helix (scripts/greedy_helix.py).
+#
+# Left end clamped at the origin, tangent +x, never moves; the right gripper
+# (x, y, z, theta, phi, yaw) is the only control.  The target is a helix of
+# one turn over the whole rod that leaves the clamp along its tangent, axis
+# horizontal (task.helix in configs/default.yaml).  Torsion is on: the yaw is
+# what lets the gripper put a turn into the rod (link = twist + writhe).
+#
+#   python scripts/greedy_helix.py run --config configs/task_helix_3d.yaml --out experiments/greedy_helix
+#
+# Only the fields that differ from configs/default.yaml are listed.
+# =============================================================================
+
+env:
+  dim: 3
+  grasp_mode: both
+
+rod:
+  material: soft_strip       # EI = 0.127 N m^2; a 0.11 m loop barely sags
+  twist: true
+  nv: 21
+  total_time: 100.0          # the greedy has no horizon; only keeps env.step from flagging done
+  max_newton_iter: 200
+  gravity: [0.0, 0.0, -9.81]
+
+start:
+  u_left_twist:  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # held fixed
+  u_right_twist: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # straight rod (sagging) at the start
+
+task:
+  helix:
+    pitch_ratio: 0.7         # radius 0.114 m, pitch 0.7 m; holonomy 0.6 pi < pi
+    turns: 1.0
+    handedness: right
+
+workspace:
+  enabled: false             # the default box does not hold this helix: its end
+                             # pose is at y = 0.50 (box |y| <= 0.4) and the
+                             # gripper tangent sweeps a cone of half-angle
+                             # acos(0.7) = 46 deg about the axis (azimuth to 91 deg)
+
+greedy:
+  schedule: homotopy         # direct gets stuck near the start for the left-handed helix
+  # Penalty on the gripper yaw (last entry, m^2/rad^2). Without it the greedy
+  # winds ~22 rad into the wrist for the last ~1.5 mm of rms (twist energy
+  # 93% of the elastic energy); 1e-6 keeps |yaw| < 1 rad (2026-11-24 runs).
+  reg: [0.0, 0.0, 0.0, 0.0, 0.0, 1.0e-6]
+
+output:
+  experiment_name: greedy_helix
+  save_gif: true

@@ -1,0 +1,49 @@
+# =============================================================================
+# Greedy shape control into a two-turn helix (scripts/greedy_helix.py).
+#
+# Same scene as configs/task_helix_3d.yaml (left end clamped at the origin,
+# tangent +x; the right gripper is the only control), two turns instead of
+# one.  Two turns double the Bishop holonomy to 4 pi (1 - h), which has to
+# stay under the twist model's wrap at pi (src/rodframes.py, Limits), so
+# h > 0.75; 0.85 gives 0.6 pi.  The radius then drops to 42 mm, below the
+# 5 cm node spacing of nv = 21, hence nv = 41.
+#
+#   python scripts/greedy_helix.py run --config configs/task_helix2_3d.yaml --out experiments/greedy_helix2
+#
+# Only the fields that differ from configs/default.yaml are listed.
+# =============================================================================
+
+env:
+  dim: 3
+  grasp_mode: both
+
+rod:
+  material: soft_strip
+  twist: true
+  nv: 41                     # node spacing 2.5 cm, ~20 edges per turn
+  total_time: 100.0          # the greedy has no horizon; only keeps env.step from flagging done
+  max_newton_iter: 200
+  gravity: [0.0, 0.0, -9.81]
+
+start:
+  u_left_twist:  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # held fixed
+  u_right_twist: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # straight rod (sagging) at the start
+
+task:
+  helix:
+    pitch_ratio: 0.85        # radius 42 mm, 0.425 m per turn; holonomy 0.6 pi < pi
+    turns: 2.0
+    handedness: right
+
+workspace:
+  enabled: false             # end pose (0.72, 0.45, 0) is outside the default |y| <= 0.4
+
+greedy:
+  schedule: homotopy
+  # Yaw penalty as in the one-turn config; untested for two turns, which
+  # need more twist -- try --reg-yaw 1e-7 if the greedy stalls before lam = 1.
+  reg: [0.0, 0.0, 0.0, 0.0, 0.0, 1.0e-6]
+
+output:
+  experiment_name: greedy_helix2
+  save_gif: true
