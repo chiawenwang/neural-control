@@ -1,0 +1,137 @@
+# =============================================================================
+# Task P (paper Sec. VII): path tracking with a peg, trajectory objective.
+# The mid node of the rod follows a half sine in the x-z plane with a drift
+# in y while the rod meets a peg; every step carries a loss term,
+#
+#   L = sum_k dlam |x_mid,k - p(lambda_k)|^2,   k = 1..M,
+#
+# and a rollout with a snap-through is rejected (the rod must stay on the
+# branch of the initial equilibrium). Run by scripts/train_path.py:
+#
+#   bash scripts/run_path_batch.sh P1 runs/path_p1 6
+#
+# Scene: that of configs/task_tracking_peg_3d.yaml (the old pipeline,
+# scripts/train_tracking.py, left unchanged), with three changes that make it
+# consistent with the shape task S and the paper:
+#   * the fixed clamp at elevation 1.5707 instead of 1.5708: the old value lay
+#     just past the singular vertical reference and started the rod with half
+#     a turn of twist (Phi = pi, 0.46 J of twist energy); the start is now the
+#     untwisted quarter arc of S (Phi = 0);
+#   * the start is the equilibrium at u0 itself (newton.initial_equilibrium),
+#     no 1 cm "ready" motion: the path is anchored at its mid node;
+#   * the smooth peg contact of the paper (peg.model: smooth) and the Newton
+#     guards of S (tangent predictor, max_node_step).
+# The peg was placed again for this start (it is touched from about a third
+# of the path to its end; the old one at (0.345, 0.618) is never touched from
+# the untwisted start), see task.path_targets and peg: below.
+# Check (2026-11-25, train_path.py targets): reference = the half sine where
+# the rod is free, shaped by the peg after step 72 (10.7 mm RMS from the sine,
+# max 17.9); on the peg 64 % of the steps and at the end (0.33 N); no snap.
+# Seed 0: state-based + L-BFGS 17.4 mm -> 0.10 mm in 150 rollouts; the
+# one-step tracker (greedy) also follows it (0.03 mm): the basic scene.
+# =============================================================================
+env:
+  dim: 3
+  grasp_mode: both              # left end fixed at u_left_*, right end driven
+rod:
+  material: soft_strip          # EI = 0.127 N*m^2
+  twist: true
+  nv: 51                        # node spacing 2 cm (< peg radius 3 cm); paper Table: N = 51
+  dt: 0.01
+  total_time: 2.0               # -> M = 200 control steps
+  rod_length: 1.0
+  max_newton_iter: 200
+  gravity: [0.0, 0.0, -9.81]
+start:
+  # the clamps of S (configs/task_shape_pegs_3d.yaml): tangent up at the origin,
+  # horizontal gripper at (0.62, 0, 0.62), both rolls zero -> untwisted quarter arc
+  u_left_3d:  [0.0, 0.0, 0.0, 0.0, 1.5707]
+  u_right_3d: [0.62, 0.0, 0.62, 0.0, 0.0]
+  u_left_twist:  [0.0, 0.0, 0.0, 0.0, 1.5707, 0.0]
+  u_right_twist: [0.62, 0.0, 0.62, 0.0, 0.0, 0.0]
+task:
+  path_targets:
+    # A path target is built like a shape target of S (train_path.py targets):
+    # the reference tracker follows the half sine below on the FREE rod (no
+    # peg), which gives the designed motion; that motion is rolled out WITH
+    # the peg, and the mid node's trajectory of that rollout is the reference
+    # path (build: contact). So the path is reachable by construction (the
+    # designed motion tracks it exactly), it follows the sine where the rod
+    # is free and is shaped by the contact where the rod lies on the peg.
+    #   p_sine(t) = m0 + (dx t, dy t, amp sin(2 pi periods t)),  t = lambda in (0, 1]
+    # (build: path instead takes the sine itself as the reference, with the
+    # tracker run with the peg as the reachability check.)
+    P1:
+      kind: sine_xz
+      amp: 0.01
+      periods: 0.5
+      dx: -0.125
+      dy: -0.12
+      build: contact
+      touch: [0]                # the peg(s) the path must touch (from mid-path to the end)
+      description: "P1, basic: one peg on the convex side of the arc; free for the first third of the path, then on the peg to the end"
+  path_init:                    # common initialization (train_path.py, cf. task.shape_init)
+    seed_base: 2000
+    rms_band: [0.01, 0.02]      # [m] initial tracking RMS the perturbation is scaled into
+    require_contact: true       # the initial trajectory must touch the peg (as the designed one)
+    end_pos: 0.02
+    end_ang: 0.05
+    end_yaw: 0.05
+    bump_pos: 0.02
+    bump_ang: 0.05
+    bump_yaw: 0.05
+  path_tracker:                 # the reference tracker: damped least squares with the exact
+    damping: 0.03               # per-step mid-node sensitivity (lambda = damping * s_max)
+    angle_scale: 0.2            # [m per rad] how angles weigh against positions
+    max_step: 0.03              # [m] largest position move per step (the designed motion)
+    alphas: [1.0, 0.5, 0.25]    # trial step lengths, each a quasi-static step
+peg:
+  enabled: true
+  center_xz: [0.170, 0.550]     # placed for P1 on the free rod's shapes along the designed
+                                # motion: untouched for the first 25 %, overlapping it from
+                                # then on to the end (<= 8 mm), mid node >= 15 mm from it
+  center_y: -0.060              # the middle of the path's y range
+  half_length_y: 0.12
+  radius: 0.03
+  k_contact: 1.0e+7
+  model: smooth
+  smoothing: 1.0e-4
+  samples_per_edge: 4
+workspace:
+  enabled: true
+  position_min_3d: [0.20, -0.40, 0.20]
+  position_max_3d: [1.00, 0.40, 0.95]
+  orientation_limits_3d: [[-1.0, 1.0], [-1.0, 1.0]]   # theta, phi [rad]
+newton:
+  continuation: true
+  max_substeps: 64
+  stability_check: true
+  snap_rule: true               # flags snaps (descent or displacement indicator); P rejects them
+  predictor: tangent
+  max_node_step: 0.02
+train:
+  grad_method: state            # state (ours) | proxy (frozen tangent)
+  optimizer: lbfgs              # lbfgs (ours) | adam
+  param: net                    # net | rates (direct rates) | endpose (end pose only, tuned)
+  init: designed                # perturbed designed (tracker) motion, fitted
+  jac_reg: 0.0
+  reject_snap: true             # trajectory objective: a flagged step makes the trial infeasible
+  stop_rms: 1.0e-4              # [m] tracking RMS of an admissible rollout (0.1 mm)
+  epochs: 500
+  max_rollouts: 500
+  max_failures: 20
+  solve_rms: 2.0e-3             # [m] solved threshold on the tracking RMS (fixed before the runs)
+  max_penetration: 5.0e-4
+  workspace: reject
+  adam:
+    lr: 3.0e-4                  # the rate of S, kept (no new sweep)
+  lbfgs:
+    history: 10
+    c1: 1.0e-4
+    c2: 0.9
+    max_ls: 20
+    first_step: 0.1
+  device: cpu
+output:
+  experiment_name: path_peg_3d
+  save_gif: true

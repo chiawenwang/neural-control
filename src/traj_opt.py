@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Trajectory optimization for terminal objectives: Adam and L-BFGS on full rollouts.
+"""Trajectory optimization on full rollouts: Adam and L-BFGS, terminal and trajectory objectives.
 
 This is the optimizer side of the shape-formation experiment
-(scripts/train_shape.py), written against a flat parameter vector ``xi`` so
+(scripts/train_shape.py, terminal objective) and of path tracking
+(scripts/train_path.py, trajectory objective; see ``Objective``), written against a flat parameter vector ``xi`` so
 that the same code trains
 
     * ``NetRates``    the network of the paper (1-64-64-n_u, tanh), float64,
@@ -29,8 +30,12 @@ A *failed* rollout is one the physics or the task rejects: a Newton failure at
 the finest subdivision, a step that ends on an unstable equilibrium, an
 exception from the model (e.g. a vertical gripper tangent), or -- with
 ``workspace="reject"`` -- a command outside the workspace box (detected
-before simulating, so it costs no rollout).  A snap-through is admitted, this
-being a terminal objective.  Adam reverts to the last admissible iterate and
+before simulating, so it costs no rollout).  The snap rule is the
+objective's (paper Sec. III-C): for a terminal objective a snap-through is
+admitted; for a trajectory objective (``reject_snap=True``) a step flagged
+as a snap-through (descent or displacement indicator, src/continuation.py)
+makes the rollout infeasible -- it stops there, like a Newton failure.
+Adam reverts to the last admissible iterate and
 takes its next step from there; L-BFGS treats the trial as ``f = +inf`` (the
 line search shortens the step).
 """
@@ -272,16 +277,17 @@ def self_clearance(X, r_rod, skip=2):
     return float(d.min() - 2.0 * r_rod) if d.size else np.inf
 
 
-def rollout(env, checkpoint, U, keep_J="last", record=False):
+def rollout(env, checkpoint, U, keep_J="last", record=False, reject_snap=False):
     """Execute the commands ``U`` from ``checkpoint``; stop at the first failed step.
 
     ``keep_J``: ``last`` keeps the equilibrium Hessian of the final step only
     (all a terminal state gradient needs), ``all`` keeps every step's (the
     frozen-tangent proxy needs them).  ``record`` adds the per-step arrays the
     figures and the analysis need (states, contact per peg and edge).
+    ``reject_snap``: a step flagged as a snap-through fails the rollout
+    (trajectory objectives: the rod must stay on the initial branch).
     Returns a dict; ``ok`` is False with ``reason`` on a failed rollout.
     """
-    from rodframes import holonomy
     env.set_state(checkpoint)
     M = len(U)
     pegs = pegs_of(env)
@@ -322,6 +328,9 @@ def rollout(env, checkpoint, U, keep_J="last", record=False):
         if info.get("snap"):
             out["snaps"] += 1
             out["snap_steps"].append(k)
+            if reject_snap:
+                out.update(ok=False, reason=f"snap at step {k} ({info.get('snap_by')})")
+                break
         out["q_list"].append(q)
         if keep_J == "all" or k == M - 1:
             out["J_list"][k] = info["J"]
@@ -372,6 +381,49 @@ def terminal_loss(env, q, target_shape, nodes):
     return L, full[env.free_index], X
 
 
+class TerminalShape:
+    """Terminal objective of task S: ``L = mean_i |x_i(1) - x_i*|^2`` over ``nodes``."""
+
+    per_step = False
+
+    def __init__(self, target_shape, nodes):
+        self.target, self.nodes = np.asarray(target_shape, float), np.asarray(nodes)
+
+    def __call__(self, env, res, dlam):
+        """``(L, A, extra)``: the loss, ``A`` (M, n_free) the rows dL/dq_free_k, and what to keep."""
+        M = len(res["J_list"])
+        L, a_last, X = terminal_loss(env, res["q_list"][-1], self.target, self.nodes)
+        A = np.zeros((M, len(env.free_index)))
+        A[-1] = a_last
+        return L, A, {"shape": X}
+
+
+class MidTracking:
+    """Trajectory objective of task P: ``L = sum_k dlam |x_node,k - p_k|^2``, k = 1..M.
+
+    ``ref`` (M, 3): row k-1 is the reference ``p(lambda_k)`` of step k.  With
+    ``dlam = 1/M`` the loss is the mean squared tracking error, so
+    ``sqrt(L)`` is the tracking RMS over the steps.  Every step carries a
+    term, so the state-based gradient takes one adjoint solve per step
+    (paper eq. (costate); ``K = M`` in Table complexity).
+    """
+
+    per_step = True
+
+    def __init__(self, ref, node):
+        self.ref, self.node = np.asarray(ref, float), int(node)
+
+    def __call__(self, env, res, dlam):
+        Q = res["q_list"]
+        M = len(Q)
+        mids = np.array([env.positions(q)[self.node] for q in Q])
+        d = mids - self.ref[:M]
+        L = float(dlam * np.sum(d * d))
+        full = np.zeros((M, env.n_dof))
+        full[:, 3 * self.node:3 * self.node + 3] = 2.0 * dlam * d
+        return L, full[:, env.free_index], {"mids": mids, "err": np.linalg.norm(d, axis=1)}
+
+
 # ===================================================================== evaluator
 
 class Evaluator:
@@ -388,14 +440,18 @@ class Evaluator:
                 "final_touching",
                 "final_force")
 
-    def __init__(self, env, checkpoint, param, u0, k_end, target_shape, nodes, *,
+    def __init__(self, env, checkpoint, param, u0, k_end, target_shape=None, nodes=None, *,
                  grad_method="state", jac_reg=0.0, ws_bounds=None, workspace="reject",
-                 stop_rms=0.0, max_rollouts=500, max_failures=20, verbose=True, tag=""):
+                 stop_rms=0.0, max_rollouts=500, max_failures=20, verbose=True, tag="",
+                 objective=None, reject_snap=False):
         self.env, self.checkpoint, self.param = env, checkpoint, param
         self.u0, self.k_end = np.asarray(u0, float), int(k_end)
         self.M = env.Nsteps
         self.dlam = 1.0 / self.M
         self.target, self.nodes = target_shape, nodes
+        # the task loss: terminal shape (S) unless an objective is given (P: MidTracking)
+        self.objective = objective if objective is not None else TerminalShape(target_shape, nodes)
+        self.reject_snap = bool(reject_snap)
         self.grad_method, self.jac_reg = grad_method, float(jac_reg)
         self.ws_bounds, self.workspace = ws_bounds, workspace
         self.stop_rms = float(stop_rms)
@@ -417,18 +473,16 @@ class Evaluator:
         if self.workspace == "reject" and ws > 1e-12:
             return U, {"ok": False, "reason": f"workspace (+{ws:.3g})", "skipped": True,
                        "ws_violation": ws, "steps": 0}
-        res = rollout(self.env, self.checkpoint, U,
-                      keep_J="all" if self.grad_method == "proxy" else "last", record=record)
+        keep = "all" if (self.grad_method == "proxy" or self.objective.per_step) else "last"
+        res = rollout(self.env, self.checkpoint, U, keep_J=keep, record=record,
+                      reject_snap=self.reject_snap)
         res["ws_violation"] = ws
         return U, res
 
     def gradient(self, xi, U, res):
         """``dL/dxi`` of an admissible rollout (state or proxy)."""
         t = time.time()
-        M = self.M
-        L, a_last, X = terminal_loss(self.env, res["q_list"][-1], self.target, self.nodes)
-        a = np.zeros((M, len(self.env.free_index)))
-        a[-1] = a_last
+        L, a, extra = self.objective(self.env, res, self.dlam)
         g_seq = multistep_adjoint_gradient(
             U, res["J_list"], self.env.free_index, self.env.fixed_index, self.env.deltaL, a,
             jac_reg=self.jac_reg, dim=3, twist=getattr(self.env, "twist", False),
@@ -440,7 +494,7 @@ class Evaluator:
             G = self.dlam * g_seq
         g = self.param.vjp(xi, G)
         self.grad_time.append(time.time() - t)
-        return L, g, X
+        return L, g, extra
 
     def __call__(self, xi):
         """One evaluation: ``(ok, loss, grad, info)``; may raise StopTraining."""
@@ -454,8 +508,8 @@ class Evaluator:
         ev = {"xi": xi, "U": U, "ok": res["ok"], "reason": res["reason"], "loss": np.inf,
               "g": None, "rms": np.nan, "res": res, "idx": self.n_evals - 1}
         if res["ok"]:
-            L, g, X = self.gradient(xi, U, res)
-            ev.update(loss=L, g=g, rms=float(np.sqrt(L)), shape=X)
+            L, g, extra = self.gradient(xi, U, res)
+            ev.update(loss=L, g=g, rms=float(np.sqrt(L)), **extra)
             if self.best is None or L < self.best["loss"]:
                 self.best = ev
         else:

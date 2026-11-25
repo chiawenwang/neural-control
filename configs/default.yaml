@@ -303,6 +303,31 @@ task:
     bump_pos: 0.02
     bump_ang: 0.05
     bump_yaw: 0.05
+  # Read only by scripts/train_path.py (task P): the reference paths of the
+  # mid node, anchored at its start position m0, e.g. the half sine
+  #   P1: {kind: sine_xz, amp: 0.01, periods: 0.5, dx: -0.125, dy: -0.12}
+  # (p(t) = m0 + (dx t, dy t, amp sin(2 pi periods t)), t = lambda), and
+  # the common initialization: the designed (tracker) motion plus
+  # lambda*e + sin(pi lambda)*b, scaled into rms_band of tracking RMS.
+  path_targets: {}
+  path_init:
+    seed_base: 2000
+    rms_band: [0.01, 0.02]     # [m]
+    require_contact: true      # the initial trajectory must touch every peg on the way
+    end_pos: 0.02
+    end_ang: 0.05
+    end_yaw: 0.05
+    bump_pos: 0.02
+    bump_ang: 0.05
+    bump_yaw: 0.05
+  # The reference tracker of scripts/train_path.py (the designed motion that
+  # shows a path is reachable, and the greedy baseline with a rate cap):
+  # damped least squares with the exact per-step mid-node sensitivity.
+  path_tracker:
+    damping: 0.03              # Levenberg-Marquardt damping, relative to s_max
+    angle_scale: 0.2           # [m per rad]
+    max_step: 0.03             # [m] largest position move per step
+    alphas: [1.0, 0.5, 0.25]   # trial step lengths (quasi-static steps)
   # Read only by scripts/greedy_helix.py: the target is a helix of `turns`
   # turns over the whole rod, starting at the left clamp along its tangent
   # (+x), axis horizontal (in the x-y plane). pitch_ratio = cos of the angle
@@ -592,6 +617,7 @@ train:
   solve_rms: 5.0e-3           # [m] "solved" threshold of the evaluation
   max_penetration: 5.0e-4     # [m] admissible penetration of the rod surface
   workspace: reject           # reject | record
+  reject_snap: false          # true: a rollout with a snap flag is infeasible (trajectory objectives)
   adam:
     lr: 1.0e-4
   lbfgs:
