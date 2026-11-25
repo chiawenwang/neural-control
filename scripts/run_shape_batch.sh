@@ -18,6 +18,7 @@
 #   SWEEP=1 bash scripts/run_shape_batch.sh P1 runs/shape_p1 8              # with the Adam-rate sweep
 #
 # EXTRA is appended to every train / greedy command (e.g. "--epochs 2").
+# RESUME=1 skips every run whose OUT/<name>.json exists (to continue after an interruption).
 # Everything goes to OUT/logs; the script stops at the first failing stage.
 set -euo pipefail
 TARGET=${1:?target, e.g. P1}
@@ -30,7 +31,15 @@ PY=${PYTHON:-python}
 cd "$(dirname "$0")/.."
 mkdir -p "$OUT/logs"
 run_parallel() {   # read commands on stdin, append EXTRA before the redirection, run NPROC at a time
-    grep '^python' | sed "s| > | $EXTRA > |" | xargs -P "$NPROC" -I{} sh -c "{}"
+    # RESUME=1: skip a run whose result OUT/<name>.json already exists (after a disconnect)
+    grep '^python' | while IFS= read -r line; do
+        name=$(printf '%s' "$line" | sed -n 's|.*/logs/\([^ ]*\)\.log.*|\1|p')
+        if [ "${RESUME:-0}" = "1" ] && [ -n "$name" ] && [ -f "$OUT/$name.json" ]; then
+            echo "skip $name (done)" >&2
+            continue
+        fi
+        printf '%s\n' "$line"
+    done | sed "s| > | $EXTRA > |" | xargs -P "$NPROC" -I{} sh -c "{}"
 }
 echo "== 1. targets"; $PY scripts/train_shape.py targets --config "$C" --out "$OUT" --targets "$TARGET" | tee "$OUT/logs/targets.log"
 grep -q "criteria: all OK" "$OUT/logs/targets.log" || { echo "design criteria not met"; exit 1; }
