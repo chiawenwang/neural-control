@@ -290,6 +290,17 @@ task:
   # Empty -> the script's built-in S1-S3. scripts/check_targets.py --mode shape
   # finds them (see configs/task_shape_pegs_3d.yaml).
   shape_targets: {}
+  # Read only by scripts/train_shape.py (train.init: designed): the common
+  # initialization is the designed motion plus lambda*e + sin(pi lambda)*b on
+  # the gripper, e and b ~ N(0, scale^2) drawn per seed (seed_base + seed).
+  shape_init:
+    seed_base: 1000
+    end_pos: 0.02              # [m]
+    end_ang: 0.05              # [rad] theta, phi
+    end_yaw: 0.05              # [rad]
+    bump_pos: 0.02
+    bump_ang: 0.05
+    bump_yaw: 0.05
   # Read only by scripts/greedy_helix.py: the target is a helix of `turns`
   # turns over the whole rod, starting at the left clamp along its tangent
   # (+x), axis horizontal (in the x-y plane). pitch_ratio = cos of the angle
@@ -338,7 +349,12 @@ peg:
   center_y: 0.0                # [m]
   half_length_y: 0.15          # [m] extent along the axis, each side
   radius: 0.03                 # [m]
-  k_contact: 1.0e+7            # [N/m^2] penalty stiffness, as for the sphere
+  k_contact: 1.0e+7            # [N/m^2] penalty stiffness (smooth: per unit rod length)
+  model: smooth                # smooth: the paper's contact (Sec. VI-B) -- edge quadrature,
+                               #   squared-softplus penalty, clearance of the rod surface;
+                               # node: legacy node-based quadratic penalty (runs before 2026-11-24)
+  smoothing: 1.0e-4            # [m] delta of the softplus (smooth model)
+  samples_per_edge: 4          # quadrature points per edge (smooth model)
   extra: []                    # further pegs (with enabled: true), each a dict of
                                # center_xz and center_y; radius, half_length_y and
                                # k_contact default to the values above. See
@@ -552,6 +568,25 @@ train:
   linesearch:
     c: 1.0e-4                 # Armijo constant
     tau_min: 1.0e-4           # smallest step fraction tried before giving up
+  # --- scripts/train_shape.py only (src/traj_opt.py); its optimizers are
+  # adam (fixed rate, every update taken) and lbfgs (strong-Wolfe line search
+  # on full rollouts), the protocol of the RSS paper.
+  param: net                  # net (the policy network, float64) | rates (direct rates)
+  init: designed              # designed (task.shape_init) | random
+  stop_rms: 1.0e-4            # [m] stop once an admissible rollout is this close
+  max_rollouts: 500           # rollout cap, every rollout counted
+  max_failures: 20            # stop after this many failed rollouts
+  solve_rms: 5.0e-3           # [m] "solved" threshold of the evaluation
+  max_penetration: 5.0e-4     # [m] admissible penetration of the rod surface
+  workspace: reject           # reject | record
+  adam:
+    lr: 1.0e-4
+  lbfgs:
+    history: 10
+    c1: 1.0e-4
+    c2: 0.9
+    max_ls: 20
+    first_step: 0.1
 
 # Output / logging.
 output:

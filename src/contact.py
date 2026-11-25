@@ -147,8 +147,14 @@ class SphereObstacle:
         return F, J
 
 
-class PegObstacle:
-    """Rigid peg: a cylinder parallel to y, 3D only (a capsule at its two ends).
+class PegObstacleNode:
+    """LEGACY node-based peg (``peg.model: node``): kept to reproduce runs made
+    before 2026-11-24.  It is NOT the contact model of the paper (Sec. VI-B):
+    the penalty is a one-sided quadratic on the nodes only (C1, its Hessian
+    jumps at contact onset), and the clearance ignores the rod radius.  Use
+    :class:`PegObstacle` (the default).
+
+    Rigid peg: a cylinder parallel to y, 3D only (a capsule at its two ends).
 
     Seen in the x-z plane it is a disc of ``radius`` at ``(cx, cz)``; along the
     axis it spans ``cy +- half_length``.  A node's distance is taken to the
@@ -200,6 +206,217 @@ class PegObstacle:
         if inside:
             J[:, 1] = 0.0
         return self.k_contact * phi * n, J
+
+    def draw_surface(self, ax, alpha=0.35, color="steelblue"):
+        """Translucent cylinder on a 3D axes; returns the artists."""
+        th = np.linspace(0.0, 2 * np.pi, 32)
+        ys = np.linspace(self.cy - self.half_length, self.cy + self.half_length, 2)
+        T, Y = np.meshgrid(th, ys)
+        surf = ax.plot_surface(self.cx + self.radius * np.cos(T), Y,
+                               self.cz + self.radius * np.sin(T), color=color, alpha=alpha,
+                               linewidth=0, shade=True)
+        return [surf]
+
+
+def _edge_samples(nv, deltaL, m):
+    """Quadrature points of the edges: ``(edge, fraction, weight)``.
+
+    ``m`` points per edge at fractions 0, 1/m, ..., (m-1)/m, plus the last
+    node; trapezoidal rest-length weights, so ``sum(weight) = rod length``.
+    """
+    frac = np.tile(np.arange(m) / m, nv - 1)
+    edge = np.repeat(np.arange(nv - 1), m)
+    edge = np.append(edge, nv - 2)
+    frac = np.append(frac, 1.0)
+    w = np.full(edge.size, deltaL / m)
+    w[0] *= 0.5
+    w[-1] *= 0.5
+    return edge, frac, w
+
+
+class PegObstacle:
+    """Rigid peg, a cylinder with its axis along y (3D) -- the contact model of
+    the paper, Sec. VI-B, eqs. (contact:energy)-(contact:peg).
+
+    Edge-based smooth penalty after the implicit contact model (Choi et al.
+    2021, Tong et al. 2023): on every edge ``(x_j, x_{j+1})`` the quadrature
+    points ``p = (1-s) x_j + s x_{j+1}`` carry rest-length weights ``w``, and::
+
+        E_c = sum_p  w * k_c / 2 * h(d(p))^2,     h(d) = delta * log(1 + exp(-d / delta))
+        d(p) = |(I - a a^T)(p - c)| - (radius + rod_radius)
+
+    ``d`` is the signed clearance of the rod *surface* (rod radius included),
+    positive outside.  ``k_c`` [N/m^2] is a stiffness per unit rod length,
+    ``delta`` [m] the smoothing length; the penalty tends to the one-sided
+    quadratic ``k_c/2 * max(0, -d)^2`` as ``delta -> 0``.  E_c is C-infinity
+    wherever no sample point is on the axis, so Assumption 1 holds.
+
+    The peg is finite, ``cy +- half_length`` along y; beyond its ends the
+    distance is taken to the end point of the axis (a capsule).  That cap is
+    only C1 where it meets the cylinder; :meth:`report` flags a contact there
+    (``end_contact``), which the experiments must not have.
+
+    The whole-rod interface (``rod_contact``, ``compute_contact_energy``) is
+    what :func:`get_contact_forces` / :func:`get_contact_energy` use, as for
+    the pipe.
+    """
+
+    D = 3
+
+    def __init__(self, cx, cy, cz, radius, half_length, rod_radius, nv, deltaL,
+                 k_contact=1.0e7, smoothing=1.0e-4, samples_per_edge=4, active_cutoff=30.0):
+        self.cx, self.cy, self.cz = float(cx), float(cy), float(cz)
+        self.radius = float(radius)
+        self.half_length = float(half_length)
+        self.r_rod = float(rod_radius)
+        self.r_eff = self.radius + self.r_rod
+        self.nv = int(nv)
+        self.deltaL = float(deltaL)
+        self.k_contact = float(k_contact)
+        self.eps = float(smoothing)
+        if self.eps <= 0.0:
+            raise ValueError(f"peg.smoothing must be > 0 (got {smoothing})")
+        self.samples_per_edge = int(samples_per_edge)
+        self.active_cutoff = float(active_cutoff)
+        self.s_edge, self.s_frac, self.s_w = _edge_samples(self.nv, self.deltaL,
+                                                           self.samples_per_edge)
+
+    # ------------------------------------------------------------ geometry
+
+    @property
+    def center(self):
+        return np.array([self.cx, self.cy, self.cz], dtype=float)
+
+    def sample_points(self, q, m=None):
+        """Quadrature points ``(n, 3)``; ``m`` points per edge instead of the model's."""
+        X = np.asarray(q[:3 * self.nv], dtype=float).reshape(self.nv, 3)
+        if m is None:
+            e, f = self.s_edge, self.s_frac
+        else:
+            e, f, _ = _edge_samples(self.nv, self.deltaL, m)
+        return (1.0 - f)[:, None] * X[e] + f[:, None] * X[e + 1]
+
+    def compute_signed_clearance(self, P, derivs=0):
+        """``d`` of points ``P`` (n, 3), and with ``derivs`` its gradient / Hessian."""
+        P = np.atleast_2d(np.asarray(P, dtype=float))
+        n = P.shape[0]
+        y = P[:, 1]
+        yc = np.clip(y, self.cy - self.half_length, self.cy + self.half_length)
+        v = P - np.column_stack([np.full(n, self.cx), yc, np.full(n, self.cz)])
+        rho = np.linalg.norm(v, axis=1)
+        d = rho - self.r_eff
+        if not derivs:
+            return d
+        ok = rho > 1e-14
+        nrm = np.zeros_like(v)
+        nrm[ok] = v[ok] / rho[ok, None]
+        if derivs == 1:
+            return d, nrm
+        inside = (y > self.cy - self.half_length) & (y < self.cy + self.half_length)
+        proj = np.broadcast_to(np.eye(3), (n, 3, 3)).copy()
+        proj[inside, 1, 1] = 0.0                      # I - a a^T, a = e_y
+        H = np.zeros((n, 3, 3))
+        H[ok] = (proj[ok] - nrm[ok, :, None] * nrm[ok, None, :]) / rho[ok, None, None]
+        return d, nrm, H
+
+    # ------------------------------------------------------------ penalty
+
+    def _penalty(self, d):
+        """``h(d)``, ``h'(d)``, ``h''(d)`` of the softplus gap."""
+        z = -d / self.eps
+        h = self.eps * np.logaddexp(0.0, z)
+        sig = 0.5 * (1.0 + np.tanh(0.5 * z))           # (1 + e^{d/delta})^{-1}, overflow-free
+        return h, -sig, sig * (1.0 - sig) / self.eps
+
+    def _active(self, q):
+        S = self.sample_points(q)
+        d = self.compute_signed_clearance(S)
+        return S, np.nonzero(d < self.active_cutoff * self.eps)[0]
+
+    def compute_contact_energy(self, q):
+        """``E_c(q)`` [J]."""
+        h = self._penalty(self.compute_signed_clearance(self.sample_points(q)))[0]
+        return 0.5 * self.k_contact * float(self.s_w @ (h * h))
+
+    def _scatter_vec(self, idx, vec):
+        out = np.zeros((self.nv, 3))
+        e, f = self.s_edge[idx], self.s_frac[idx]
+        np.add.at(out, e, (1.0 - f)[:, None] * vec)
+        np.add.at(out, e + 1, f[:, None] * vec)
+        return out.reshape(-1)
+
+    def contact_gradient_hessian(self, q, want_hess=True):
+        """``dE_c/dq`` and ``d2E_c/dq2`` over the ``3 nv`` position DOFs."""
+        S, idx = self._active(q)
+        n3 = 3 * self.nv
+        if idx.size == 0:
+            return np.zeros(n3), (np.zeros((n3, n3)) if want_hess else None)
+        if want_hess:
+            d, Gd, Hd = self.compute_signed_clearance(S[idx], derivs=2)
+        else:
+            d, Gd = self.compute_signed_clearance(S[idx], derivs=1)
+        h, dh, d2h = self._penalty(d)
+        kw = self.k_contact * self.s_w[idx]
+        a = kw * h * dh                                   # dE/dd  (= w phi')
+        grad = self._scatter_vec(idx, a[:, None] * Gd)
+        if not want_hess:
+            return grad, None
+        b = kw * (dh * dh + h * d2h)                      # d2E/dd2 (= w phi'')
+        Hs = b[:, None, None] * Gd[:, :, None] * Gd[:, None, :] + a[:, None, None] * Hd
+        e, f = self.s_edge[idx], self.s_frac[idx]
+        H = np.zeros((n3, n3))
+        c3 = np.arange(3)
+        for na, ca in ((e, 1.0 - f), (e + 1, f)):
+            rows = 3 * na[:, None] + c3[None, :]
+            for nb, cb in ((e, 1.0 - f), (e + 1, f)):
+                cols = 3 * nb[:, None] + c3[None, :]
+                np.add.at(H, (rows[:, :, None], cols[:, None, :]), (ca * cb)[:, None, None] * Hs)
+        return grad, H
+
+    def rod_contact(self, q, want_jac=True):
+        """Whole-rod hook of :func:`get_contact_forces`: ``(F_c, J_c) = (-grad, -Hess)``."""
+        grad, H = self.contact_gradient_hessian(q, want_hess=want_jac)
+        return -grad, (None if H is None else -H)
+
+    # ------------------------------------------------------------ diagnostics
+
+    def report(self, q, dense_samples=16, threshold=None):
+        """Geometric contact report of the rod ``q`` (positions first).
+
+        ``min_clearance`` / ``max_penetration`` [m] of the rod surface, from
+        ``dense_samples`` points per edge (the geometric value, independent
+        of the quadrature of the energy); ``edge_clearance`` (nv-1,) the
+        smallest clearance per edge; ``touching_edges`` the edges closer than
+        ``threshold`` (default 3 delta); ``force`` [N] the total normal force
+        of the penalty, ``sum_p w k_c h sigma``; ``end_contact`` whether a
+        touching point lies beyond the ends of the axis (on a cap).
+        """
+        thr = 3.0 * self.eps if threshold is None else float(threshold)
+        m = int(dense_samples)
+        e, _, _ = _edge_samples(self.nv, self.deltaL, m)
+        P = self.sample_points(q, m=m)
+        d = self.compute_signed_clearance(P)
+        edge_clear = np.full(self.nv - 1, np.inf)
+        np.minimum.at(edge_clear, e, d)
+        touch = d < thr
+        beyond = (P[:, 1] <= self.cy - self.half_length) | (P[:, 1] >= self.cy + self.half_length)
+        S = self.sample_points(q)
+        ds = self.compute_signed_clearance(S)
+        h, dh, _ = self._penalty(ds)
+        force = float(np.sum(self.s_w * self.k_contact * h * (-dh)))
+        return {"min_clearance": float(d.min()),
+                "max_penetration": float(max(0.0, -d.min())),
+                "edge_clearance": edge_clear,
+                "touching_edges": edge_clear < thr,
+                "n_touching": int(touch.sum()),
+                "force": force,
+                "end_contact": bool(np.any(touch & beyond))}
+
+    def bounds(self):
+        """``(lo, hi)`` corners of the box around the peg."""
+        c = self.center
+        e = np.array([self.radius, self.radius + self.half_length, self.radius])
+        return c - e, c + e
 
     def draw_surface(self, ax, alpha=0.35, color="steelblue"):
         """Translucent cylinder on a 3D axes; returns the artists."""

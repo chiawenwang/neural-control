@@ -106,7 +106,10 @@ def check_values(cfg) -> None:
     and ``--optimizer`` flags are checked by argparse's ``choices``.)
     """
     from implicit_grad_tools import GRAD_METHODS
-    from neural_control import OPTIMIZERS
+    # neural_control.OPTIMIZERS (adam, linesearch: the task scripts built on
+    # neural_control) and traj_opt.OPTIMIZERS (adam, lbfgs: train_shape.py),
+    # listed here so that loading a config does not import torch.
+    OPTIMIZERS = ("adam", "linesearch", "lbfgs")
     train = cfg.get("train") or {}
     value = train.get("grad_method")
     if value not in GRAD_METHODS:

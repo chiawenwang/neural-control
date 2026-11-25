@@ -314,6 +314,8 @@ def attach_pipe(env, cfg):
 
 
 _PEG_KEYS = ("center_xz", "center_y", "radius", "half_length_y", "k_contact")
+#: Contact-model keys, set once in the ``peg:`` block for every peg.
+_PEG_MODEL_DEFAULTS = {"model": "smooth", "smoothing": 1.0e-4, "samples_per_edge": 4}
 
 
 def attach_peg(env, cfg):
@@ -323,13 +325,22 @@ def attach_peg(env, cfg):
     with the block's radius, half length and stiffness unless it sets its own.
     Returns the pegs (empty when ``peg.enabled`` is false).  A rod that starts
     inside a peg is rejected rather than left to be pushed out.
+
+    ``peg.model``: ``smooth`` (default) is the paper's contact model
+    (contact.PegObstacle: edge quadrature, squared-softplus penalty with
+    smoothing length ``peg.smoothing``, clearance of the rod surface);
+    ``node`` is the legacy node-based quadratic penalty (PegObstacleNode),
+    kept only to reproduce runs made before 2026-11-24.
     """
     p = cfg.get("peg") or {}
     if not p.get("enabled", False):
         return []
     if env_dim(cfg) != 3:
         raise ValueError("peg.enabled: true needs env.dim: 3 (the peg is a cylinder along y)")
-    from contact import PegObstacle
+    from contact import PegObstacle, PegObstacleNode
+    opt = {k: p.get(k, v) for k, v in _PEG_MODEL_DEFAULTS.items()}
+    if opt["model"] not in ("smooth", "node"):
+        raise ValueError(f"peg.model must be smooth or node, got {opt['model']!r}")
     spacing = cfg.rod.rod_length / (cfg.rod.nv - 1)
     pegs = []
     for i, extra in enumerate([{}] + list(p.get("extra") or [])):
@@ -338,13 +349,22 @@ def attach_peg(env, cfg):
             raise ValueError(f"peg.extra[{i - 1}] sets {bad}; a peg takes {list(_PEG_KEYS)}")
         q = {key: extra.get(key, p[key]) for key in _PEG_KEYS}
         cx, cz = (float(v) for v in q["center_xz"])
-        peg = PegObstacle(cx, float(q["center_y"]), cz, float(q["radius"]),
-                          float(q["half_length_y"]), k_contact=float(q["k_contact"]))
         name = "peg" if i == 0 else f"peg.extra[{i - 1}]"
-        if peg.radius <= spacing:
-            raise ValueError(f"{name} radius {peg.radius} m is not above the node spacing "
-                             f"{spacing:.4g} m: the rod could slip between two nodes")
-        if any(peg.node_energy(*x) > 0.0 for x in env.nodes.reshape(-1, 3)):
+        if opt["model"] == "node":
+            peg = PegObstacleNode(cx, float(q["center_y"]), cz, float(q["radius"]),
+                                  float(q["half_length_y"]), k_contact=float(q["k_contact"]))
+            if peg.radius <= spacing:
+                raise ValueError(f"{name} radius {peg.radius} m is not above the node spacing "
+                                 f"{spacing:.4g} m: the rod could slip between two nodes")
+            inside = any(peg.node_energy(*x) > 0.0 for x in env.nodes.reshape(-1, 3))
+        else:
+            peg = PegObstacle(cx, float(q["center_y"]), cz, float(q["radius"]),
+                              float(q["half_length_y"]), rod_radius=env.R_outer,
+                              nv=env.nv, deltaL=env.deltaL, k_contact=float(q["k_contact"]),
+                              smoothing=float(opt["smoothing"]),
+                              samples_per_edge=int(opt["samples_per_edge"]))
+            inside = peg.report(env.nodes.reshape(-1))["max_penetration"] > 0.0
+        if inside:
             raise ValueError(f"the initial rod penetrates {name}; move its center_xz / center_y")
         env.add_obstacle(peg)
         pegs.append(peg)

@@ -11,6 +11,12 @@
 # upper-left. train_shape.py starts from the equilibrium at u0
 # (newton.initial_equilibrium), no ready motion.
 #
+# 2026-11-24: the pegs switched to the paper's smooth contact model (peg.model:
+# smooth). P1 was rebuilt and re-checked with it (train_shape.py targets): all
+# design criteria hold except that the start rod's SURFACE is 27.3 mm from the
+# clamp-side peg (30.3 mm from the centerline). P2 and P3 below still carry
+# their node-model descriptions; rebuild them before use.
+#
 # Pegs and targets were FOUND and CHECKED by
 #   python scripts/check_targets.py --config configs/task_shape_pegs_3d.yaml --mode shape
 # (2026-11-20, experiments/target_check/shape_pegs_3d): 6323 sampled stable
@@ -47,10 +53,23 @@ start:
   u_left_twist:  [0.0, 0.0, 0.0, 0.0, 1.5708, 0.0]
   u_right_twist: [0.62, 0.0, 0.62, 0.0, 0.0, 0.0]
 task:
+  # Common initialization (train.init: designed): the designed motion of the
+  # target plus lambda * e + sin(pi lambda) * b on the gripper, e and b drawn
+  # per seed from N(0, scale^2); the trajectory is fitted to it. One per
+  # (target, seed), shared by every method. Scales: position [m], tangent
+  # angles [rad], yaw [rad]. PROVISIONAL -- to be fixed before the runs.
+  shape_init:
+    seed_base: 1000
+    end_pos: 0.02
+    end_ang: 0.05
+    end_yaw: 0.05
+    bump_pos: 0.02
+    bump_ang: 0.05
+    bump_yaw: 0.05
   shape_targets:                # straight moves u0 -> u0 + du of the right gripper (x, y, z, theta, phi, yaw)
     P1:
       du: [-0.0821, -0.1843, -0.0367, -0.0124, 0.1182, 0.0000]
-      description: "straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (touching from steps [62, 60], nodes [8, 19])"
+      description: "straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact: touching from steps [51, 51], nodes [8-9] and [18-20], 2.9 / 2.5 N, max penetration 0.12 mm; without pegs it ends 14.7 mm from the target)"
     P2:
       du: [-0.0851, 0.1299, 0.0326, -0.0160, 0.3858, 0.0000]
       description: "straight move du = [-0.085, 0.13, 0.033, -0.016, 0.386, 0.0] onto both pegs (touching from steps [64, 63], nodes [8, 19])"
@@ -63,11 +82,18 @@ peg:
   center_y: 0.0
   half_length_y: 0.25           # a 0.5 m bar across the x-z plane of the start
   radius: 0.04                  # > node spacing 0.033 m
-  k_contact: 1.0e+7
+  k_contact: 1.0e+7             # [N/m^2] per unit rod length (smooth model)
+  # Contact model (paper Sec. VI-B, since 2026-11-24): edge quadrature with
+  # samples_per_edge points, squared-softplus penalty of smoothing length
+  # `smoothing`, clearance of the rod SURFACE (rod radius included).
+  # model: node is the legacy node-based quadratic penalty (old runs only).
+  model: smooth
+  smoothing: 1.0e-4             # delta [m]
+  samples_per_edge: 4
   extra:
     - {center_xz: [0.160, 0.560], center_y: 0.0}   # gripper side: above the arc, 37 mm from the start rod
 workspace:
-  enabled: true                 # check_targets.py samples in it; train_shape.py switches it off
+  enabled: true                 # check_targets.py samples in it; train_shape.py reads train.workspace
   position_min_3d: [0.20, -0.40, 0.20]   # the gripper starts at (0.62, 0, 0.62)
   position_max_3d: [1.00, 0.40, 0.95]
   orientation_limits_3d: [[-1.0, 1.0], [-1.0, 1.0]]   # theta, phi [rad]
@@ -77,11 +103,33 @@ newton:
   stability_check: true
   snap_rule: true
 train:
-  grad_method: state
-  optimizer: adam
-  epochs: 100
-  lr: 0.005                     # as the S1-S3 experiment; not tuned for this scene
-  device: auto
+  grad_method: state            # state (ours) | proxy (frozen tangent baseline)
+  optimizer: adam               # adam | lbfgs (RSS protocol; --optimizer overrides)
+  param: net                    # net (1-64-64-6 tanh, float64; needs torch) | rates (direct rates, numpy)
+  init: designed                # designed: perturbed designed motion, fitted (task.shape_init) | random
+  jac_reg: 0.0                  # exact adjoint (no shift of the Hessian)
+  # Stop at whichever comes first:
+  stop_rms: 1.0e-4              # [m] shape RMS of an admissible rollout (0.1 mm; keep it well below
+                                #     solve_rms, or the final errors are censored at the threshold)
+  epochs: 500                   # update cap (Adam: 1 rollout per update; L-BFGS: >= 1)
+  max_rollouts: 500             # rollout cap, every rollout counted (RSS: 500)
+  max_failures: 20              # failed rollouts (RSS: a run stops after 20)
+  # Evaluation (fixed before the runs, paper Sec. VII-A):
+  solve_rms: 5.0e-3             # [m] solved threshold
+  max_penetration: 5.0e-4       # [m] admissible penetration of the rod surface
+  workspace: reject             # reject: a command outside the box is a failed trial | record: only logged
+  adam:
+    lr: 1.0e-4                  # RSS rate; to be swept on seed 0 (see the report)
+  lbfgs:
+    history: 10
+    c1: 1.0e-4                  # Armijo
+    c2: 0.9                     # curvature (strong Wolfe)
+    max_ls: 20                  # rollouts per line search
+    first_step: 0.1             # norm of the first trial step in xi (empty memory)
+  device: cpu
+output:
+  experiment_name: shape_pegs_3d
+  save_gif: true
 output:
   experiment_name: shape_pegs_3d
   save_gif: true

@@ -329,10 +329,43 @@ def multistep_adjoint_gradient(u_seq, J_list, free_index, fixed_index, deltaL,
         if not A.any():                     # S_i^T 0 = 0: nothing to solve for
             continue
 
-        dxf_dxb_i = local_dxf_dxb(J_list[i], free_index, fixed_index, jac_reg)
+        # S_i^T A = -J_fb^T eta with J_ff eta = A: one adjoint solve with the
+        # (symmetric) equilibrium Hessian instead of the n_qb solves that
+        # forming S_i would take (paper eq. adjoint).
+        g_qb_i = adjoint_pull(J_list[i], free_index, fixed_index, A, jac_reg)
         B_i = _boundary_jacobian(u_seq[i], deltaL, dim, twist, boundary_rows)   # (n_qb, n_u)
-
-        g_qb_i = dxf_dxb_i.T @ A                           # (n_qb,)
         g_seq[i] = B_i.T @ g_qb_i                          # (n_u,)
 
     return g_seq
+
+
+#: How many adjoint solves :func:`adjoint_pull` has made (H1 cost bookkeeping).
+N_ADJOINT_SOLVES = [0]
+
+
+def adjoint_pull(J, free_index, fixed_index, a_free, jac_reg=0.0):
+    """``dL/dq_b = S^T a = -J_fb^T eta`` with ``J_ff eta = a``.
+
+    ``J`` is the Hessian of the total potential at the realized equilibrium
+    (``newton.solve_equilibrium``'s Jacobian: symmetric, and positive definite
+    at a stable equilibrium), so the solve uses its Cholesky factor -- the
+    factorization the stability check makes.  If the factorization fails (an
+    unstable state, which the rollout should have rejected) it falls back to
+    an LU solve, as the old code did.  ``jac_reg`` adds ``jac_reg * I`` to
+    ``J_ff``; keep it 0 for the exact gradient.
+    """
+    from scipy.linalg import cho_factor, cho_solve, LinAlgError
+    J_ff = J[np.ix_(free_index, free_index)]
+    J_fb = J[np.ix_(free_index, fixed_index)]
+    if jac_reg:
+        J_ff = J_ff + jac_reg * np.eye(J_ff.shape[0], dtype=J_ff.dtype)
+    N_ADJOINT_SOLVES[0] += 1
+    try:
+        eta = cho_solve(cho_factor(0.5 * (J_ff + J_ff.T), lower=True, check_finite=False),
+                        a_free, check_finite=False)
+    except LinAlgError:
+        try:
+            eta = np.linalg.solve(J_ff.T, a_free)
+        except np.linalg.LinAlgError:
+            eta = np.linalg.lstsq(J_ff.T, a_free, rcond=None)[0]
+    return -(J_fb.T @ eta)
