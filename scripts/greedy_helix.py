@@ -195,7 +195,8 @@ def cmd_run(args):
             scan_env = build_env(cfg)
             reset_env(scan_env, cfg)
             tgt = helix_shape(scan_env.nv, scan_env.rod_length, h, turns, hand)
-            yaws = np.linspace(-16 * np.pi, 16 * np.pi, 65)
+            lo, hi, n = args.yaw_scan
+            yaws = np.linspace(lo, hi, int(n))
             rows = stable_yaw_scan(scan_env, tgt, yaws)
             pick = pick_stable_yaw(rows)
             st = [r for r in rows if r[2]]
@@ -411,6 +412,9 @@ def main():
                    help="final yaw of the yaw reference (rad), or 'auto': scan for the yaw that "
                         "makes the target a stable equilibrium; the reference ramps with lam")
     r.add_argument("--retreats", type=int, default=None, help="default: greedy.max_retreats")
+    r.add_argument("--yaw-scan", type=float, nargs=3, metavar=("MIN", "MAX", "N"),
+                   default=(-16 * np.pi, 16 * np.pi, 65),
+                   help="yaws [rad] scanned by --yaw-target auto (default -16pi 16pi 65)")
     r.add_argument("--seed", type=int, default=0,
                    help="perturb the right gripper's start pose (0: as configured)")
     r.add_argument("--name", default=None)
