@@ -28,3 +28,15 @@ Initial trajectory: rms 15.21 mm, max 21.61 mm, contact 60 % of the steps, snaps
 [P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 145); failures 14/20, rollouts 26
 [P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 145); failures 15/20, rollouts 27
 [P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 145); failures 16/20, rollouts 28
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 144); failures 17/20, rollouts 29
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 144); failures 18/20, rollouts 30
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 144); failures 19/20, rollouts 31
+[P2_net_state_adam_s1] stopped: 20 failed rollouts (last: newton_failed at step 143)
+/usr/lib/python3.13/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /content/neural-control/experiments/path_pegs2_3d/runs/20261125-145614-P2_net_state_adam_s1/P2_net_state_adam_s1_path.{pdf,svg}  3.50 x 4.30 in (88.9 x 109.3 mm), font: Liberation Serif
+[tro_style] /content/neural-control/experiments/path_pegs2_3d/runs/20261125-145614-P2_net_state_adam_s1/P2_net_state_adam_s1_error.{pdf,svg}  3.50 x 1.52 in (88.9 x 38.7 mm), font: Liberation Serif
+Saved 200-frame animation to /content/neural-control/experiments/path_pegs2_3d/runs/20261125-145614-P2_net_state_adam_s1/P2_net_state_adam_s1.gif
+[tro_style] /content/neural-control/experiments/path_pegs2_3d/runs/20261125-145614-P2_net_state_adam_s1/P2_net_state_adam_s1_rms.{pdf,svg}  3.50 x 1.82 in (88.9 x 46.3 mm), font: Liberation Serif
+Run summary -> /content/neural-control/experiments/path_pegs2_3d/runs/20261125-145614-P2_net_state_adam_s1/summary.json  (finished)
+[P2_net_state_adam_s1] final rms 13.855 mm (best 10.071 mm), solved False, 11 updates, 32 rollouts, 20 failed (0 by the snap rule), 1391s -> /content/neural-control/experiments/path_pegs2_3d/runs/20261125-145614-P2_net_state_adam_s1

@@ -14,3 +14,9 @@ Initial trajectory: rms 14.52 mm, max 20.49 mm, contact 32 % of the steps, snaps
 [P2_net_state_adam_s0 it 010] rms=   4.170 mm  rollouts=11  snaps=0  pen=0.032 mm  t=  332.0s  
 [P2_net_state_adam_s0 it 020] rms=   1.677 mm  rollouts=21  snaps=0  pen=0.021 mm  t=  639.2s  
 [P2_net_state_adam_s0 it 030] rms=   1.221 mm  rollouts=31  snaps=0  pen=0.019 mm  t=  942.5s  
+[P2_net_state_adam_s0 it 040] rms=   0.785 mm  rollouts=41  snaps=0  pen=0.018 mm  t= 1246.2s  
+[P2_net_state_adam_s0 it 050] rms=   0.885 mm  rollouts=51  snaps=0  pen=0.019 mm  t= 1550.3s  
+[P2_net_state_adam_s0 it 060] rms=   0.761 mm  rollouts=61  snaps=0  pen=0.020 mm  t= 1849.3s  
+[P2_net_state_adam_s0 it 070] rms=   0.423 mm  rollouts=71  snaps=0  pen=0.018 mm  t= 2149.4s  
+[P2_net_state_adam_s0 it 080] rms=   0.434 mm  rollouts=81  snaps=0  pen=0.018 mm  t= 2453.6s  
+[P2_net_state_adam_s0 it 090] rms=   0.362 mm  rollouts=91  snaps=0  pen=0.019 mm  t= 2753.2s  
