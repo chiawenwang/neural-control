@@ -1,0 +1,93 @@
+{
+ "target": "W1",
+ "seed": 2,
+ "attempt": 1,
+ "scale": 2.4886508531464497,
+ "rms": 0.04139301817109987,
+ "rms_band": [
+  0.03,
+  0.05
+ ],
+ "end_offset": [
+  0.0025100696856015115,
+  -0.025425557633562485,
+  0.0024563429779950216,
+  -0.014152627920342515,
+  0.050508434888878954,
+  0.03602130964514388
+ ],
+ "bump": [
+  0.014250300857726914,
+  0.006584709585125168,
+  -0.002828308516484107,
+  -0.06587213870625662,
+  -0.04259680372960772,
+  -0.015150175694209116
+ ],
+ "final_touching": [
+  true,
+  true
+ ],
+ "onset": [
+  74,
+  85
+ ],
+ "max_penetration": 0.00010472013728415885,
+ "tried": [
+  {
+   "attempt": 0,
+   "c": 1.0,
+   "ok": true,
+   "reason": "",
+   "snaps": 1,
+   "ws_violation": 0.0,
+   "rms": 0.0198579742958029,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 0,
+   "c": 2.014304148256161,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.05100696666498373,
+   "same_side": true,
+   "touching": false
+  },
+  {
+   "attempt": 0,
+   "c": 1.5796306112349006,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.03598491460245998,
+   "same_side": true,
+   "touching": false
+  },
+  {
+   "attempt": 1,
+   "c": 1.0,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.016072965779601916,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 1,
+   "c": 2.4886508531464497,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.04139301817109987,
+   "same_side": true,
+   "touching": true
+  }
+ ]
+}

@@ -1,0 +1,174 @@
+{
+ "task": "shape",
+ "status": "done",
+ "target_name": "W1",
+ "config": "configs/task_shape_weave_3d.yaml",
+ "param": "endpose20aimed",
+ "grad_method": "state",
+ "optimizer": "none",
+ "optimizer_settings": {},
+ "trained_without_pegs": false,
+ "seed": 3,
+ "P": 6,
+ "init": {
+  "init": "designed + end pose aimed",
+  "window": 20,
+  "calibration": {
+   "attempt": 0,
+   "scale": 3.2989650810328137,
+   "rms": 0.04537760352643138,
+   "rms_band": [
+    0.03,
+    0.05
+   ]
+  },
+  "aimed_offset": [
+   0.06741318399036833,
+   0.007954712929137197,
+   0.09400523090224082,
+   0.06554225134498076,
+   0.008441922892474696,
+   -0.24524790444601346
+  ]
+ },
+ "nv": 31,
+ "N": 100,
+ "n_free_nodes": 27,
+ "stop_rms": 0.0001,
+ "solve_rms": 0.005,
+ "epochs_cap": 500,
+ "max_rollouts": 500,
+ "max_failures": 20,
+ "workspace_mode": "record",
+ "stop": "rms 0.0000 mm <= stop_rms 0.1 mm",
+ "train_time": 7.838715553283691,
+ "updates": 0,
+ "rollouts": 1,
+ "evaluations": 1,
+ "failures": 0,
+ "failure_reasons": [],
+ "adjoint_solves": 1,
+ "grad_time_median": 0.0005600452423095703,
+ "init_rms": 1.3648715539184597e-12,
+ "init_ok": true,
+ "init_onset": [
+  77,
+  55
+ ],
+ "init_final_touching": [
+  true,
+  true
+ ],
+ "final_rms": 1.3648715539184597e-12,
+ "final_loss": 1.8628743586957907e-24,
+ "final_ok": true,
+ "best_rms": 1.3648715539184597e-12,
+ "solved": false,
+ "admissible": false,
+ "admissibility": {
+  "all_steps_stable": true,
+  "in_workspace": true,
+  "no_self_contact": true,
+  "penetration_le_max": true,
+  "no_cap_contact": false
+ },
+ "final_snaps": 0,
+ "final_snap_steps": [],
+ "final_max_penetration": 0.00016253235428696777,
+ "final_max_strain": 0.00011264054478965502,
+ "final_max_abs_holonomy": 1.2013205351656944,
+ "final_ws_violation": 0.2663273937428503,
+ "final_onset": [
+  77,
+  55
+ ],
+ "final_touching": [
+  true,
+  true
+ ],
+ "final_force": [
+  2.525520806229523,
+  1.2269885401608536
+ ],
+ "snaps_total": 0,
+ "updates_to_5mm": null,
+ "updates_to_1mm": null,
+ "iterates": [],
+ "evals": {
+  "loss": [
+   1.8628743586957907e-24
+  ],
+  "rms": [
+   1.3648715539184597e-12
+  ],
+  "gnorm": [
+   1.781391701721701e-12
+  ],
+  "ok": [
+   true
+  ],
+  "reason": [
+   ""
+  ],
+  "time": [
+   7.838706731796265
+  ],
+  "rollouts": [
+   1
+  ],
+  "snaps": [
+   0
+  ],
+  "max_substeps": [
+   1
+  ],
+  "newton_iterations": [
+   430
+  ],
+  "max_penetration": [
+   0.00016253235428696777
+  ],
+  "max_strain": [
+   0.00011264054478965502
+  ],
+  "max_abs_holonomy": [
+   1.2013205351656944
+  ],
+  "min_self_clearance": [
+   0.05988144824624594
+  ],
+  "ws_violation": [
+   0.2663273937428503
+  ],
+  "end_contact": [
+   true
+  ],
+  "onset": [
+   [
+    77,
+    55
+   ]
+  ],
+  "final_touching": [
+   [
+    true,
+    true
+   ]
+  ],
+  "final_force": [
+   [
+    2.525520806229523,
+    1.2269885401608536
+   ]
+  ]
+ },
+ "target": {
+  "description": "weave: under L, through the gap, over R; L pressed from below, R from above",
+  "du": null,
+  "onset_step": [
+   72,
+   88
+  ],
+  "criteria_ok": true
+ }
+}

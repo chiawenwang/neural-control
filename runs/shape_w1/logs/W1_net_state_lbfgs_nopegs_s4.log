@@ -1,0 +1,85 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-031126-W1_net_state_lbfgs_nopegs_s4
+Task: 3D shape formation, target W1 -- weave: under L, through the gap, over R; L pressed from below, R from above
+Trajectory: net (P = 4678), init designed (fit rms 3.00e-03)
+Gradient: state   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: record
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 0 peg(s) in training (trained WITHOUT pegs, evaluated with)
+Initial trajectory: rms 30.82 mm, pegs touched at the end [True, True], onset [74, 83]
+[W1_net_state_lbfgs_nopegs_s4 it 001] rms=  91.507 mm  rollouts=4  snaps=0  pen=0.000 mm  t=   27.6s  alpha=0.00684 ls=3
+[W1_net_state_lbfgs_nopegs_s4 it 002] rms=  86.171 mm  rollouts=5  snaps=1  pen=0.000 mm  t=   35.7s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 003] rms=  77.492 mm  rollouts=6  snaps=0  pen=0.000 mm  t=   43.5s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 004] rms=  71.478 mm  rollouts=7  snaps=2  pen=0.000 mm  t=   51.6s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 005] rms=  68.347 mm  rollouts=8  snaps=2  pen=0.000 mm  t=   63.9s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 006] rms=  61.590 mm  rollouts=9  snaps=1  pen=0.000 mm  t=   70.4s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 007] rms=  41.978 mm  rollouts=10  snaps=0  pen=0.000 mm  t=   76.8s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 008] rms=  38.144 mm  rollouts=12  snaps=0  pen=0.000 mm  t=   89.1s  alpha=0.194 ls=2
+[W1_net_state_lbfgs_nopegs_s4 it 009] rms=  28.357 mm  rollouts=13  snaps=0  pen=0.000 mm  t=   95.1s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 010] rms=  27.205 mm  rollouts=14  snaps=0  pen=0.000 mm  t=  101.2s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 011] rms=  25.784 mm  rollouts=15  snaps=0  pen=0.000 mm  t=  107.3s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 012] rms=  25.076 mm  rollouts=16  snaps=0  pen=0.000 mm  t=  113.3s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 013] rms=  24.966 mm  rollouts=17  snaps=0  pen=0.000 mm  t=  119.4s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 014] rms=  24.942 mm  rollouts=18  snaps=0  pen=0.000 mm  t=  125.5s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 015] rms=  24.930 mm  rollouts=19  snaps=0  pen=0.000 mm  t=  131.6s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 016] rms=  24.929 mm  rollouts=20  snaps=0  pen=0.000 mm  t=  137.7s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 017] rms=  24.924 mm  rollouts=21  snaps=0  pen=0.000 mm  t=  143.8s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 018] rms=  24.913 mm  rollouts=22  snaps=0  pen=0.000 mm  t=  149.9s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 019] rms=  24.883 mm  rollouts=23  snaps=0  pen=0.000 mm  t=  155.9s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 020] rms=  24.812 mm  rollouts=24  snaps=0  pen=0.000 mm  t=  162.0s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 021] rms=  24.661 mm  rollouts=25  snaps=0  pen=0.000 mm  t=  168.1s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 022] rms=  24.366 mm  rollouts=26  snaps=0  pen=0.000 mm  t=  174.2s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 023] rms=  23.922 mm  rollouts=27  snaps=0  pen=0.000 mm  t=  180.4s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 024] rms=  23.823 mm  rollouts=31  snaps=0  pen=0.000 mm  t=  205.9s  alpha=0.153 ls=4
+[W1_net_state_lbfgs_nopegs_s4 it 025] rms=  23.652 mm  rollouts=32  snaps=0  pen=0.000 mm  t=  212.1s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 026] rms=  23.572 mm  rollouts=34  snaps=0  pen=0.000 mm  t=  224.6s  alpha=0.66 ls=2
+[W1_net_state_lbfgs_nopegs_s4 it 027] rms=  23.568 mm  rollouts=35  snaps=0  pen=0.000 mm  t=  230.8s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 028] rms=  23.563 mm  rollouts=36  snaps=0  pen=0.000 mm  t=  237.0s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 029] rms=  23.559 mm  rollouts=37  snaps=0  pen=0.000 mm  t=  243.2s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 030] rms=  23.549 mm  rollouts=38  snaps=0  pen=0.000 mm  t=  249.5s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 031] rms=  23.518 mm  rollouts=39  snaps=0  pen=0.000 mm  t=  255.7s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 032] rms=  23.395 mm  rollouts=40  snaps=0  pen=0.000 mm  t=  262.0s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 033] rms=  23.090 mm  rollouts=41  snaps=0  pen=0.000 mm  t=  268.2s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 034] rms=  22.177 mm  rollouts=42  snaps=0  pen=0.000 mm  t=  274.4s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 035] rms=  20.565 mm  rollouts=43  snaps=0  pen=0.000 mm  t=  280.5s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 036] rms=  19.475 mm  rollouts=47  snaps=0  pen=0.000 mm  t=  306.2s  alpha=0.195 ls=4
+[W1_net_state_lbfgs_nopegs_s4 it 037] rms=  18.171 mm  rollouts=48  snaps=0  pen=0.000 mm  t=  312.3s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 038] rms=  13.296 mm  rollouts=51  snaps=0  pen=0.000 mm  t=  334.1s  alpha=0.0982 ls=3
+[W1_net_state_lbfgs_nopegs_s4 it 039] rms=  11.103 mm  rollouts=53  snaps=0  pen=0.000 mm  t=  347.6s  alpha=0.346 ls=2
+[W1_net_state_lbfgs_nopegs_s4 it 040] rms=   7.635 mm  rollouts=54  snaps=0  pen=0.000 mm  t=  354.1s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 041] rms=   6.714 mm  rollouts=55  snaps=0  pen=0.000 mm  t=  360.6s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 042] rms=   6.507 mm  rollouts=56  snaps=0  pen=0.000 mm  t=  367.1s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 043] rms=   6.484 mm  rollouts=57  snaps=0  pen=0.000 mm  t=  373.6s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 044] rms=   6.442 mm  rollouts=58  snaps=0  pen=0.000 mm  t=  380.1s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 045] rms=   6.367 mm  rollouts=59  snaps=0  pen=0.000 mm  t=  386.6s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 046] rms=   6.154 mm  rollouts=60  snaps=0  pen=0.000 mm  t=  393.2s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 047] rms=   5.640 mm  rollouts=61  snaps=0  pen=0.000 mm  t=  399.9s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 048] rms=   4.508 mm  rollouts=62  snaps=0  pen=0.000 mm  t=  406.8s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 049] rms=   4.186 mm  rollouts=64  snaps=0  pen=0.000 mm  t=  421.4s  alpha=0.186 ls=2
+[W1_net_state_lbfgs_nopegs_s4 it 050] rms=   2.311 mm  rollouts=65  snaps=0  pen=0.000 mm  t=  428.7s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 051] rms=   2.107 mm  rollouts=66  snaps=0  pen=0.000 mm  t=  436.2s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 052] rms=   2.093 mm  rollouts=68  snaps=0  pen=0.000 mm  t=  451.0s  alpha=0.409 ls=2
+[W1_net_state_lbfgs_nopegs_s4 it 053] rms=   2.092 mm  rollouts=69  snaps=0  pen=0.000 mm  t=  458.5s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 054] rms=   2.091 mm  rollouts=70  snaps=0  pen=0.000 mm  t=  466.0s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 055] rms=   2.090 mm  rollouts=71  snaps=0  pen=0.000 mm  t=  473.2s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 056] rms=   2.090 mm  rollouts=72  snaps=0  pen=0.000 mm  t=  480.5s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 057] rms=   2.089 mm  rollouts=73  snaps=0  pen=0.000 mm  t=  487.7s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 058] rms=   2.089 mm  rollouts=74  snaps=0  pen=0.000 mm  t=  494.9s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 059] rms=   2.089 mm  rollouts=75  snaps=0  pen=0.000 mm  t=  502.1s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 060] rms=   2.089 mm  rollouts=76  snaps=0  pen=0.000 mm  t=  509.3s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 061] rms=   2.089 mm  rollouts=77  snaps=0  pen=0.000 mm  t=  516.5s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 062] rms=   2.089 mm  rollouts=78  snaps=0  pen=0.000 mm  t=  523.8s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 063] rms=   2.089 mm  rollouts=79  snaps=0  pen=0.000 mm  t=  531.1s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 064] rms=   2.089 mm  rollouts=80  snaps=0  pen=0.000 mm  t=  538.2s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 065] rms=   2.089 mm  rollouts=81  snaps=0  pen=0.000 mm  t=  545.4s  alpha=1 ls=1
+[W1_net_state_lbfgs_nopegs_s4 it 066] rms=   2.089 mm  rollouts=107  snaps=0  pen=0.000 mm  t=  732.1s  alpha=0.0312 ls=6
+[W1_net_state_lbfgs_nopegs_s4 it 067] rms=   2.089 mm  rollouts=111  snaps=0  pen=0.000 mm  t=  760.3s  alpha=0.125 ls=4
+[W1_net_state_lbfgs_nopegs_s4 it 068] rms=   2.089 mm  rollouts=131  snaps=0  pen=0.000 mm  t=  898.4s  alpha=7.63e-06 ls=20
+[W1_net_state_lbfgs_nopegs_s4 it 069] rms=   2.089 mm  rollouts=151  snaps=0  pen=0.000 mm  t= 1036.0s  alpha=0.0625 ls=20
+[W1_net_state_lbfgs_nopegs_s4 it 070] rms=   2.089 mm  rollouts=171  snaps=0  pen=0.000 mm  t= 1173.1s  alpha=7.63e-06 ls=20
+[W1_net_state_lbfgs_nopegs_s4 it 071] rms=   2.089 mm  rollouts=191  snaps=0  pen=0.000 mm  t= 1310.2s  alpha=3.81e-06 ls=20
+[W1_net_state_lbfgs_nopegs_s4 it 072] rms=   2.089 mm  rollouts=211  snaps=0  pen=0.000 mm  t= 1447.9s  alpha=3.81e-06 ls=20
+[W1_net_state_lbfgs_nopegs_s4] stopped: line search found no admissible decrease
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-031126-W1_net_state_lbfgs_nopegs_s4/W1_net_state_lbfgs_nopegs_s4_rms.{pdf,svg}  3.50 x 1.80 in (88.9 x 45.8 mm), font: Liberation Serif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-031126-W1_net_state_lbfgs_nopegs_s4/summary.json  (finished)
+[W1_net_state_lbfgs_nopegs_s4] final rms n/a (best 2.089 mm), solved False, 72 updates, 251 rollouts, 0 failed, max penetration 0.000 mm, 1723s -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-031126-W1_net_state_lbfgs_nopegs_s4

@@ -1,0 +1,158 @@
+{
+ "target": "W1",
+ "seed": 1,
+ "attempt": 1,
+ "scale": 2.8701206961823775,
+ "rms": 0.041388889007393556,
+ "rms_band": [
+  0.03,
+  0.05
+ ],
+ "end_offset": [
+  0.004126496231194896,
+  -0.02450053702449336,
+  0.035057556173744675,
+  -0.059353214093909756,
+  0.03561310176044446,
+  -0.06343258690270412
+ ],
+ "bump": [
+  -0.03168649926574956,
+  -0.012637632605854614,
+  -0.017786604460864098,
+  -0.04654539624792717,
+  0.11068296165778405,
+  0.03622131322245286
+ ],
+ "final_touching": [
+  true,
+  true
+ ],
+ "onset": [
+  88,
+  76
+ ],
+ "max_penetration": 2.8722369856036545e-05,
+ "tried": [
+  {
+   "attempt": 0,
+   "c": 1.0,
+   "ok": true,
+   "reason": "",
+   "snaps": 1,
+   "ws_violation": 0.0,
+   "rms": 0.17699104383164022,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 0,
+   "c": 0.2260001361314606,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.19253404129271492,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 0,
+   "c": 0.04695276422061203,
+   "ok": true,
+   "reason": "",
+   "snaps": 1,
+   "ws_violation": 0.0,
+   "rms": 0.19552103336404741,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 0,
+   "c": 0.009605670226422964,
+   "ok": true,
+   "reason": "",
+   "snaps": 1,
+   "ws_violation": 0.0,
+   "rms": 0.19614775419935518,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 0,
+   "c": 0.00195886417677976,
+   "ok": true,
+   "reason": "",
+   "snaps": 1,
+   "ws_violation": 0.0,
+   "rms": 0.19627636801707177,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 0,
+   "c": 0.00039920530353595735,
+   "ok": true,
+   "reason": "",
+   "snaps": 1,
+   "ws_violation": 0.0,
+   "rms": 0.1963026129019667,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 0,
+   "c": 8.134487822336221e-05,
+   "ok": false,
+   "reason": "unstable at step 22",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 0,
+   "c": 5.6941414756353545e-05,
+   "ok": false,
+   "reason": "unstable at step 22",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 0,
+   "c": 3.985899032944748e-05,
+   "ok": false,
+   "reason": "unstable at step 22",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 0,
+   "c": 2.7901293230613235e-05,
+   "ok": false,
+   "reason": "unstable at step 22",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 1,
+   "c": 1.0,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.013936696130307357,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 1,
+   "c": 2.8701206961823775,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.041388889007393556,
+   "same_side": true,
+   "touching": true
+  }
+ ]
+}

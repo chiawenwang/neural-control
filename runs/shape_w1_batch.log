@@ -18,3 +18,59 @@ Start rod: clearance to the pegs [129.9, 96.9] mm (rod surface)
    -> runs/shape_w1/checks/check_W1_net_s0.json
 == 3. Adam rate: train.adam.lr of configs/task_shape_weave_3d.yaml (no sweep; SWEEP=1 runs one)
 == 4. main runs and baselines
+== 5. greedy
+== 6. figures
+== 7. verify and report
+ok   W1_endpose20_state_lbfgs_s0: final rms 0.088 mm, solved True, 29 rollouts, stop: rms 0.0878 mm <= stop_rms 0.1 mm
+ok   W1_endpose20_state_lbfgs_s1: final rms 0.052 mm, solved True, 35 rollouts, stop: rms 0.0525 mm <= stop_rms 0.1 mm
+ok   W1_endpose20_state_lbfgs_s2: final rms 0.095 mm, solved True, 36 rollouts, stop: rms 0.0949 mm <= stop_rms 0.1 mm
+ok   W1_endpose20_state_lbfgs_s3: final rms 0.100 mm, solved False, 20 rollouts, stop: rms 0.0996 mm <= stop_rms 0.1 mm
+ok   W1_endpose20_state_lbfgs_s4: final rms 0.096 mm, solved False, 19 rollouts, stop: rms 0.0957 mm <= stop_rms 0.1 mm
+ok   W1_endpose20aimed_state_none_s0: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0001 mm <= stop_rms 0.1 mm
+ok   W1_endpose20aimed_state_none_s1: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   W1_endpose20aimed_state_none_s2: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   W1_endpose20aimed_state_none_s3: final rms 0.000 mm, solved False, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   W1_endpose20aimed_state_none_s4: final rms 0.000 mm, solved False, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   W1_endpose60_state_lbfgs_s0: final rms 0.089 mm, solved True, 29 rollouts, stop: rms 0.0888 mm <= stop_rms 0.1 mm
+ok   W1_endpose60_state_lbfgs_s1: final rms 0.052 mm, solved False, 35 rollouts, stop: rms 0.0524 mm <= stop_rms 0.1 mm
+ok   W1_endpose60_state_lbfgs_s2: final rms 0.094 mm, solved True, 36 rollouts, stop: rms 0.0943 mm <= stop_rms 0.1 mm
+ok   W1_endpose60_state_lbfgs_s3: final rms 0.098 mm, solved True, 20 rollouts, stop: rms 0.0981 mm <= stop_rms 0.1 mm
+ok   W1_endpose60_state_lbfgs_s4: final rms 0.096 mm, solved True, 19 rollouts, stop: rms 0.0957 mm <= stop_rms 0.1 mm
+ok   W1_endpose60aimed_state_none_s0: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0004 mm <= stop_rms 0.1 mm
+ok   W1_endpose60aimed_state_none_s1: final rms 0.000 mm, solved False, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   W1_endpose60aimed_state_none_s2: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   W1_endpose60aimed_state_none_s3: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   W1_endpose60aimed_state_none_s4: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   W1_greedy_state_greedy_s0: final rms 48.132 mm, solved False, 3.96 rollouts, stop: objective dropped < 0.001 (relative) over 50 steps
+ok   W1_net_proxy_adam_s0: final rms 29.555 mm, solved False, 136 rollouts, stop: 20 failed rollouts (last: newton_failed at step 59)
+ok   W1_net_proxy_adam_s1: final rms 9.460 mm, solved False, 63 rollouts, stop: 20 failed rollouts (last: newton_failed at step 39)
+ok   W1_net_proxy_adam_s2: final rms 24.408 mm, solved False, 500 rollouts, stop: rollout budget (500) used
+ok   W1_net_proxy_adam_s3: final rms 8.146 mm, solved False, 36 rollouts, stop: 20 failed rollouts (last: newton_failed at step 30)
+ok   W1_net_proxy_adam_s4: final rms 109.605 mm, solved False, 55 rollouts, stop: 20 failed rollouts (last: newton_failed at step 58)
+ok   W1_net_proxy_lbfgs_s0: final rms 1.623 mm, solved True, 75 rollouts, stop: line search found no admissible decrease
+ok   W1_net_proxy_lbfgs_s1: final rms 0.922 mm, solved False, 172 rollouts, stop: line search found no admissible decrease
+ok   W1_net_proxy_lbfgs_s2: final rms 1.440 mm, solved True, 437 rollouts, stop: 20 failed rollouts (last: newton_failed at step 25)
+ok   W1_net_proxy_lbfgs_s3: final rms 2.178 mm, solved True, 110 rollouts, stop: line search found no admissible decrease
+ok   W1_net_proxy_lbfgs_s4: final rms 0.353 mm, solved True, 219 rollouts, stop: line search found no admissible decrease
+ok   W1_net_state_adam_s0: final rms 0.099 mm, solved True, 227 rollouts, stop: rms 0.0993 mm <= stop_rms 0.1 mm
+ok   W1_net_state_adam_s1: final rms 0.099 mm, solved False, 268 rollouts, stop: rms 0.0988 mm <= stop_rms 0.1 mm
+ok   W1_net_state_adam_s2: final rms 0.100 mm, solved True, 266 rollouts, stop: rms 0.1000 mm <= stop_rms 0.1 mm
+ok   W1_net_state_adam_s3: final rms 0.112 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   W1_net_state_adam_s4: final rms 0.097 mm, solved True, 114 rollouts, stop: rms 0.0971 mm <= stop_rms 0.1 mm
+ok   W1_net_state_lbfgs_nopegs_s0: final rms 2.575 mm, solved True, 190 rollouts, stop: line search found no admissible decrease
+ok   W1_net_state_lbfgs_nopegs_s1: final rms 24.519 mm, solved False, 67 rollouts, stop: line search found no admissible decrease
+ok   W1_net_state_lbfgs_nopegs_s2: final rms 2.575 mm, solved True, 129 rollouts, stop: line search found no admissible decrease
+ok   W1_net_state_lbfgs_nopegs_s3: final rms 16.535 mm, solved False, 119 rollouts, stop: line search found no admissible decrease
+ok   W1_net_state_lbfgs_nopegs_s4: final rms -, solved False, 251 rollouts, stop: line search found no admissible decrease
+ok   W1_net_state_lbfgs_s0: final rms 0.093 mm, solved True, 18 rollouts, stop: rms 0.0931 mm <= stop_rms 0.1 mm
+ok   W1_net_state_lbfgs_s1: final rms 0.090 mm, solved False, 36 rollouts, stop: rms 0.0901 mm <= stop_rms 0.1 mm
+ok   W1_net_state_lbfgs_s2: final rms 0.065 mm, solved True, 33 rollouts, stop: rms 0.0654 mm <= stop_rms 0.1 mm
+ok   W1_net_state_lbfgs_s3: final rms 0.097 mm, solved True, 31 rollouts, stop: rms 0.0975 mm <= stop_rms 0.1 mm
+ok   W1_net_state_lbfgs_s4: final rms 0.051 mm, solved True, 22 rollouts, stop: rms 0.0506 mm <= stop_rms 0.1 mm
+ok   W1_rates_state_lbfgs_s0: final rms 0.057 mm, solved True, 31 rollouts, stop: rms 0.0568 mm <= stop_rms 0.1 mm
+ok   W1_rates_state_lbfgs_s1: final rms 0.064 mm, solved False, 39 rollouts, stop: rms 0.0638 mm <= stop_rms 0.1 mm
+ok   W1_rates_state_lbfgs_s2: final rms 0.098 mm, solved True, 35 rollouts, stop: rms 0.0982 mm <= stop_rms 0.1 mm
+ok   W1_rates_state_lbfgs_s3: final rms 0.082 mm, solved True, 24 rollouts, stop: rms 0.0821 mm <= stop_rms 0.1 mm
+ok   W1_rates_state_lbfgs_s4: final rms 0.056 mm, solved True, 20 rollouts, stop: rms 0.0559 mm <= stop_rms 0.1 mm
+51 runs, 0 with problems
+done: runs/shape_w1/report.md

@@ -1,0 +1,41 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-025502-W1_rates_state_lbfgs_s2
+Task: 3D shape formation, target W1 -- weave: under L, through the gap, over R; L pressed from below, R from above
+Trajectory: rates (P = 600), init designed (fit rms 0.00e+00)
+Gradient: state   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: record
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 2 peg(s) in training
+Initial trajectory: rms 41.39 mm, pegs touched at the end [True, True], onset [74, 85]
+[W1_rates_state_lbfgs_s2 it 001] rms=  38.291 mm  rollouts=4  snaps=0  pen=0.111 mm  t=   31.2s  alpha=4 ls=3
+[W1_rates_state_lbfgs_s2 it 002] rms=  21.640 mm  rollouts=5  snaps=0  pen=0.081 mm  t=   38.9s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 003] rms=   9.788 mm  rollouts=6  snaps=0  pen=0.065 mm  t=   46.6s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 004] rms=   7.265 mm  rollouts=7  snaps=0  pen=0.074 mm  t=   54.4s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 005] rms=   2.278 mm  rollouts=8  snaps=0  pen=0.086 mm  t=   62.1s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 006] rms=   1.389 mm  rollouts=9  snaps=0  pen=0.067 mm  t=   69.9s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 007] rms=   1.340 mm  rollouts=10  snaps=0  pen=0.067 mm  t=   77.6s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 008] rms=   1.314 mm  rollouts=11  snaps=0  pen=0.066 mm  t=   85.3s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 009] rms=   1.302 mm  rollouts=12  snaps=0  pen=0.065 mm  t=   93.0s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 010] rms=   1.300 mm  rollouts=14  snaps=0  pen=0.065 mm  t=  108.4s  alpha=2 ls=2
+[W1_rates_state_lbfgs_s2 it 011] rms=   1.279 mm  rollouts=15  snaps=0  pen=0.064 mm  t=  116.2s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 012] rms=   1.242 mm  rollouts=16  snaps=0  pen=0.064 mm  t=  124.1s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 013] rms=   1.157 mm  rollouts=17  snaps=0  pen=0.065 mm  t=  131.9s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 014] rms=   1.040 mm  rollouts=18  snaps=0  pen=0.070 mm  t=  139.7s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 015] rms=   1.039 mm  rollouts=24  snaps=0  pen=0.069 mm  t=  187.5s  alpha=0.00657 ls=6
+[W1_rates_state_lbfgs_s2 it 016] rms=   0.932 mm  rollouts=25  snaps=0  pen=0.074 mm  t=  195.3s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 017] rms=   0.895 mm  rollouts=26  snaps=0  pen=0.077 mm  t=  203.2s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 018] rms=   0.891 mm  rollouts=27  snaps=0  pen=0.077 mm  t=  211.1s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 019] rms=   0.889 mm  rollouts=28  snaps=0  pen=0.077 mm  t=  219.1s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 020] rms=   0.885 mm  rollouts=29  snaps=0  pen=0.078 mm  t=  226.9s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 021] rms=   0.852 mm  rollouts=30  snaps=0  pen=0.078 mm  t=  234.8s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 022] rms=   0.791 mm  rollouts=31  snaps=0  pen=0.078 mm  t=  242.7s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 023] rms=   0.619 mm  rollouts=32  snaps=0  pen=0.078 mm  t=  250.6s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 024] rms=   0.325 mm  rollouts=33  snaps=0  pen=0.076 mm  t=  258.5s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2 it 025] rms=   0.181 mm  rollouts=34  snaps=0  pen=0.074 mm  t=  266.4s  alpha=1 ls=1
+[W1_rates_state_lbfgs_s2] stopped: rms 0.0982 mm <= stop_rms 0.1 mm
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-025502-W1_rates_state_lbfgs_s2/W1_rates_state_lbfgs_s2_shape.{pdf,svg}  3.50 x 2.42 in (88.9 x 61.4 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-025502-W1_rates_state_lbfgs_s2/W1_rates_state_lbfgs_s2_error.{pdf,svg}  3.50 x 1.47 in (88.9 x 37.2 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-025502-W1_rates_state_lbfgs_s2/W1_rates_state_lbfgs_s2_rms.{pdf,svg}  3.50 x 1.78 in (88.9 x 45.2 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-025502-W1_rates_state_lbfgs_s2/W1_rates_state_lbfgs_s2.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-025502-W1_rates_state_lbfgs_s2/summary.json  (finished)
+[W1_rates_state_lbfgs_s2] final rms 0.098 mm (best 0.098 mm), solved True, 25 updates, 35 rollouts, 0 failed, max penetration 0.072 mm, 274s -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-025502-W1_rates_state_lbfgs_s2

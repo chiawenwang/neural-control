@@ -1,0 +1,39 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-015440-W1_net_proxy_adam_s1
+Task: 3D shape formation, target W1 -- weave: under L, through the gap, over R; L pressed from below, R from above
+Trajectory: net (P = 4678), init designed (fit rms 2.05e-03)
+Gradient: proxy   Optimizer: adam {'lr': 0.0003}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: record
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 2 peg(s) in training
+Initial trajectory: rms 41.73 mm, pegs touched at the end [True, True], onset [88, 76]
+[W1_net_proxy_adam_s1 it 010] rms=  25.513 mm  rollouts=11  snaps=0  pen=0.514 mm  t=  102.3s  
+[W1_net_proxy_adam_s1 it 020] rms=  17.775 mm  rollouts=21  snaps=0  pen=0.055 mm  t=  185.6s  
+[W1_net_proxy_adam_s1 it 030] rms=  11.021 mm  rollouts=31  snaps=0  pen=0.803 mm  t=  270.3s  
+[W1_net_proxy_adam_s1 it 040] rms=  11.161 mm  rollouts=41  snaps=0  pen=0.120 mm  t=  359.5s  
+[W1_net_proxy_adam_s1 it 041] FAILED rollout (newton_failed at step 39); failures 1/20, rollouts 43
+[W1_net_proxy_adam_s1 it 041] FAILED rollout (newton_failed at step 39); failures 2/20, rollouts 44
+[W1_net_proxy_adam_s1 it 041] FAILED rollout (newton_failed at step 39); failures 3/20, rollouts 45
+[W1_net_proxy_adam_s1 it 041] FAILED rollout (newton_failed at step 39); failures 4/20, rollouts 46
+[W1_net_proxy_adam_s1 it 041] FAILED rollout (newton_failed at step 39); failures 5/20, rollouts 47
+[W1_net_proxy_adam_s1 it 041] FAILED rollout (tunneled through peg [0] at step 39); failures 6/20, rollouts 48
+[W1_net_proxy_adam_s1 it 042] FAILED rollout (newton_failed at step 39); failures 7/20, rollouts 50
+[W1_net_proxy_adam_s1 it 042] FAILED rollout (newton_failed at step 39); failures 8/20, rollouts 51
+[W1_net_proxy_adam_s1 it 042] FAILED rollout (newton_failed at step 39); failures 9/20, rollouts 52
+[W1_net_proxy_adam_s1 it 042] FAILED rollout (newton_failed at step 39); failures 10/20, rollouts 53
+[W1_net_proxy_adam_s1 it 042] FAILED rollout (newton_failed at step 39); failures 11/20, rollouts 54
+[W1_net_proxy_adam_s1 it 042] FAILED rollout (newton_failed at step 39); failures 12/20, rollouts 55
+[W1_net_proxy_adam_s1 it 042] FAILED rollout (newton_failed at step 39); failures 13/20, rollouts 56
+[W1_net_proxy_adam_s1 it 042] FAILED rollout (newton_failed at step 39); failures 14/20, rollouts 57
+[W1_net_proxy_adam_s1 it 042] FAILED rollout (newton_failed at step 39); failures 15/20, rollouts 58
+[W1_net_proxy_adam_s1 it 042] FAILED rollout (newton_failed at step 39); failures 16/20, rollouts 59
+[W1_net_proxy_adam_s1 it 042] FAILED rollout (newton_failed at step 39); failures 17/20, rollouts 60
+[W1_net_proxy_adam_s1 it 042] FAILED rollout (newton_failed at step 39); failures 18/20, rollouts 61
+[W1_net_proxy_adam_s1 it 042] FAILED rollout (newton_failed at step 39); failures 19/20, rollouts 62
+[W1_net_proxy_adam_s1] stopped: 20 failed rollouts (last: newton_failed at step 39)
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-015440-W1_net_proxy_adam_s1/W1_net_proxy_adam_s1_shape.{pdf,svg}  3.50 x 2.42 in (88.9 x 61.5 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-015440-W1_net_proxy_adam_s1/W1_net_proxy_adam_s1_error.{pdf,svg}  3.50 x 1.49 in (88.9 x 38.0 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-015440-W1_net_proxy_adam_s1/W1_net_proxy_adam_s1_rms.{pdf,svg}  3.50 x 1.82 in (88.9 x 46.2 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-015440-W1_net_proxy_adam_s1/W1_net_proxy_adam_s1.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-015440-W1_net_proxy_adam_s1/summary.json  (finished)
+[W1_net_proxy_adam_s1] final rms 9.460 mm (best 6.861 mm), solved False, 42 updates, 63 rollouts, 20 failed, max penetration 2.986 mm, 530s -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-015440-W1_net_proxy_adam_s1

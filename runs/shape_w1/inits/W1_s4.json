@@ -1,0 +1,233 @@
+{
+ "target": "W1",
+ "seed": 4,
+ "attempt": 2,
+ "scale": 1.0,
+ "rms": 0.030386680793069377,
+ "rms_band": [
+  0.03,
+  0.05
+ ],
+ "end_offset": [
+  -0.019326054825203384,
+  0.042985826880344094,
+  -0.026434915716863874,
+  -0.036841061904789835,
+  0.0014640765266981026,
+  0.06640000085629422
+ ],
+ "bump": [
+  0.00043133353407948945,
+  -0.012814328774330254,
+  -0.0009249238518378234,
+  -0.05593947915661628,
+  0.002275478757950277,
+  0.020404002539647685
+ ],
+ "final_touching": [
+  true,
+  true
+ ],
+ "onset": [
+  74,
+  83
+ ],
+ "max_penetration": 7.476513902836268e-05,
+ "tried": [
+  {
+   "attempt": 0,
+   "c": 1.0,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.002046922367623886,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 0,
+   "c": 19.54153251372836,
+   "ok": false,
+   "reason": "newton_failed at step 12",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 0,
+   "c": 13.67907275960985,
+   "ok": false,
+   "reason": "newton_failed at step 13",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 0,
+   "c": 9.575350931726895,
+   "ok": false,
+   "reason": "newton_failed at step 15",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 0,
+   "c": 6.702745652208826,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.0086622360229686,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 0,
+   "c": 30.951572478219106,
+   "ok": false,
+   "reason": "tunneled through peg [1] at step 12",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 0,
+   "c": 21.66610073475337,
+   "ok": false,
+   "reason": "newton_failed at step 12",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 0,
+   "c": 15.166270514327358,
+   "ok": false,
+   "reason": "newton_failed at step 12",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 0,
+   "c": 10.61638936002915,
+   "ok": false,
+   "reason": "newton_failed at step 15",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 0,
+   "c": 7.431472552020404,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.009161815915710277,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 1,
+   "c": 1.0,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.010408020581649568,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 1,
+   "c": 3.8431899405084,
+   "ok": false,
+   "reason": "newton_failed at step 28",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 1,
+   "c": 2.6902329583558795,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.02662278702114489,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 1,
+   "c": 4.042000495619318,
+   "ok": false,
+   "reason": "newton_failed at step 28",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 1,
+   "c": 2.8294003469335225,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.027872757771652264,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 1,
+   "c": 4.060452675854183,
+   "ok": false,
+   "reason": "newton_failed at step 28",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 1,
+   "c": 2.842316873097928,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.027987036763210175,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 1,
+   "c": 4.062333425501111,
+   "ok": false,
+   "reason": "newton_failed at step 28",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 1,
+   "c": 2.8436333978507777,
+   "ok": true,
+   "reason": "",
+   "snaps": 0,
+   "ws_violation": 0.0,
+   "rms": 0.027998700843772054,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 1,
+   "c": 4.062521920167317,
+   "ok": false,
+   "reason": "newton_failed at step 28",
+   "snaps": 0,
+   "ws_violation": 0.0
+  },
+  {
+   "attempt": 2,
+   "c": 1.0,
+   "ok": true,
+   "reason": "",
+   "snaps": 1,
+   "ws_violation": 0.0,
+   "rms": 0.030386680793069377,
+   "same_side": true,
+   "touching": true
+  }
+ ]
+}

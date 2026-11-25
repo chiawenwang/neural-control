@@ -1,0 +1,30 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012923-W1_net_state_lbfgs_s0
+Task: 3D shape formation, target W1 -- weave: under L, through the gap, over R; L pressed from below, R from above
+Trajectory: net (P = 4678), init designed (fit rms 6.62e-03)
+Gradient: state   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: record
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 2 peg(s) in training
+Initial trajectory: rms 47.95 mm, pegs touched at the end [True, True], onset [77, 51]
+[W1_net_state_lbfgs_s0 it 001] rms=  22.136 mm  rollouts=4  snaps=0  pen=0.095 mm  t=   66.4s  alpha=0.00546 ls=3
+[W1_net_state_lbfgs_s0 it 002] rms=  17.071 mm  rollouts=5  snaps=0  pen=0.105 mm  t=   74.0s  alpha=1 ls=1
+[W1_net_state_lbfgs_s0 it 003] rms=   8.643 mm  rollouts=6  snaps=0  pen=0.109 mm  t=   81.7s  alpha=1 ls=1
+[W1_net_state_lbfgs_s0 it 004] rms=   5.881 mm  rollouts=7  snaps=0  pen=0.112 mm  t=   89.4s  alpha=1 ls=1
+[W1_net_state_lbfgs_s0 it 005] rms=   1.822 mm  rollouts=8  snaps=0  pen=0.089 mm  t=   97.1s  alpha=1 ls=1
+[W1_net_state_lbfgs_s0 it 006] rms=   0.332 mm  rollouts=9  snaps=0  pen=0.073 mm  t=  104.6s  alpha=1 ls=1
+[W1_net_state_lbfgs_s0 it 007] rms=   0.251 mm  rollouts=10  snaps=0  pen=0.073 mm  t=  112.0s  alpha=1 ls=1
+[W1_net_state_lbfgs_s0 it 008] rms=   0.199 mm  rollouts=11  snaps=0  pen=0.080 mm  t=  119.5s  alpha=1 ls=1
+[W1_net_state_lbfgs_s0 it 009] rms=   0.199 mm  rollouts=12  snaps=0  pen=0.080 mm  t=  127.0s  alpha=1 ls=1
+[W1_net_state_lbfgs_s0 it 010] rms=   0.197 mm  rollouts=13  snaps=0  pen=0.081 mm  t=  134.5s  alpha=1 ls=1
+[W1_net_state_lbfgs_s0 it 011] rms=   0.194 mm  rollouts=14  snaps=0  pen=0.083 mm  t=  142.0s  alpha=1 ls=1
+[W1_net_state_lbfgs_s0 it 012] rms=   0.186 mm  rollouts=15  snaps=0  pen=0.087 mm  t=  149.5s  alpha=1 ls=1
+[W1_net_state_lbfgs_s0 it 013] rms=   0.168 mm  rollouts=16  snaps=0  pen=0.093 mm  t=  157.0s  alpha=1 ls=1
+[W1_net_state_lbfgs_s0 it 014] rms=   0.133 mm  rollouts=17  snaps=0  pen=0.102 mm  t=  164.6s  alpha=1 ls=1
+[W1_net_state_lbfgs_s0] stopped: rms 0.0931 mm <= stop_rms 0.1 mm
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012923-W1_net_state_lbfgs_s0/W1_net_state_lbfgs_s0_shape.{pdf,svg}  3.50 x 2.42 in (88.9 x 61.4 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012923-W1_net_state_lbfgs_s0/W1_net_state_lbfgs_s0_error.{pdf,svg}  3.50 x 1.49 in (88.8 x 37.8 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012923-W1_net_state_lbfgs_s0/W1_net_state_lbfgs_s0_rms.{pdf,svg}  3.50 x 1.76 in (88.9 x 44.8 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012923-W1_net_state_lbfgs_s0/W1_net_state_lbfgs_s0.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012923-W1_net_state_lbfgs_s0/summary.json  (finished)
+[W1_net_state_lbfgs_s0] final rms 0.093 mm (best 0.093 mm), solved True, 14 updates, 18 rollouts, 1 failed, max penetration 0.106 mm, 172s -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012923-W1_net_state_lbfgs_s0

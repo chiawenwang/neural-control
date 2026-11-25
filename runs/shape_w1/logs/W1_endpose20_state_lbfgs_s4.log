@@ -1,0 +1,31 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-031151-W1_endpose20_state_lbfgs_s4
+Task: 3D shape formation, target W1 -- weave: under L, through the gap, over R; L pressed from below, R from above
+Trajectory: endpose20 (P = 6), init designed + end pose offset 0 (fit rms 0.00e+00)
+Gradient: state   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: record
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 2 peg(s) in training
+Initial trajectory: rms 30.39 mm, pegs touched at the end [True, True], onset [74, 83]
+[W1_endpose20_state_lbfgs_s4 it 001] rms=  18.747 mm  rollouts=3  snaps=1  pen=0.106 mm  t=   97.0s  alpha=0.548 ls=2
+[W1_endpose20_state_lbfgs_s4 it 002] rms=  14.614 mm  rollouts=4  snaps=1  pen=0.065 mm  t=  129.3s  alpha=1 ls=1
+[W1_endpose20_state_lbfgs_s4 it 003] rms=   3.637 mm  rollouts=5  snaps=1  pen=0.098 mm  t=  161.2s  alpha=1 ls=1
+[W1_endpose20_state_lbfgs_s4 it 004] rms=   1.718 mm  rollouts=6  snaps=1  pen=0.088 mm  t=  193.2s  alpha=1 ls=1
+[W1_endpose20_state_lbfgs_s4 it 005] rms=   0.841 mm  rollouts=7  snaps=1  pen=0.080 mm  t=  225.3s  alpha=1 ls=1
+[W1_endpose20_state_lbfgs_s4 it 006] rms=   0.678 mm  rollouts=8  snaps=1  pen=0.084 mm  t=  257.4s  alpha=1 ls=1
+[W1_endpose20_state_lbfgs_s4 it 007] rms=   0.674 mm  rollouts=9  snaps=1  pen=0.085 mm  t=  289.5s  alpha=1 ls=1
+[W1_endpose20_state_lbfgs_s4 it 008] rms=   0.673 mm  rollouts=10  snaps=1  pen=0.085 mm  t=  321.5s  alpha=1 ls=1
+[W1_endpose20_state_lbfgs_s4 it 009] rms=   0.670 mm  rollouts=11  snaps=1  pen=0.085 mm  t=  353.5s  alpha=1 ls=1
+[W1_endpose20_state_lbfgs_s4 it 010] rms=   0.661 mm  rollouts=12  snaps=1  pen=0.085 mm  t=  385.4s  alpha=1 ls=1
+[W1_endpose20_state_lbfgs_s4 it 011] rms=   0.639 mm  rollouts=13  snaps=1  pen=0.085 mm  t=  417.5s  alpha=1 ls=1
+[W1_endpose20_state_lbfgs_s4 it 012] rms=   0.585 mm  rollouts=14  snaps=1  pen=0.086 mm  t=  449.2s  alpha=1 ls=1
+[W1_endpose20_state_lbfgs_s4 it 013] rms=   0.470 mm  rollouts=15  snaps=1  pen=0.088 mm  t=  481.0s  alpha=1 ls=1
+[W1_endpose20_state_lbfgs_s4 it 014] rms=   0.291 mm  rollouts=16  snaps=1  pen=0.089 mm  t=  512.5s  alpha=1 ls=1
+[W1_endpose20_state_lbfgs_s4 it 015] rms=   0.222 mm  rollouts=18  snaps=1  pen=0.089 mm  t=  575.7s  alpha=0.464 ls=2
+[W1_endpose20_state_lbfgs_s4] stopped: rms 0.0957 mm <= stop_rms 0.1 mm
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-031151-W1_endpose20_state_lbfgs_s4/W1_endpose20_state_lbfgs_s4_shape.{pdf,svg}  3.50 x 2.42 in (88.9 x 61.4 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-031151-W1_endpose20_state_lbfgs_s4/W1_endpose20_state_lbfgs_s4_error.{pdf,svg}  3.50 x 1.48 in (88.9 x 37.7 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-031151-W1_endpose20_state_lbfgs_s4/W1_endpose20_state_lbfgs_s4_rms.{pdf,svg}  3.50 x 1.80 in (88.9 x 45.8 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-031151-W1_endpose20_state_lbfgs_s4/W1_endpose20_state_lbfgs_s4.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-031151-W1_endpose20_state_lbfgs_s4/summary.json  (finished)
+[W1_endpose20_state_lbfgs_s4] final rms 0.096 mm (best 0.096 mm), solved False, 15 updates, 19 rollouts, 0 failed, max penetration 0.089 mm, 607s -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-031151-W1_endpose20_state_lbfgs_s4

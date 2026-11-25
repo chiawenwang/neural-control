@@ -1,0 +1,20 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-024542-W1_net_state_lbfgs_nopegs_s1
+Task: 3D shape formation, target W1 -- weave: under L, through the gap, over R; L pressed from below, R from above
+Trajectory: net (P = 4678), init designed (fit rms 2.05e-03)
+Gradient: state   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: record
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 0 peg(s) in training (trained WITHOUT pegs, evaluated with)
+Initial trajectory: rms 41.73 mm, pegs touched at the end [True, True], onset [88, 76]
+[W1_net_state_lbfgs_nopegs_s1 it 001] rms=  44.311 mm  rollouts=3  snaps=0  pen=0.000 mm  t=   38.6s  alpha=0.023 ls=2
+[W1_net_state_lbfgs_nopegs_s1 it 002] rms=  38.615 mm  rollouts=5  snaps=0  pen=0.000 mm  t=   63.6s  alpha=0.5 ls=2
+[W1_net_state_lbfgs_nopegs_s1 it 003] rms=  37.267 mm  rollouts=7  snaps=0  pen=0.000 mm  t=   88.7s  alpha=0.5 ls=2
+[W1_net_state_lbfgs_nopegs_s1 it 004] rms=  37.252 mm  rollouts=27  snaps=0  pen=0.000 mm  t=  275.1s  alpha=0.00217 ls=20
+[W1_net_state_lbfgs_nopegs_s1] stopped: line search found no admissible decrease
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-024542-W1_net_state_lbfgs_nopegs_s1/W1_net_state_lbfgs_nopegs_s1_shape.{pdf,svg}  3.50 x 2.40 in (88.9 x 60.9 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-024542-W1_net_state_lbfgs_nopegs_s1/W1_net_state_lbfgs_nopegs_s1_error.{pdf,svg}  3.50 x 1.49 in (88.9 x 38.0 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-024542-W1_net_state_lbfgs_nopegs_s1/W1_net_state_lbfgs_nopegs_s1_rms.{pdf,svg}  3.50 x 1.77 in (88.9 x 45.0 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-024542-W1_net_state_lbfgs_nopegs_s1/W1_net_state_lbfgs_nopegs_s1.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-024542-W1_net_state_lbfgs_nopegs_s1/summary.json  (finished)
+[W1_net_state_lbfgs_nopegs_s1] final rms 24.519 mm (best 37.252 mm), solved False, 4 updates, 67 rollouts, 15 failed, max penetration 0.119 mm, 653s -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-024542-W1_net_state_lbfgs_nopegs_s1

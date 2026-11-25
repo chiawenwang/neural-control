@@ -1,0 +1,27 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-021457-W1_net_proxy_lbfgs_s3
+Task: 3D shape formation, target W1 -- weave: under L, through the gap, over R; L pressed from below, R from above
+Trajectory: net (P = 4678), init designed (fit rms 7.08e-03)
+Gradient: proxy   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: record
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 2 peg(s) in training
+Initial trajectory: rms 44.78 mm, pegs touched at the end [True, True], onset [77, 55]
+[W1_net_proxy_lbfgs_s3 it 001] rms=  44.769 mm  rollouts=4  snaps=0  pen=0.134 mm  t=   34.2s  alpha=0.0828 ls=3
+[W1_net_proxy_lbfgs_s3 it 002] rms=  16.345 mm  rollouts=5  snaps=0  pen=0.144 mm  t=   41.7s  alpha=1 ls=1
+[W1_net_proxy_lbfgs_s3 it 003] rms=   6.610 mm  rollouts=6  snaps=0  pen=0.153 mm  t=   49.1s  alpha=1 ls=1
+[W1_net_proxy_lbfgs_s3 it 004] rms=   3.904 mm  rollouts=7  snaps=0  pen=0.156 mm  t=   56.7s  alpha=1 ls=1
+[W1_net_proxy_lbfgs_s3 it 005] rms=   2.496 mm  rollouts=8  snaps=0  pen=0.143 mm  t=   63.9s  alpha=1 ls=1
+[W1_net_proxy_lbfgs_s3 it 006] rms=   2.267 mm  rollouts=9  snaps=0  pen=0.131 mm  t=   71.3s  alpha=1 ls=1
+[W1_net_proxy_lbfgs_s3 it 007] rms=   2.263 mm  rollouts=10  snaps=0  pen=0.129 mm  t=   78.5s  alpha=1 ls=1
+[W1_net_proxy_lbfgs_s3 it 008] rms=   2.179 mm  rollouts=30  snaps=0  pen=0.124 mm  t=  223.7s  alpha=0.0514 ls=4
+[W1_net_proxy_lbfgs_s3 it 009] rms=   2.178 mm  rollouts=32  snaps=0  pen=0.125 mm  t=  238.2s  alpha=0.16 ls=2
+[W1_net_proxy_lbfgs_s3 it 010] rms=   2.178 mm  rollouts=51  snaps=0  pen=0.125 mm  t=  375.4s  alpha=2.97e-13 ls=19
+[W1_net_proxy_lbfgs_s3 it 011] rms=   2.178 mm  rollouts=70  snaps=0  pen=0.125 mm  t=  513.0s  alpha=2.03e-13 ls=19
+[W1_net_proxy_lbfgs_s3] stopped: line search found no admissible decrease
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-021457-W1_net_proxy_lbfgs_s3/W1_net_proxy_lbfgs_s3_shape.{pdf,svg}  3.50 x 2.42 in (88.9 x 61.4 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-021457-W1_net_proxy_lbfgs_s3/W1_net_proxy_lbfgs_s3_error.{pdf,svg}  3.50 x 1.51 in (88.9 x 38.4 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-021457-W1_net_proxy_lbfgs_s3/W1_net_proxy_lbfgs_s3_rms.{pdf,svg}  3.50 x 1.82 in (88.9 x 46.2 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-021457-W1_net_proxy_lbfgs_s3/W1_net_proxy_lbfgs_s3.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-021457-W1_net_proxy_lbfgs_s3/summary.json  (finished)
+[W1_net_proxy_lbfgs_s3] final rms 2.178 mm (best 2.178 mm), solved True, 11 updates, 110 rollouts, 2 failed, max penetration 0.125 mm, 804s -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-021457-W1_net_proxy_lbfgs_s3

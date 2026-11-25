@@ -1,0 +1,78 @@
+# 3D shape formation against two pegs
+
+Solved: final shape RMS <= solve_rms and the motion admissible (every step converged and stable, every pose in the workspace, max penetration <= train.max_penetration, no cap contact). 'rollouts' counts every rollout, failed ones and line-search trials included.
+
+| target | param | gradient | optimizer | seed | init rms [mm] | final rms [mm] | best rms [mm] | solved | updates | rollouts | failed | snaps (final) | max pen. [mm] | time [s] | stop |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| W1 | endpose20 | state | lbfgs | 0 | 45.937 | 0.088 | 0.088 | yes | 25 | 29 | 0 | 0 | 0.147 | 222 | rms 0.0878 mm <= stop_rms 0.1 mm |
+| W1 | endpose20 | state | lbfgs | 1 | 41.389 | 0.052 | 0.052 | yes | 29 | 35 | 0 | 0 | 0.095 | 268 | rms 0.0525 mm <= stop_rms 0.1 mm |
+| W1 | endpose20 | state | lbfgs | 2 | 41.393 | 0.095 | 0.095 | yes | 28 | 36 | 0 | 0 | 0.067 | 279 | rms 0.0949 mm <= stop_rms 0.1 mm |
+| W1 | endpose20 | state | lbfgs | 3 | 45.378 | 0.100 | 0.100 | no | 18 | 20 | 0 | 0 | 0.163 | 159 | rms 0.0996 mm <= stop_rms 0.1 mm |
+| W1 | endpose20 | state | lbfgs | 4 | 30.387 | 0.096 | 0.096 | no | 15 | 19 | 0 | 1 | 0.089 | 607 | rms 0.0957 mm <= stop_rms 0.1 mm |
+| W1 | endpose20aimed | state | none | 0 | 0.000 | 0.000 | 0.000 | yes | 0 | 1 | 0 | 0 | 0.147 | 8 | rms 0.0001 mm <= stop_rms 0.1 mm |
+| W1 | endpose20aimed | state | none | 1 | 0.000 | 0.000 | 0.000 | yes | 0 | 1 | 0 | 0 | 0.093 | 7 | rms 0.0000 mm <= stop_rms 0.1 mm |
+| W1 | endpose20aimed | state | none | 2 | 0.000 | 0.000 | 0.000 | yes | 0 | 1 | 0 | 0 | 0.067 | 8 | rms 0.0000 mm <= stop_rms 0.1 mm |
+| W1 | endpose20aimed | state | none | 3 | 0.000 | 0.000 | 0.000 | no | 0 | 1 | 0 | 0 | 0.163 | 8 | rms 0.0000 mm <= stop_rms 0.1 mm |
+| W1 | endpose20aimed | state | none | 4 | 0.000 | 0.000 | 0.000 | no | 0 | 1 | 0 | 1 | 0.090 | 32 | rms 0.0000 mm <= stop_rms 0.1 mm |
+| W1 | endpose60 | state | lbfgs | 0 | 45.937 | 0.089 | 0.089 | yes | 24 | 29 | 0 | 0 | 0.116 | 228 | rms 0.0888 mm <= stop_rms 0.1 mm |
+| W1 | endpose60 | state | lbfgs | 1 | 41.389 | 0.052 | 0.052 | no | 29 | 35 | 0 | 0 | 0.097 | 283 | rms 0.0524 mm <= stop_rms 0.1 mm |
+| W1 | endpose60 | state | lbfgs | 2 | 41.393 | 0.094 | 0.094 | yes | 28 | 36 | 0 | 0 | 0.069 | 282 | rms 0.0943 mm <= stop_rms 0.1 mm |
+| W1 | endpose60 | state | lbfgs | 3 | 45.378 | 0.098 | 0.098 | yes | 18 | 20 | 0 | 0 | 0.163 | 157 | rms 0.0981 mm <= stop_rms 0.1 mm |
+| W1 | endpose60 | state | lbfgs | 4 | 30.387 | 0.096 | 0.096 | yes | 15 | 19 | 0 | 1 | 0.084 | 592 | rms 0.0957 mm <= stop_rms 0.1 mm |
+| W1 | endpose60aimed | state | none | 0 | 0.000 | 0.000 | 0.000 | yes | 0 | 1 | 0 | 0 | 0.113 | 8 | rms 0.0004 mm <= stop_rms 0.1 mm |
+| W1 | endpose60aimed | state | none | 1 | 0.000 | 0.000 | 0.000 | no | 0 | 1 | 0 | 0 | 0.095 | 8 | rms 0.0000 mm <= stop_rms 0.1 mm |
+| W1 | endpose60aimed | state | none | 2 | 0.000 | 0.000 | 0.000 | yes | 0 | 1 | 0 | 0 | 0.071 | 8 | rms 0.0000 mm <= stop_rms 0.1 mm |
+| W1 | endpose60aimed | state | none | 3 | 0.000 | 0.000 | 0.000 | yes | 0 | 1 | 0 | 0 | 0.164 | 8 | rms 0.0000 mm <= stop_rms 0.1 mm |
+| W1 | endpose60aimed | state | none | 4 | 0.000 | 0.000 | 0.000 | yes | 0 | 1 | 0 | 1 | 0.084 | 31 | rms 0.0000 mm <= stop_rms 0.1 mm |
+| W1 | greedy | state | greedy | 0 | 216.125 | 48.132 | 48.132 | no | 132 | 3.96 | 28 | 1 | 0.119 | 36 | objective dropped < 0.001 (relative) over 50 steps |
+| W1 | net | proxy | adam | 0 | 47.948 | 29.555 | 18.653 | no | 115 | 136 | 20 | 0 | 0.108 | 1085 | 20 failed rollouts (last: newton_failed at step 59) |
+| W1 | net | proxy | adam | 1 | 41.732 | 9.460 | 6.861 | no | 42 | 63 | 20 | 0 | 2.986 | 530 | 20 failed rollouts (last: newton_failed at step 39) |
+| W1 | net | proxy | adam | 2 | 41.604 | 24.408 | 11.567 | no | 483 | 500 | 16 | 0 | 0.944 | 4021 | rollout budget (500) used |
+| W1 | net | proxy | adam | 3 | 44.779 | 8.146 | 7.438 | no | 15 | 36 | 20 | 0 | 1.296 | 204 | 20 failed rollouts (last: newton_failed at step 30) |
+| W1 | net | proxy | adam | 4 | 30.819 | 109.605 | 0.604 | no | 34 | 55 | 20 | 1 | 0.809 | 481 | 20 failed rollouts (last: newton_failed at step 58) |
+| W1 | net | proxy | lbfgs | 0 | 47.948 | 1.623 | 1.623 | yes | 11 | 75 | 1 | 0 | 0.075 | 591 | line search found no admissible decrease |
+| W1 | net | proxy | lbfgs | 1 | 41.732 | 0.922 | 0.922 | no | 21 | 172 | 1 | 0 | 0.111 | 1544 | line search found no admissible decrease |
+| W1 | net | proxy | lbfgs | 2 | 41.604 | 1.440 | 1.440 | yes | 32 | 437 | 20 | 0 | 0.066 | 3395 | 20 failed rollouts (last: newton_failed at step 25) |
+| W1 | net | proxy | lbfgs | 3 | 44.779 | 2.178 | 2.178 | yes | 11 | 110 | 2 | 0 | 0.125 | 804 | line search found no admissible decrease |
+| W1 | net | proxy | lbfgs | 4 | 30.819 | 0.353 | 0.353 | yes | 20 | 219 | 2 | 0 | 0.078 | 1742 | line search found no admissible decrease |
+| W1 | net | state | adam | 0 | 47.948 | 0.099 | 0.099 | yes | 225 | 227 | 0 | 0 | 0.078 | 1749 | rms 0.0993 mm <= stop_rms 0.1 mm |
+| W1 | net | state | adam | 1 | 41.732 | 0.099 | 0.099 | no | 266 | 268 | 0 | 0 | 0.120 | 2290 | rms 0.0988 mm <= stop_rms 0.1 mm |
+| W1 | net | state | adam | 2 | 41.604 | 0.100 | 0.100 | yes | 264 | 266 | 0 | 0 | 0.072 | 2012 | rms 0.1000 mm <= stop_rms 0.1 mm |
+| W1 | net | state | adam | 3 | 44.779 | 0.112 | 0.112 | yes | 499 | 500 | 0 | 0 | 0.154 | 3823 | rollout budget (500) used |
+| W1 | net | state | adam | 4 | 30.819 | 0.097 | 0.097 | yes | 112 | 114 | 0 | 0 | 0.079 | 923 | rms 0.0971 mm <= stop_rms 0.1 mm |
+| W1 | net | state | lbfgs | 0 | 47.948 | 0.093 | 0.093 | yes | 14 | 18 | 1 | 0 | 0.106 | 172 | rms 0.0931 mm <= stop_rms 0.1 mm |
+| W1 | net | state | lbfgs | 1 | 41.732 | 0.090 | 0.090 | no | 29 | 36 | 1 | 0 | 0.108 | 457 | rms 0.0901 mm <= stop_rms 0.1 mm |
+| W1 | net | state | lbfgs | 2 | 41.604 | 0.065 | 0.065 | yes | 21 | 33 | 1 | 0 | 0.074 | 254 | rms 0.0654 mm <= stop_rms 0.1 mm |
+| W1 | net | state | lbfgs | 3 | 44.779 | 0.097 | 0.097 | yes | 25 | 31 | 1 | 0 | 0.155 | 233 | rms 0.0975 mm <= stop_rms 0.1 mm |
+| W1 | net | state | lbfgs | 4 | 30.819 | 0.051 | 0.051 | yes | 14 | 22 | 3 | 0 | 0.081 | 186 | rms 0.0506 mm <= stop_rms 0.1 mm |
+| W1 | net (no pegs) | state | lbfgs | 0 | 47.948 | 2.575 | 2.089 | yes | 80 | 190 | 0 | 0 | 0.000 | 1226 | line search found no admissible decrease |
+| W1 | net (no pegs) | state | lbfgs | 1 | 41.732 | 24.519 | 37.252 | no | 4 | 67 | 15 | 0 | 0.119 | 653 | line search found no admissible decrease |
+| W1 | net (no pegs) | state | lbfgs | 2 | 41.604 | 2.575 | 2.089 | yes | 64 | 129 | 0 | 0 | 0.000 | 834 | line search found no admissible decrease |
+| W1 | net (no pegs) | state | lbfgs | 3 | 44.779 | 16.535 | 20.739 | no | 34 | 119 | 0 | 0 | 0.278 | 1007 | line search found no admissible decrease |
+| W1 | net (no pegs) | state | lbfgs | 4 | 30.819 | - | 2.089 | no | 72 | 251 | 0 | 0 | 0.000 | 1723 | line search found no admissible decrease |
+| W1 | rates | state | lbfgs | 0 | 45.937 | 0.057 | 0.057 | yes | 27 | 31 | 0 | 0 | 0.098 | 242 | rms 0.0568 mm <= stop_rms 0.1 mm |
+| W1 | rates | state | lbfgs | 1 | 41.389 | 0.064 | 0.064 | no | 31 | 39 | 0 | 0 | 0.097 | 333 | rms 0.0638 mm <= stop_rms 0.1 mm |
+| W1 | rates | state | lbfgs | 2 | 41.393 | 0.098 | 0.098 | yes | 25 | 35 | 0 | 0 | 0.072 | 274 | rms 0.0982 mm <= stop_rms 0.1 mm |
+| W1 | rates | state | lbfgs | 3 | 45.378 | 0.082 | 0.082 | yes | 20 | 24 | 0 | 0 | 0.156 | 189 | rms 0.0821 mm <= stop_rms 0.1 mm |
+| W1 | rates | state | lbfgs | 4 | 30.387 | 0.056 | 0.056 | yes | 15 | 20 | 0 | 0 | 0.083 | 188 | rms 0.0559 mm <= stop_rms 0.1 mm |
+
+## Per method
+
+| param | gradient | optimizer | runs | solved | median final rms [mm] | median rollouts | failed rollouts (total) |
+|---|---|---|---|---|---|---|---|
+| endpose20 | state | lbfgs | 5 | 3 | 0.095 | 29 | 0 |
+| endpose20aimed | state | none | 5 | 3 | 0.000 | 1 | 0 |
+| endpose60 | state | lbfgs | 5 | 4 | 0.094 | 29 | 0 |
+| endpose60aimed | state | none | 5 | 4 | 0.000 | 1 | 0 |
+| greedy | state | greedy | 1 | 0 | 48.132 | 4 | 28 |
+| net | proxy | adam | 5 | 0 | 24.408 | 63 | 96 |
+| net | proxy | lbfgs | 5 | 4 | 1.440 | 172 | 26 |
+| net | state | adam | 5 | 4 | 0.099 | 266 | 0 |
+| net | state | lbfgs | 5 | 4 | 0.090 | 31 | 7 |
+| net (no pegs) | state | lbfgs | 5 | 2 | 9.555 | 129 | 15 |
+| rates | state | lbfgs | 5 | 4 | 0.064 | 31 | 0 |
+
+![curves](curves.png)
+
+
+report -> runs/shape_w1/report.md

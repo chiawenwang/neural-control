@@ -1,0 +1,42 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012959-W1_net_state_adam_s2
+Task: 3D shape formation, target W1 -- weave: under L, through the gap, over R; L pressed from below, R from above
+Trajectory: net (P = 4678), init designed (fit rms 2.34e-03)
+Gradient: state   Optimizer: adam {'lr': 0.0003}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: record
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 2 peg(s) in training
+Initial trajectory: rms 41.60 mm, pegs touched at the end [True, True], onset [73, 85]
+[W1_net_state_adam_s2 it 010] rms=  15.330 mm  rollouts=11  snaps=0  pen=0.087 mm  t=   81.4s  
+[W1_net_state_adam_s2 it 020] rms=   7.857 mm  rollouts=21  snaps=0  pen=0.087 mm  t=  156.4s  
+[W1_net_state_adam_s2 it 030] rms=   4.516 mm  rollouts=31  snaps=0  pen=0.087 mm  t=  231.4s  
+[W1_net_state_adam_s2 it 040] rms=   4.192 mm  rollouts=41  snaps=0  pen=0.079 mm  t=  306.1s  
+[W1_net_state_adam_s2 it 050] rms=   3.622 mm  rollouts=51  snaps=0  pen=0.084 mm  t=  380.8s  
+[W1_net_state_adam_s2 it 060] rms=   2.064 mm  rollouts=61  snaps=0  pen=0.064 mm  t=  455.1s  
+[W1_net_state_adam_s2 it 070] rms=   1.778 mm  rollouts=71  snaps=0  pen=0.071 mm  t=  529.9s  
+[W1_net_state_adam_s2 it 080] rms=   1.358 mm  rollouts=81  snaps=0  pen=0.059 mm  t=  604.4s  
+[W1_net_state_adam_s2 it 090] rms=   1.196 mm  rollouts=91  snaps=0  pen=0.067 mm  t=  679.4s  
+[W1_net_state_adam_s2 it 100] rms=   0.989 mm  rollouts=101  snaps=0  pen=0.063 mm  t=  755.6s  
+[W1_net_state_adam_s2 it 110] rms=   0.838 mm  rollouts=111  snaps=0  pen=0.066 mm  t=  831.1s  
+[W1_net_state_adam_s2 it 120] rms=   0.721 mm  rollouts=121  snaps=0  pen=0.067 mm  t=  906.6s  
+[W1_net_state_adam_s2 it 130] rms=   0.621 mm  rollouts=131  snaps=0  pen=0.068 mm  t=  982.7s  
+[W1_net_state_adam_s2 it 140] rms=   0.534 mm  rollouts=141  snaps=0  pen=0.069 mm  t= 1059.1s  
+[W1_net_state_adam_s2 it 150] rms=   0.458 mm  rollouts=151  snaps=0  pen=0.070 mm  t= 1135.2s  
+[W1_net_state_adam_s2 it 160] rms=   0.392 mm  rollouts=161  snaps=0  pen=0.070 mm  t= 1211.1s  
+[W1_net_state_adam_s2 it 170] rms=   0.334 mm  rollouts=171  snaps=0  pen=0.071 mm  t= 1286.7s  
+[W1_net_state_adam_s2 it 180] rms=   0.284 mm  rollouts=181  snaps=0  pen=0.071 mm  t= 1362.4s  
+[W1_net_state_adam_s2 it 190] rms=   0.242 mm  rollouts=191  snaps=0  pen=0.071 mm  t= 1438.4s  
+[W1_net_state_adam_s2 it 200] rms=   0.207 mm  rollouts=201  snaps=0  pen=0.071 mm  t= 1515.1s  
+[W1_net_state_adam_s2 it 210] rms=   0.177 mm  rollouts=211  snaps=0  pen=0.071 mm  t= 1592.2s  
+[W1_net_state_adam_s2 it 220] rms=   0.154 mm  rollouts=221  snaps=0  pen=0.071 mm  t= 1668.1s  
+[W1_net_state_adam_s2 it 230] rms=   0.135 mm  rollouts=231  snaps=0  pen=0.072 mm  t= 1744.4s  
+[W1_net_state_adam_s2 it 240] rms=   0.121 mm  rollouts=241  snaps=0  pen=0.072 mm  t= 1821.7s  
+[W1_net_state_adam_s2 it 250] rms=   0.111 mm  rollouts=251  snaps=0  pen=0.072 mm  t= 1897.7s  
+[W1_net_state_adam_s2 it 260] rms=   0.103 mm  rollouts=261  snaps=0  pen=0.072 mm  t= 1973.9s  
+[W1_net_state_adam_s2] stopped: rms 0.1000 mm <= stop_rms 0.1 mm
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012959-W1_net_state_adam_s2/W1_net_state_adam_s2_shape.{pdf,svg}  3.50 x 2.41 in (88.9 x 61.3 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012959-W1_net_state_adam_s2/W1_net_state_adam_s2_error.{pdf,svg}  3.50 x 1.51 in (88.9 x 38.4 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012959-W1_net_state_adam_s2/W1_net_state_adam_s2_rms.{pdf,svg}  3.50 x 1.78 in (88.9 x 45.3 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012959-W1_net_state_adam_s2/W1_net_state_adam_s2.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012959-W1_net_state_adam_s2/summary.json  (finished)
+[W1_net_state_adam_s2] final rms 0.100 mm (best 0.100 mm), solved True, 264 updates, 266 rollouts, 0 failed, max penetration 0.072 mm, 2012s -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-012959-W1_net_state_adam_s2

@@ -1,0 +1,80 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-020012-W1_net_proxy_adam_s2
+Task: 3D shape formation, target W1 -- weave: under L, through the gap, over R; L pressed from below, R from above
+Trajectory: net (P = 4678), init designed (fit rms 2.34e-03)
+Gradient: proxy   Optimizer: adam {'lr': 0.0003}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: record
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 2 peg(s) in training
+Initial trajectory: rms 41.60 mm, pegs touched at the end [True, True], onset [73, 85]
+[W1_net_proxy_adam_s2 it 010] rms=  51.475 mm  rollouts=11  snaps=0  pen=0.143 mm  t=   85.2s  
+[W1_net_proxy_adam_s2 it 020] rms=  25.769 mm  rollouts=21  snaps=0  pen=0.034 mm  t=  165.9s  
+[W1_net_proxy_adam_s2 it 030] rms=  24.880 mm  rollouts=31  snaps=0  pen=0.144 mm  t=  242.1s  
+[W1_net_proxy_adam_s2 it 040] rms=  15.422 mm  rollouts=41  snaps=0  pen=0.076 mm  t=  323.0s  
+[W1_net_proxy_adam_s2 it 050] rms=  18.110 mm  rollouts=51  snaps=0  pen=0.124 mm  t=  400.0s  
+[W1_net_proxy_adam_s2 it 060] rms=  13.788 mm  rollouts=61  snaps=0  pen=0.068 mm  t=  475.7s  
+[W1_net_proxy_adam_s2 it 070] rms=  18.213 mm  rollouts=71  snaps=0  pen=0.115 mm  t=  552.1s  
+[W1_net_proxy_adam_s2 it 080] rms=  13.818 mm  rollouts=81  snaps=0  pen=0.079 mm  t=  627.7s  
+[W1_net_proxy_adam_s2 it 090] rms=  18.652 mm  rollouts=91  snaps=0  pen=0.119 mm  t=  703.9s  
+[W1_net_proxy_adam_s2 it 100] rms=  22.124 mm  rollouts=101  snaps=0  pen=0.102 mm  t=  777.5s  
+[W1_net_proxy_adam_s2 it 110] rms=  27.594 mm  rollouts=111  snaps=0  pen=0.101 mm  t=  853.7s  
+[W1_net_proxy_adam_s2 it 120] rms=  33.220 mm  rollouts=121  snaps=0  pen=0.089 mm  t=  927.3s  
+[W1_net_proxy_adam_s2 it 130] rms=  35.686 mm  rollouts=131  snaps=0  pen=0.089 mm  t= 1003.6s  
+[W1_net_proxy_adam_s2 it 140] rms=  38.693 mm  rollouts=141  snaps=0  pen=0.115 mm  t= 1076.8s  
+[W1_net_proxy_adam_s2 it 150] rms=  35.076 mm  rollouts=151  snaps=0  pen=0.075 mm  t= 1153.4s  
+[W1_net_proxy_adam_s2 it 160] rms=  32.739 mm  rollouts=161  snaps=0  pen=0.131 mm  t= 1227.6s  
+[W1_net_proxy_adam_s2 it 170] rms=  20.967 mm  rollouts=171  snaps=0  pen=0.092 mm  t= 1303.5s  
+[W1_net_proxy_adam_s2 it 180] rms=  17.699 mm  rollouts=181  snaps=0  pen=0.140 mm  t= 1378.5s  
+[W1_net_proxy_adam_s2 it 190] rms=  16.110 mm  rollouts=191  snaps=0  pen=0.080 mm  t= 1452.7s  
+[W1_net_proxy_adam_s2 it 200] rms=  27.507 mm  rollouts=201  snaps=0  pen=0.118 mm  t= 1529.9s  
+[W1_net_proxy_adam_s2 it 210] rms=  36.868 mm  rollouts=211  snaps=0  pen=0.105 mm  t= 1603.6s  
+[W1_net_proxy_adam_s2 it 220] rms=  40.582 mm  rollouts=221  snaps=0  pen=0.103 mm  t= 1680.9s  
+[W1_net_proxy_adam_s2 it 230] rms=  42.607 mm  rollouts=231  snaps=0  pen=0.113 mm  t= 1756.3s  
+[W1_net_proxy_adam_s2 it 240] rms=  31.871 mm  rollouts=241  snaps=0  pen=0.065 mm  t= 1832.8s  
+[W1_net_proxy_adam_s2 it 250] rms=  26.787 mm  rollouts=251  snaps=0  pen=0.146 mm  t= 1908.7s  
+[W1_net_proxy_adam_s2 it 260] rms=  14.601 mm  rollouts=261  snaps=0  pen=0.082 mm  t= 1983.1s  
+[W1_net_proxy_adam_s2 it 270] rms=  26.577 mm  rollouts=271  snaps=0  pen=0.137 mm  t= 2061.5s  
+[W1_net_proxy_adam_s2 it 280] rms=  37.608 mm  rollouts=281  snaps=0  pen=0.104 mm  t= 2136.7s  
+[W1_net_proxy_adam_s2 it 290] rms=  47.417 mm  rollouts=291  snaps=0  pen=0.112 mm  t= 2216.7s  
+[W1_net_proxy_adam_s2 it 300] rms=  53.806 mm  rollouts=301  snaps=0  pen=0.152 mm  t= 2291.7s  
+[W1_net_proxy_adam_s2 it 310] rms=  49.591 mm  rollouts=311  snaps=0  pen=0.097 mm  t= 2372.2s  
+[W1_net_proxy_adam_s2 it 320] rms=  49.787 mm  rollouts=321  snaps=0  pen=0.139 mm  t= 2449.9s  
+[W1_net_proxy_adam_s2 it 330] rms=  33.057 mm  rollouts=331  snaps=0  pen=0.083 mm  t= 2529.6s  
+[W1_net_proxy_adam_s2 it 340] rms=  30.139 mm  rollouts=341  snaps=0  pen=0.151 mm  t= 2610.6s  
+[W1_net_proxy_adam_s2 it 350] rms=  15.931 mm  rollouts=351  snaps=0  pen=0.093 mm  t= 2687.6s  
+[W1_net_proxy_adam_s2 it 360] rms=  26.137 mm  rollouts=361  snaps=0  pen=0.142 mm  t= 2770.6s  
+[W1_net_proxy_adam_s2 it 370] rms=  28.230 mm  rollouts=371  snaps=0  pen=0.111 mm  t= 2846.8s  
+[W1_net_proxy_adam_s2 it 380] rms=  38.580 mm  rollouts=381  snaps=0  pen=0.130 mm  t= 2930.8s  
+[W1_net_proxy_adam_s2 it 390] rms=  43.298 mm  rollouts=391  snaps=0  pen=0.112 mm  t= 3007.0s  
+[W1_net_proxy_adam_s2 it 400] rms=  44.617 mm  rollouts=401  snaps=0  pen=0.113 mm  t= 3089.9s  
+[W1_net_proxy_adam_s2 it 410] rms=  45.693 mm  rollouts=411  snaps=0  pen=0.135 mm  t= 3167.1s  
+[W1_net_proxy_adam_s2 it 420] rms=  37.135 mm  rollouts=421  snaps=0  pen=0.711 mm  t= 3249.5s  
+[W1_net_proxy_adam_s2 it 430] rms=  33.407 mm  rollouts=431  snaps=0  pen=0.136 mm  t= 3330.9s  
+[W1_net_proxy_adam_s2 it 440] rms=  22.092 mm  rollouts=441  snaps=0  pen=1.257 mm  t= 3413.5s  
+[W1_net_proxy_adam_s2 it 450] rms=  18.774 mm  rollouts=451  snaps=0  pen=0.144 mm  t= 3496.6s  
+[W1_net_proxy_adam_s2 it 460] rms=  11.967 mm  rollouts=461  snaps=0  pen=0.115 mm  t= 3578.9s  
+[W1_net_proxy_adam_s2 it 470] rms=  14.897 mm  rollouts=471  snaps=0  pen=1.316 mm  t= 3662.5s  
+[W1_net_proxy_adam_s2 it 480] rms=  12.763 mm  rollouts=481  snaps=0  pen=0.115 mm  t= 3744.6s  
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 1/20, rollouts 485
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 2/20, rollouts 486
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 3/20, rollouts 487
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 4/20, rollouts 488
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 5/20, rollouts 489
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 6/20, rollouts 490
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 7/20, rollouts 491
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 8/20, rollouts 492
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 9/20, rollouts 493
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 10/20, rollouts 494
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 11/20, rollouts 495
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 12/20, rollouts 496
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 13/20, rollouts 497
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 14/20, rollouts 498
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 60); failures 15/20, rollouts 499
+[W1_net_proxy_adam_s2 it 483] FAILED rollout (newton_failed at step 61); failures 16/20, rollouts 500
+[W1_net_proxy_adam_s2] stopped: rollout budget (500) used
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-020012-W1_net_proxy_adam_s2/W1_net_proxy_adam_s2_shape.{pdf,svg}  3.50 x 2.42 in (88.9 x 61.5 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-020012-W1_net_proxy_adam_s2/W1_net_proxy_adam_s2_error.{pdf,svg}  3.50 x 1.49 in (88.9 x 38.0 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-020012-W1_net_proxy_adam_s2/W1_net_proxy_adam_s2_rms.{pdf,svg}  3.50 x 1.82 in (88.9 x 46.2 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-020012-W1_net_proxy_adam_s2/W1_net_proxy_adam_s2.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-020012-W1_net_proxy_adam_s2/summary.json  (finished)
+[W1_net_proxy_adam_s2] final rms 24.408 mm (best 11.567 mm), solved False, 483 updates, 500 rollouts, 16 failed, max penetration 0.944 mm, 4021s -> /home/sciarm20/neural-control/experiments/shape_weave_3d/runs/20261125-020012-W1_net_proxy_adam_s2

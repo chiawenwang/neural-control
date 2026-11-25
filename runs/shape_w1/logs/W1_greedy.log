@@ -1,0 +1,19 @@
+Greedy on W1: step cap 0.01815 (from ['W1_net_state_lbfgs_s0.npz', 'W1_net_state_lbfgs_s1.npz', 'W1_net_state_lbfgs_s2.npz', 'W1_net_state_lbfgs_s3.npz', 'W1_net_state_lbfgs_s4.npz']), max steps 800, alphas [1.0, 0.5, 0.25]
+  step   10  lam 1.00  rms target   50.9 mm  helix   50.9 mm  u_c [ 0.892 -0.016 -0.026 -0.04  -0.345 -0.918]  H +0.11  twist -1.02  10s
+  step   20  lam 1.00  rms target   49.3 mm  helix   49.3 mm  u_c [ 0.895 -0.019 -0.036 -0.051 -0.466 -1.372]  H +0.14  twist -1.51  13s
+  step   30  lam 1.00  rms target   48.7 mm  helix   48.7 mm  u_c [ 0.896 -0.021 -0.04  -0.065 -0.514 -1.463]  H +0.15  twist -1.61  14s
+  step   40  lam 1.00  rms target   48.5 mm  helix   48.5 mm  u_c [ 0.893 -0.022 -0.048 -0.065 -0.62  -1.644]  H +0.18  twist -1.83  17s
+  step   50  lam 1.00  rms target   48.4 mm  helix   48.4 mm  u_c [ 0.891 -0.021 -0.053 -0.058 -0.687 -1.69 ]  H +0.20  twist -1.89  18s
+  step   60  lam 1.00  rms target   48.3 mm  helix   48.3 mm  u_c [ 0.887 -0.021 -0.059 -0.06  -0.773 -1.92 ]  H +0.23  twist -2.15  21s
+  step   70  lam 1.00  rms target   48.2 mm  helix   48.2 mm  u_c [ 0.882 -0.021 -0.066 -0.063 -0.877 -2.147]  H +0.26  twist -2.40  23s
+  step   80  lam 1.00  rms target   48.2 mm  helix   48.2 mm  u_c [ 0.877 -0.022 -0.071 -0.082 -0.951 -2.442]  H +0.27  twist -2.71  25s
+  step   90  lam 1.00  rms target   48.1 mm  helix   48.1 mm  u_c [ 0.876 -0.021 -0.072 -0.072 -0.972 -2.373]  H +0.28  twist -2.66  27s
+  step  100  lam 1.00  rms target   48.1 mm  helix   48.1 mm  u_c [ 0.874 -0.022 -0.074 -0.079 -1.003 -2.464]  H +0.29  twist -2.75  29s
+  step  110  lam 1.00  rms target   48.1 mm  helix   48.1 mm  u_c [ 0.872 -0.022 -0.075 -0.084 -1.026 -2.516]  H +0.30  twist -2.81  31s
+  step  120  lam 1.00  rms target   48.1 mm  helix   48.1 mm  u_c [ 0.869 -0.022 -0.077 -0.094 -1.063 -2.607]  H +0.30  twist -2.91  33s
+  step  130  lam 1.00  rms target   48.1 mm  helix   48.1 mm  u_c [ 0.869 -0.022 -0.078 -0.093 -1.069 -2.604]  H +0.31  twist -2.91  35s
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] runs/shape_w1/W1_greedy_state_greedy_s0_shape.{pdf,svg}  3.50 x 2.42 in (88.9 x 61.6 mm), font: Liberation Serif
+[tro_style] runs/shape_w1/W1_greedy_state_greedy_s0_error.{pdf,svg}  3.50 x 1.49 in (88.9 x 38.0 mm), font: Liberation Serif
+[W1_greedy_state_greedy_s0] 132 steps (objective dropped < 0.001 (relative) over 50 steps), final rms 48.132 mm, solved False, admissible True , snaps 1, replay deviation 0.0, 36s -> runs/shape_w1
