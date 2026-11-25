@@ -135,9 +135,11 @@ train:
   max_penetration: 5.0e-4       # [m] admissible penetration of the rod surface
   workspace: reject             # reject: a command outside the box is a failed trial | record: only logged
   adam:
-    lr: 3.0e-4                  # PROVISIONAL fallback. `jobs` uses OUT/adam_lr.json from
-                                # `sweep --pick` when it exists -- rerun the sweep: the earlier
-                                # choice (3e-4) was made on the twisted start (see start:).
+    lr: 3.0e-4                  # from `train_shape.py sweep` on P1, seed 0, frozen tangent (run
+                                # 2026-11-24 before the untwisted-start fix; kept by decision, not
+                                # re-swept): 1e-4 -> 3.91 mm, 3e-4 -> 1.20 mm (both solved), 1e-3 ->
+                                # 32.4, 3e-3 -> 56.3, 1e-2 -> 36.5 mm. `jobs` would use OUT/adam_lr.json
+                                # instead if a new sweep wrote one.
   lbfgs:
     history: 10
     c1: 1.0e-4                  # Armijo
