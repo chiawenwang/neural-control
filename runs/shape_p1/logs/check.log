@@ -1,0 +1,10 @@
+[check P1] initial rms 32.52 mm, snaps none, P = 4678, Newton tol 1.27e-07
+   gradient cost: state 0.8 ms / 1 solve(s); proxy 13.1 ms / 100 solve(s)
+   dir 0: fd -1.405093e-03  state -1.405093e-03 (rel err 2.61e-08)  proxy +2.576860e-03 (rel err 2.83e+00)  same snaps True
+   dir 1: fd +3.105555e-03  state +3.105555e-03 (rel err 1.10e-08)  proxy +8.459540e-03 (rel err 1.72e+00)  same snaps True
+   dir 2: fd +2.373305e-03  state +2.373305e-03 (rel err 3.55e-09)  proxy +2.651481e-03 (rel err 1.17e-01)  same snaps True
+   dir 3: fd -1.463717e-03  state -1.463717e-03 (rel err 4.64e-09)  proxy -2.509823e-03 (rel err 7.15e-01)  same snaps True
+   state: median rel err 7.80e-09, max 2.61e-08;  proxy median 1.22e+00
+   proxy vs state per rate (pegs): first contact at step 57; median rel diff steps 30..57: 1.0578005811277882, after: 0.21729524256319063, last rate: 0.00e+00
+   proxy vs state per rate (no_pegs): first contact at step None; median rel diff steps 30..57: 0.029131387582696747, after: 0.014470520931954124, last rate: 0.00e+00
+   -> runs/shape_p1/checks/check_P1_net_s0.json

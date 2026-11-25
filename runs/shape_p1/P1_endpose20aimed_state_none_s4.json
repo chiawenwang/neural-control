@@ -1,0 +1,177 @@
+{
+ "task": "shape",
+ "status": "done",
+ "target_name": "P1",
+ "config": "configs/task_shape_pegs_3d.yaml",
+ "param": "endpose20aimed",
+ "grad_method": "state",
+ "optimizer": "none",
+ "optimizer_settings": {},
+ "trained_without_pegs": false,
+ "seed": 4,
+ "P": 6,
+ "init": {
+  "init": "designed + end pose aimed",
+  "window": 20,
+  "calibration": {
+   "attempt": 1,
+   "scale": 3.56192989449224,
+   "rms": 0.04189562122682233,
+   "rms_band": [
+    0.03,
+    0.05
+   ]
+  },
+  "aimed_offset": [
+   -0.016415085270183538,
+   -0.05102955691274716,
+   -0.040049273430356136,
+   -0.06632868245558073,
+   0.0994007638628796,
+   0.20330742972627167
+  ]
+ },
+ "nv": 31,
+ "N": 100,
+ "n_free_nodes": 27,
+ "stop_rms": 0.0001,
+ "solve_rms": 0.005,
+ "epochs_cap": 500,
+ "max_rollouts": 500,
+ "max_failures": 20,
+ "workspace_mode": "reject",
+ "stop": "rms 0.0000 mm <= stop_rms 0.1 mm",
+ "train_time": 4.4652135372161865,
+ "updates": 0,
+ "rollouts": 1,
+ "evaluations": 1,
+ "failures": 0,
+ "failure_reasons": [],
+ "adjoint_solves": 1,
+ "grad_time_median": 0.0005757808685302734,
+ "init_rms": 4.4234872650245355e-09,
+ "init_ok": true,
+ "init_onset": [
+  92,
+  93
+ ],
+ "init_final_touching": [
+  true,
+  true
+ ],
+ "final_rms": 4.4234872650245355e-09,
+ "final_loss": 1.9567239583834242e-17,
+ "final_ok": true,
+ "best_rms": 4.4234872650245355e-09,
+ "solved": true,
+ "admissible": true,
+ "admissibility": {
+  "all_steps_stable": true,
+  "in_workspace": true,
+  "penetration_le_max": true,
+  "no_cap_contact": true
+ },
+ "final_snaps": 0,
+ "final_snap_steps": [],
+ "final_max_penetration": 0.0001265699772519252,
+ "final_max_strain": 0.00010253144805083547,
+ "final_max_abs_holonomy": 0.49941894708355244,
+ "final_ws_violation": 0.0,
+ "final_onset": [
+  92,
+  93
+ ],
+ "final_touching": [
+  true,
+  true
+ ],
+ "final_force": [
+  3.4208383748250446,
+  2.759734049803634
+ ],
+ "snaps_total": 0,
+ "updates_to_5mm": null,
+ "updates_to_1mm": null,
+ "iterates": [],
+ "evals": {
+  "loss": [
+   1.9567239583834242e-17
+  ],
+  "rms": [
+   4.4234872650245355e-09
+  ],
+  "gnorm": [
+   1.9985117831155302e-08
+  ],
+  "ok": [
+   true
+  ],
+  "reason": [
+   ""
+  ],
+  "time": [
+   4.465204238891602
+  ],
+  "rollouts": [
+   1
+  ],
+  "snaps": [
+   0
+  ],
+  "max_substeps": [
+   1
+  ],
+  "newton_iterations": [
+   218
+  ],
+  "max_penetration": [
+   0.0001265699772519252
+  ],
+  "max_strain": [
+   0.00010253144805083547
+  ],
+  "max_abs_holonomy": [
+   0.49941894708355244
+  ],
+  "ws_violation": [
+   0.0
+  ],
+  "end_contact": [
+   false
+  ],
+  "onset": [
+   [
+    92,
+    93
+   ]
+  ],
+  "final_touching": [
+   [
+    true,
+    true
+   ]
+  ],
+  "final_force": [
+   [
+    3.4208383748250446,
+    2.759734049803634
+   ]
+  ]
+ },
+ "target": {
+  "description": "straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact, untwisted start: touching from steps [49, 48], nodes [8-9] and [18-20], 3.4 / 2.8 N, max penetration 0.14 mm; without pegs it ends 35 mm from the target)",
+  "du": [
+   -0.0821,
+   -0.1843,
+   -0.0367,
+   -0.0124,
+   0.1182,
+   0.0
+  ],
+  "onset_step": [
+   49,
+   48
+  ],
+  "criteria_ok": true
+ }
+}

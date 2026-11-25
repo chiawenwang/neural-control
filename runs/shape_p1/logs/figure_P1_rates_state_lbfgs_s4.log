@@ -1,0 +1,5 @@
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] runs/shape_p1/P1_rates_state_lbfgs_s4_shape.{pdf,svg}  3.50 x 3.81 in (88.9 x 96.7 mm), font: Liberation Serif
+[tro_style] runs/shape_p1/P1_rates_state_lbfgs_s4_error.{pdf,svg}  3.50 x 1.51 in (88.9 x 38.4 mm), font: Liberation Serif
+[tro_style] runs/shape_p1/P1_rates_state_lbfgs_s4_rms.{pdf,svg}  3.50 x 1.70 in (88.9 x 43.1 mm), font: Liberation Serif

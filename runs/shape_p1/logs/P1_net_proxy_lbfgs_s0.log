@@ -1,0 +1,24 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-222328-P1_net_proxy_lbfgs_s0
+Task: 3D shape formation, target P1 -- straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact, untwisted start: touching from steps [49, 48], nodes [8-9] and [18-20], 3.4 / 2.8 N, max penetration 0.14 mm; without pegs it ends 35 mm from the target)
+Trajectory: net (P = 4678), init designed (fit rms 5.10e-05)
+Gradient: proxy   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 2 peg(s) in training
+Initial trajectory: rms 32.52 mm, pegs touched at the end [True, True], onset [57, 77]
+[P1_net_proxy_lbfgs_s0 it 001] rms=  24.686 mm  rollouts=3  snaps=0  pen=0.100 mm  t=   10.7s  alpha=0.0138 ls=4
+[P1_net_proxy_lbfgs_s0 it 002] rms=  12.954 mm  rollouts=4  snaps=0  pen=0.106 mm  t=   14.1s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s0 it 003] rms=   9.476 mm  rollouts=5  snaps=0  pen=0.107 mm  t=   17.5s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s0 it 004] rms=   8.764 mm  rollouts=7  snaps=0  pen=0.108 mm  t=   24.4s  alpha=0.302 ls=2
+[P1_net_proxy_lbfgs_s0 it 005] rms=   8.754 mm  rollouts=27  snaps=0  pen=0.109 mm  t=   92.8s  alpha=0.0742 ls=20
+[P1_net_proxy_lbfgs_s0 it 006] rms=   8.745 mm  rollouts=47  snaps=0  pen=0.109 mm  t=  161.4s  alpha=0.0715 ls=20
+[P1_net_proxy_lbfgs_s0 it 007] rms=   8.726 mm  rollouts=72  snaps=0  pen=0.108 mm  t=  246.3s  alpha=0.00407 ls=6
+[P1_net_proxy_lbfgs_s0 it 008] rms=   8.726 mm  rollouts=91  snaps=0  pen=0.108 mm  t=  310.9s  alpha=1.2e-12 ls=19
+[P1_net_proxy_lbfgs_s0] stopped: line search found no admissible decrease
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-222328-P1_net_proxy_lbfgs_s0/P1_net_proxy_lbfgs_s0_shape.{pdf,svg}  3.50 x 4.08 in (88.9 x 103.6 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-222328-P1_net_proxy_lbfgs_s0/P1_net_proxy_lbfgs_s0_error.{pdf,svg}  3.50 x 1.47 in (89.0 x 37.3 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-222328-P1_net_proxy_lbfgs_s0/P1_net_proxy_lbfgs_s0_rms.{pdf,svg}  3.50 x 1.81 in (88.9 x 45.9 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-222328-P1_net_proxy_lbfgs_s0/P1_net_proxy_lbfgs_s0.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-222328-P1_net_proxy_lbfgs_s0/summary.json  (finished)
+[P1_net_proxy_lbfgs_s0] final rms 8.726 mm (best 8.726 mm), solved False, 8 updates, 127 rollouts, 2 failed, max penetration 0.108 mm, 432s -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-222328-P1_net_proxy_lbfgs_s0

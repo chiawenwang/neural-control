@@ -1,0 +1,119 @@
+{
+ "name": "W1",
+ "description": "weave: under L, through the gap, over R; L pressed from below, R from above",
+ "du": null,
+ "via": [
+  [
+   0.25,
+   -0.38,
+   0.0,
+   -0.06,
+   0.0,
+   0.3,
+   0.0
+  ],
+  [
+   0.45,
+   -0.39,
+   0.0,
+   0.22,
+   0.0,
+   1.2,
+   0.0
+  ],
+  [
+   0.7,
+   -0.13,
+   0.0,
+   0.2,
+   0.0,
+   0.0,
+   0.0
+  ],
+  [
+   1.0,
+   0.03,
+   0.0,
+   -0.05,
+   0.0,
+   -0.4,
+   0.0
+  ]
+ ],
+ "require_touch": [
+  0,
+  1
+ ],
+ "allow_snap": true,
+ "N": 100,
+ "nv": 31,
+ "config": "configs/task_shape_weave_3d.yaml",
+ "contact_model": "smooth",
+ "smoothing": 0.0001,
+ "snap_steps": [
+  22,
+  68
+ ],
+ "max_substeps": 64,
+ "newton_iterations": 1526,
+ "rollout_time": 62.94096636772156,
+ "u_final": [
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.88,
+  0.0,
+  -0.05,
+  0.0,
+  -0.4,
+  0.0
+ ],
+ "mid_final": [
+  0.45415453166231295,
+  0.15628104283300076,
+  0.06636100247966956
+ ],
+ "start_clearance": [
+  0.12986811448602703,
+  0.09689704784346143
+ ],
+ "onset_step": [
+  72,
+  88
+ ],
+ "final_force": [
+  2.525520806346603,
+  1.2269885145456385
+ ],
+ "touching_nodes_final": [
+  [
+   10,
+   11
+  ],
+  [
+   19,
+   20
+  ]
+ ],
+ "max_penetration": 8.475672791837668e-05,
+ "max_strain": 0.00012288770041080088,
+ "max_abs_holonomy": 1.6738235010031826,
+ "rms_free_vs_target": 0.12679867617208207,
+ "min_self_clearance": 0.05971983437031735,
+ "rms_straight_vs_target": 0.056841448380103965,
+ "straight_move": "ok",
+ "rms_start_vs_target": 0.21612472234442573,
+ "criteria": {
+  "start_clearance_ge_27mm": true,
+  "no_contact_first_30pct": true,
+  "required_pegs_touch_at_end": true,
+  "max_penetration_le_0.5mm": true,
+  "no_cap_contact": true,
+  "no_self_contact": true,
+  "no_snap": true
+ },
+ "criteria_ok": true
+}

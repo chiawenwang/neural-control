@@ -1,0 +1,6 @@
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+Greedy on P1: step cap 0.002013 (from ['P1_net_state_lbfgs_s0.npz']), max steps 2, alphas [1.0, 0.5, 0.25]
+[tro_style] runs/smoke/P1_greedy_state_greedy_s0_shape.{pdf,svg}  3.50 x 3.99 in (88.9 x 101.4 mm), font: Liberation Serif
+[tro_style] runs/smoke/P1_greedy_state_greedy_s0_error.{pdf,svg}  3.50 x 1.48 in (88.9 x 37.5 mm), font: Liberation Serif
+[P1_greedy_state_greedy_s0] 2 steps (max_steps), final rms 155.171 mm, solved False, admissible True , snaps 0, replay deviation 0.0, 0s -> runs/smoke

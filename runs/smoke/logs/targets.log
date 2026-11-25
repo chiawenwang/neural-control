@@ -1,0 +1,6 @@
+Rod: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2
+Horizon: 100 steps, nv = 31, 2 peg(s), contact model smooth (delta 0.0001 m)
+Start rod: clearance to the pegs [27.2, 34.4] mm (rod surface)
+[P1] straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact, untwisted start: touching from steps [49, 48], nodes [8-9] and [18-20], 3.4 / 2.8 N, max penetration 0.14 mm; without pegs it ends 35 mm from the target)
+   onset steps [49, 48], final force [3.42, 2.76] N, touching nodes [[8, 9], [18, 19, 20]], max penetration 0.136 mm, snaps none, start->target rms 157.2 mm, free (no pegs) end shape vs target 35.2 mm
+   criteria: all OK

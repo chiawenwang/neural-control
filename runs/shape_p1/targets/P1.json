@@ -1,0 +1,77 @@
+{
+ "name": "P1",
+ "description": "straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact, untwisted start: touching from steps [49, 48], nodes [8-9] and [18-20], 3.4 / 2.8 N, max penetration 0.14 mm; without pegs it ends 35 mm from the target)",
+ "du": [
+  -0.0821,
+  -0.1843,
+  -0.0367,
+  -0.0124,
+  0.1182,
+  0.0
+ ],
+ "N": 100,
+ "nv": 31,
+ "config": "configs/task_shape_pegs_3d.yaml",
+ "contact_model": "smooth",
+ "smoothing": 0.0001,
+ "snap_steps": [],
+ "max_substeps": 1,
+ "newton_iterations": 194,
+ "rollout_time": 6.560348987579346,
+ "u_final": [
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  1.5707,
+  0.0,
+  0.5379,
+  -0.1843,
+  0.5833,
+  -0.0124,
+  0.1182,
+  0.0
+ ],
+ "mid_final": [
+  0.07671209906364806,
+  -0.14149496120115715,
+  0.45439376572234463
+ ],
+ "start_clearance": [
+  0.027212294358125298,
+  0.03435612662089225
+ ],
+ "onset_step": [
+  49,
+  48
+ ],
+ "final_force": [
+  3.4208384441936355,
+  2.7597342117281185
+ ],
+ "touching_nodes_final": [
+  [
+   8,
+   9
+  ],
+  [
+   18,
+   19,
+   20
+  ]
+ ],
+ "max_penetration": 0.00013632739757939855,
+ "max_strain": 0.00010253145183047874,
+ "max_abs_holonomy": 0.49941896062694763,
+ "rms_free_vs_target": 0.0352373697072915,
+ "rms_start_vs_target": 0.15723690749945018,
+ "criteria": {
+  "start_clearance_ge_27mm": true,
+  "no_contact_first_30pct": true,
+  "both_touch_at_end": true,
+  "max_penetration_le_0.5mm": true,
+  "no_cap_contact": true,
+  "no_snap": true
+ },
+ "criteria_ok": true
+}

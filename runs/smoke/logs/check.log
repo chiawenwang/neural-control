@@ -1,0 +1,10 @@
+[check P1] initial rms 32.51 mm, snaps none, P = 4678, Newton tol 1.27e-07
+   gradient cost: state 0.8 ms / 1 solve(s); proxy 13.1 ms / 100 solve(s)
+   dir 0: fd -3.314472e-03  state -3.314472e-03 (rel err 1.01e-08)  proxy +9.616139e-04 (rel err 1.29e+00)  same snaps True
+   dir 1: fd +4.631442e-04  state +4.631443e-04 (rel err 6.86e-08)  proxy +3.799995e-03 (rel err 7.20e+00)  same snaps True
+   dir 2: fd -3.034388e-03  state -3.034388e-03 (rel err 1.11e-08)  proxy +2.043195e-03 (rel err 1.67e+00)  same snaps True
+   dir 3: fd -2.400482e-03  state -2.400482e-03 (rel err 3.67e-09)  proxy -1.426790e-03 (rel err 4.06e-01)  same snaps True
+   state: median rel err 1.06e-08, max 6.86e-08;  proxy median 1.48e+00
+   proxy vs state per rate (pegs): first contact at step 57; median rel diff steps 30..57: 1.0581497195220444, after: 0.22211739925264426, last rate: 0.00e+00
+   proxy vs state per rate (no_pegs): first contact at step None; median rel diff steps 30..57: 0.02917731090744094, after: 0.01453534489531643, last rate: 0.00e+00
+   -> runs/smoke/checks/check_P1_net_s0.json

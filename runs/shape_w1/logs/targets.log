@@ -1,0 +1,6 @@
+Rod: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2
+Horizon: 100 steps, nv = 31, 2 peg(s), contact model smooth (delta 0.0001 m)
+Start rod: clearance to the pegs [129.9, 96.9] mm (rod surface)
+[W1] weave: under L, through the gap, over R; L pressed from below, R from above
+   onset steps [72, 88], final force [2.53, 1.23] N, touching nodes [[10, 11], [19, 20]], max penetration 0.085 mm, snaps [22, 68], start->target rms 216.1 mm, free (no pegs) end shape vs target 126.8 mm, straight move to the end pose: 56.8 mm, self clearance 59.7 mm
+   criteria: all OK

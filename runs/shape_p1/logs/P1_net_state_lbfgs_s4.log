@@ -1,0 +1,47 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-214527-P1_net_state_lbfgs_s4
+Task: 3D shape formation, target P1 -- straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact, untwisted start: touching from steps [49, 48], nodes [8-9] and [18-20], 3.4 / 2.8 N, max penetration 0.14 mm; without pegs it ends 35 mm from the target)
+Trajectory: net (P = 4678), init designed (fit rms 5.89e-05)
+Gradient: state   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 2 peg(s) in training
+Initial trajectory: rms 41.85 mm, pegs touched at the end [True, True], onset [97, 95]
+[P1_net_state_lbfgs_s4 it 001] rms=  32.193 mm  rollouts=4  snaps=0  pen=0.111 mm  t=   34.9s  alpha=0.00399 ls=4
+[P1_net_state_lbfgs_s4 it 002] rms=  28.865 mm  rollouts=7  snaps=0  pen=0.124 mm  t=   47.7s  alpha=4 ls=3
+[P1_net_state_lbfgs_s4 it 003] rms=  17.499 mm  rollouts=9  snaps=0  pen=0.108 mm  t=   55.9s  alpha=0.63 ls=2
+[P1_net_state_lbfgs_s4 it 004] rms=  12.087 mm  rollouts=10  snaps=0  pen=0.124 mm  t=   60.0s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 005] rms=   6.071 mm  rollouts=11  snaps=0  pen=0.116 mm  t=   64.1s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 006] rms=   5.494 mm  rollouts=12  snaps=0  pen=0.118 mm  t=   68.1s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 007] rms=   5.355 mm  rollouts=13  snaps=0  pen=0.119 mm  t=   72.2s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 008] rms=   5.308 mm  rollouts=14  snaps=0  pen=0.120 mm  t=   76.3s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 009] rms=   5.202 mm  rollouts=15  snaps=0  pen=0.121 mm  t=   80.3s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 010] rms=   5.031 mm  rollouts=16  snaps=0  pen=0.123 mm  t=   84.3s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 011] rms=   4.684 mm  rollouts=17  snaps=0  pen=0.126 mm  t=   88.4s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 012] rms=   4.205 mm  rollouts=18  snaps=0  pen=0.132 mm  t=   92.5s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 013] rms=   3.349 mm  rollouts=19  snaps=0  pen=0.130 mm  t=   96.7s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 014] rms=   2.408 mm  rollouts=21  snaps=0  pen=0.130 mm  t=  105.8s  alpha=0.5 ls=2
+[P1_net_state_lbfgs_s4 it 015] rms=   2.259 mm  rollouts=41  snaps=0  pen=0.130 mm  t=  197.5s  alpha=0.0756 ls=20
+[P1_net_state_lbfgs_s4 it 016] rms=   2.242 mm  rollouts=61  snaps=0  pen=0.130 mm  t=  287.7s  alpha=0.00893 ls=20
+[P1_net_state_lbfgs_s4 it 017] rms=   2.160 mm  rollouts=89  snaps=0  pen=0.127 mm  t=  417.3s  alpha=0.00247 ls=8
+[P1_net_state_lbfgs_s4 it 018] rms=   2.129 mm  rollouts=90  snaps=0  pen=0.127 mm  t=  421.9s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 019] rms=   1.954 mm  rollouts=91  snaps=0  pen=0.127 mm  t=  426.4s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 020] rms=   1.686 mm  rollouts=92  snaps=0  pen=0.127 mm  t=  430.9s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 021] rms=   1.433 mm  rollouts=93  snaps=0  pen=0.129 mm  t=  435.5s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 022] rms=   1.405 mm  rollouts=94  snaps=0  pen=0.130 mm  t=  440.4s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 023] rms=   1.400 mm  rollouts=95  snaps=0  pen=0.130 mm  t=  445.0s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 024] rms=   1.396 mm  rollouts=96  snaps=0  pen=0.130 mm  t=  449.6s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 025] rms=   1.388 mm  rollouts=97  snaps=0  pen=0.130 mm  t=  454.2s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 026] rms=   1.376 mm  rollouts=98  snaps=0  pen=0.130 mm  t=  458.9s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 027] rms=   1.353 mm  rollouts=99  snaps=0  pen=0.130 mm  t=  463.5s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 028] rms=   1.316 mm  rollouts=100  snaps=0  pen=0.129 mm  t=  468.5s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 029] rms=   1.290 mm  rollouts=101  snaps=0  pen=0.129 mm  t=  473.2s  alpha=1 ls=1
+[P1_net_state_lbfgs_s4 it 030] rms=   1.241 mm  rollouts=103  snaps=0  pen=0.129 mm  t=  482.7s  alpha=0.5 ls=2
+[P1_net_state_lbfgs_s4 it 031] rms=   1.219 mm  rollouts=123  snaps=0  pen=0.129 mm  t=  583.5s  alpha=0.0787 ls=20
+[P1_net_state_lbfgs_s4] stopped: line search found no admissible decrease
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-214527-P1_net_state_lbfgs_s4/P1_net_state_lbfgs_s4_shape.{pdf,svg}  3.50 x 4.08 in (88.9 x 103.5 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-214527-P1_net_state_lbfgs_s4/P1_net_state_lbfgs_s4_error.{pdf,svg}  3.50 x 1.49 in (89.0 x 37.7 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-214527-P1_net_state_lbfgs_s4/P1_net_state_lbfgs_s4_rms.{pdf,svg}  3.50 x 1.80 in (88.9 x 45.8 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-214527-P1_net_state_lbfgs_s4/P1_net_state_lbfgs_s4.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-214527-P1_net_state_lbfgs_s4/summary.json  (finished)
+[P1_net_state_lbfgs_s4] final rms 1.219 mm (best 1.219 mm), solved True, 31 updates, 163 rollouts, 1 failed, max penetration 0.129 mm, 792s -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-214527-P1_net_state_lbfgs_s4

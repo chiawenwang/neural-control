@@ -1,0 +1,52 @@
+ok   P1_endpose20_state_lbfgs_s0: final rms 0.064 mm, solved True, 70 rollouts, stop: rms 0.0643 mm <= stop_rms 0.1 mm
+ok   P1_endpose20_state_lbfgs_s1: final rms 0.065 mm, solved True, 32 rollouts, stop: rms 0.0646 mm <= stop_rms 0.1 mm
+ok   P1_endpose20_state_lbfgs_s2: final rms 0.671 mm, solved True, 199 rollouts, stop: line search found no admissible decrease
+ok   P1_endpose20_state_lbfgs_s3: final rms 0.078 mm, solved True, 36 rollouts, stop: rms 0.0782 mm <= stop_rms 0.1 mm
+ok   P1_endpose20_state_lbfgs_s4: final rms 1.562 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_endpose20aimed_state_none_s0: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_endpose20aimed_state_none_s1: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0001 mm <= stop_rms 0.1 mm
+ok   P1_endpose20aimed_state_none_s2: final rms 76.036 mm, solved False, 1 rollouts, stop: no optimization (evaluation only)
+ok   P1_endpose20aimed_state_none_s3: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_endpose20aimed_state_none_s4: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_endpose60_state_lbfgs_s0: final rms 0.092 mm, solved True, 56 rollouts, stop: rms 0.0917 mm <= stop_rms 0.1 mm
+ok   P1_endpose60_state_lbfgs_s1: final rms 0.075 mm, solved True, 33 rollouts, stop: rms 0.0746 mm <= stop_rms 0.1 mm
+ok   P1_endpose60_state_lbfgs_s2: final rms 0.632 mm, solved True, 120 rollouts, stop: line search found no admissible decrease
+ok   P1_endpose60_state_lbfgs_s3: final rms 0.078 mm, solved True, 36 rollouts, stop: rms 0.0783 mm <= stop_rms 0.1 mm
+ok   P1_endpose60_state_lbfgs_s4: final rms 2.371 mm, solved True, 284 rollouts, stop: line search found no admissible decrease
+ok   P1_endpose60aimed_state_none_s0: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_endpose60aimed_state_none_s1: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_endpose60aimed_state_none_s2: final rms 76.036 mm, solved False, 1 rollouts, stop: no optimization (evaluation only)
+ok   P1_endpose60aimed_state_none_s3: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_endpose60aimed_state_none_s4: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_greedy_state_greedy_s0: final rms 0.000 mm, solved True, 5.07 rollouts, stop: trust radius below step_min
+ok   P1_net_proxy_adam_s0: final rms 3.553 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_proxy_adam_s1: final rms 0.217 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_proxy_adam_s2: final rms 116.018 mm, solved False, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_proxy_adam_s3: final rms 0.100 mm, solved True, 382 rollouts, stop: rms 0.0999 mm <= stop_rms 0.1 mm
+ok   P1_net_proxy_adam_s4: final rms 5.834 mm, solved False, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_proxy_lbfgs_s0: final rms 8.726 mm, solved False, 127 rollouts, stop: line search found no admissible decrease
+ok   P1_net_proxy_lbfgs_s1: final rms 0.306 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_proxy_lbfgs_s2: final rms 13.906 mm, solved False, 120 rollouts, stop: line search found no admissible decrease
+ok   P1_net_proxy_lbfgs_s3: final rms 2.350 mm, solved True, 51 rollouts, stop: line search found no admissible decrease
+ok   P1_net_proxy_lbfgs_s4: final rms 12.339 mm, solved False, 49 rollouts, stop: line search found no admissible decrease
+ok   P1_net_state_adam_s0: final rms 1.575 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_adam_s1: final rms 0.297 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_adam_s2: final rms 8.300 mm, solved False, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_adam_s3: final rms 0.972 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_adam_s4: final rms 0.922 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_lbfgs_nopegs_s0: final rms 6.874 mm, solved False, 174 rollouts, stop: line search found no admissible decrease
+ok   P1_net_state_lbfgs_nopegs_s1: final rms 6.874 mm, solved False, 143 rollouts, stop: line search found no admissible decrease
+ok   P1_net_state_lbfgs_nopegs_s2: final rms 6.874 mm, solved False, 234 rollouts, stop: line search found no admissible decrease
+ok   P1_net_state_lbfgs_nopegs_s3: final rms 6.874 mm, solved False, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_lbfgs_nopegs_s4: final rms 6.874 mm, solved False, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_lbfgs_s0: final rms 0.098 mm, solved True, 24 rollouts, stop: rms 0.0977 mm <= stop_rms 0.1 mm
+ok   P1_net_state_lbfgs_s1: final rms 0.048 mm, solved True, 23 rollouts, stop: rms 0.0478 mm <= stop_rms 0.1 mm
+ok   P1_net_state_lbfgs_s2: final rms 0.743 mm, solved True, 133 rollouts, stop: line search found no admissible decrease
+ok   P1_net_state_lbfgs_s3: final rms 0.086 mm, solved True, 36 rollouts, stop: rms 0.0864 mm <= stop_rms 0.1 mm
+ok   P1_net_state_lbfgs_s4: final rms 1.219 mm, solved True, 163 rollouts, stop: line search found no admissible decrease
+ok   P1_rates_state_lbfgs_s0: final rms 0.079 mm, solved True, 58 rollouts, stop: rms 0.0788 mm <= stop_rms 0.1 mm
+ok   P1_rates_state_lbfgs_s1: final rms 0.087 mm, solved True, 44 rollouts, stop: rms 0.0871 mm <= stop_rms 0.1 mm
+ok   P1_rates_state_lbfgs_s2: final rms 0.577 mm, solved True, 232 rollouts, stop: line search found no admissible decrease
+ok   P1_rates_state_lbfgs_s3: final rms 0.077 mm, solved True, 37 rollouts, stop: rms 0.0765 mm <= stop_rms 0.1 mm
+ok   P1_rates_state_lbfgs_s4: final rms 2.182 mm, solved True, 401 rollouts, stop: line search found no admissible decrease
+51 runs, 0 with problems

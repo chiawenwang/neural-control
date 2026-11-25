@@ -1,0 +1,52 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-223135-P1_net_proxy_lbfgs_s1
+Task: 3D shape formation, target P1 -- straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact, untwisted start: touching from steps [49, 48], nodes [8-9] and [18-20], 3.4 / 2.8 N, max penetration 0.14 mm; without pegs it ends 35 mm from the target)
+Trajectory: net (P = 4678), init designed (fit rms 2.90e-06)
+Gradient: proxy   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 2 peg(s) in training
+Initial trajectory: rms 41.89 mm, pegs touched at the end [True, True], onset [58, 55]
+[P1_net_proxy_lbfgs_s1 it 001] rms=  16.038 mm  rollouts=4  snaps=0  pen=0.138 mm  t=   64.0s  alpha=0.0333 ls=3
+[P1_net_proxy_lbfgs_s1 it 002] rms=  10.620 mm  rollouts=5  snaps=0  pen=0.133 mm  t=   68.3s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s1 it 003] rms=   7.700 mm  rollouts=6  snaps=0  pen=0.133 mm  t=   72.6s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s1 it 004] rms=   5.427 mm  rollouts=8  snaps=0  pen=0.135 mm  t=   80.6s  alpha=0.421 ls=2
+[P1_net_proxy_lbfgs_s1 it 005] rms=   3.543 mm  rollouts=9  snaps=0  pen=0.135 mm  t=   84.7s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s1 it 006] rms=   2.420 mm  rollouts=10  snaps=0  pen=0.133 mm  t=   88.8s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s1 it 007] rms=   1.564 mm  rollouts=11  snaps=0  pen=0.135 mm  t=   92.9s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s1 it 008] rms=   0.673 mm  rollouts=12  snaps=0  pen=0.135 mm  t=   97.1s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s1 it 009] rms=   0.479 mm  rollouts=13  snaps=0  pen=0.134 mm  t=  101.2s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s1 it 010] rms=   0.437 mm  rollouts=14  snaps=0  pen=0.133 mm  t=  105.3s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s1 it 011] rms=   0.425 mm  rollouts=15  snaps=0  pen=0.132 mm  t=  109.4s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s1 it 012] rms=   0.417 mm  rollouts=17  snaps=0  pen=0.133 mm  t=  117.5s  alpha=0.238 ls=2
+[P1_net_proxy_lbfgs_s1 it 013] rms=   0.412 mm  rollouts=19  snaps=0  pen=0.134 mm  t=  125.6s  alpha=0.165 ls=2
+[P1_net_proxy_lbfgs_s1 it 014] rms=   0.412 mm  rollouts=39  snaps=0  pen=0.135 mm  t=  206.3s  alpha=0.0266 ls=20
+[P1_net_proxy_lbfgs_s1 it 015] rms=   0.412 mm  rollouts=59  snaps=0  pen=0.135 mm  t=  287.3s  alpha=0.0123 ls=20
+[P1_net_proxy_lbfgs_s1 it 016] rms=   0.411 mm  rollouts=78  snaps=0  pen=0.135 mm  t=  364.8s  alpha=0.0237 ls=19
+[P1_net_proxy_lbfgs_s1 it 017] rms=   0.411 mm  rollouts=98  snaps=0  pen=0.135 mm  t=  445.9s  alpha=0.00489 ls=20
+[P1_net_proxy_lbfgs_s1 it 018] rms=   0.411 mm  rollouts=118  snaps=0  pen=0.135 mm  t=  527.7s  alpha=0.00878 ls=20
+[P1_net_proxy_lbfgs_s1 it 019] rms=   0.411 mm  rollouts=138  snaps=0  pen=0.135 mm  t=  609.3s  alpha=0.0106 ls=20
+[P1_net_proxy_lbfgs_s1 it 020] rms=   0.411 mm  rollouts=158  snaps=0  pen=0.135 mm  t=  690.7s  alpha=0.00987 ls=20
+[P1_net_proxy_lbfgs_s1 it 021] rms=   0.410 mm  rollouts=178  snaps=0  pen=0.136 mm  t=  772.1s  alpha=0.031 ls=20
+[P1_net_proxy_lbfgs_s1 it 022] rms=   0.307 mm  rollouts=203  snaps=0  pen=0.135 mm  t=  874.2s  alpha=0.0189 ls=6
+[P1_net_proxy_lbfgs_s1 it 023] rms=   0.306 mm  rollouts=223  snaps=0  pen=0.135 mm  t=  955.9s  alpha=0.255 ls=20
+[P1_net_proxy_lbfgs_s1 it 024] rms=   0.306 mm  rollouts=243  snaps=0  pen=0.135 mm  t= 1037.4s  alpha=0.000262 ls=20
+[P1_net_proxy_lbfgs_s1 it 025] rms=   0.306 mm  rollouts=263  snaps=0  pen=0.135 mm  t= 1118.3s  alpha=0.000895 ls=20
+[P1_net_proxy_lbfgs_s1 it 026] rms=   0.306 mm  rollouts=283  snaps=0  pen=0.135 mm  t= 1199.5s  alpha=0.00146 ls=20
+[P1_net_proxy_lbfgs_s1 it 027] rms=   0.306 mm  rollouts=303  snaps=0  pen=0.135 mm  t= 1280.9s  alpha=0.000387 ls=20
+[P1_net_proxy_lbfgs_s1 it 028] rms=   0.306 mm  rollouts=323  snaps=0  pen=0.135 mm  t= 1362.5s  alpha=0.000925 ls=20
+[P1_net_proxy_lbfgs_s1 it 029] rms=   0.306 mm  rollouts=343  snaps=0  pen=0.135 mm  t= 1444.4s  alpha=0.00098 ls=20
+[P1_net_proxy_lbfgs_s1 it 030] rms=   0.306 mm  rollouts=363  snaps=0  pen=0.135 mm  t= 1525.7s  alpha=0.000567 ls=20
+[P1_net_proxy_lbfgs_s1 it 031] rms=   0.306 mm  rollouts=383  snaps=0  pen=0.135 mm  t= 1607.9s  alpha=0.000682 ls=20
+[P1_net_proxy_lbfgs_s1 it 032] rms=   0.306 mm  rollouts=403  snaps=0  pen=0.135 mm  t= 1690.6s  alpha=0.000594 ls=20
+[P1_net_proxy_lbfgs_s1 it 033] rms=   0.306 mm  rollouts=423  snaps=0  pen=0.135 mm  t= 1772.2s  alpha=0.000599 ls=20
+[P1_net_proxy_lbfgs_s1 it 034] rms=   0.306 mm  rollouts=443  snaps=0  pen=0.135 mm  t= 1853.7s  alpha=0.00294 ls=20
+[P1_net_proxy_lbfgs_s1 it 035] rms=   0.306 mm  rollouts=463  snaps=0  pen=0.135 mm  t= 1935.4s  alpha=0.00324 ls=20
+[P1_net_proxy_lbfgs_s1 it 036] rms=   0.306 mm  rollouts=483  snaps=0  pen=0.135 mm  t= 2017.3s  alpha=0.00836 ls=20
+[P1_net_proxy_lbfgs_s1] stopped: rollout budget (500) used
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-223135-P1_net_proxy_lbfgs_s1/P1_net_proxy_lbfgs_s1_shape.{pdf,svg}  3.50 x 4.09 in (88.9 x 103.9 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-223135-P1_net_proxy_lbfgs_s1/P1_net_proxy_lbfgs_s1_error.{pdf,svg}  3.50 x 1.48 in (88.9 x 37.7 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-223135-P1_net_proxy_lbfgs_s1/P1_net_proxy_lbfgs_s1_rms.{pdf,svg}  3.50 x 1.80 in (88.9 x 45.8 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-223135-P1_net_proxy_lbfgs_s1/P1_net_proxy_lbfgs_s1.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-223135-P1_net_proxy_lbfgs_s1/summary.json  (finished)
+[P1_net_proxy_lbfgs_s1] final rms 0.306 mm (best 0.306 mm), solved True, 36 updates, 500 rollouts, 0 failed, max penetration 0.135 mm, 2087s -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-223135-P1_net_proxy_lbfgs_s1

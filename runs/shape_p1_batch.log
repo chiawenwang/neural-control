@@ -1,0 +1,76 @@
+== 1. targets
+Rod: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2
+Horizon: 100 steps, nv = 31, 2 peg(s), contact model smooth (delta 0.0001 m)
+Start rod: clearance to the pegs [27.2, 34.4] mm (rod surface)
+[P1] straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact, untwisted start: touching from steps [49, 48], nodes [8-9] and [18-20], 3.4 / 2.8 N, max penetration 0.14 mm; without pegs it ends 35 mm from the target)
+   onset steps [49, 48], final force [3.42, 2.76] N, touching nodes [[8, 9], [18, 19, 20]], max penetration 0.136 mm, snaps none, start->target rms 157.2 mm, free (no pegs) end shape vs target 35.2 mm
+   criteria: all OK
+== 2. gradient check
+[check P1] initial rms 32.52 mm, snaps none, P = 4678, Newton tol 1.27e-07
+   gradient cost: state 0.8 ms / 1 solve(s); proxy 13.1 ms / 100 solve(s)
+   dir 0: fd -1.405093e-03  state -1.405093e-03 (rel err 2.61e-08)  proxy +2.576860e-03 (rel err 2.83e+00)  same snaps True
+   dir 1: fd +3.105555e-03  state +3.105555e-03 (rel err 1.10e-08)  proxy +8.459540e-03 (rel err 1.72e+00)  same snaps True
+   dir 2: fd +2.373305e-03  state +2.373305e-03 (rel err 3.55e-09)  proxy +2.651481e-03 (rel err 1.17e-01)  same snaps True
+   dir 3: fd -1.463717e-03  state -1.463717e-03 (rel err 4.64e-09)  proxy -2.509823e-03 (rel err 7.15e-01)  same snaps True
+   state: median rel err 7.80e-09, max 2.61e-08;  proxy median 1.22e+00
+   proxy vs state per rate (pegs): first contact at step 57; median rel diff steps 30..57: 1.0578005811277882, after: 0.21729524256319063, last rate: 0.00e+00
+   proxy vs state per rate (no_pegs): first contact at step None; median rel diff steps 30..57: 0.029131387582696747, after: 0.014470520931954124, last rate: 0.00e+00
+   -> runs/shape_p1/checks/check_P1_net_s0.json
+== 3. Adam rate: train.adam.lr of configs/task_shape_pegs_3d.yaml (no sweep; SWEEP=1 runs one)
+== 4. main runs and baselines
+== 5. greedy
+== 6. figures
+== 7. verify and report
+ok   P1_endpose20_state_lbfgs_s0: final rms 0.064 mm, solved True, 70 rollouts, stop: rms 0.0643 mm <= stop_rms 0.1 mm
+ok   P1_endpose20_state_lbfgs_s1: final rms 0.065 mm, solved True, 32 rollouts, stop: rms 0.0646 mm <= stop_rms 0.1 mm
+ok   P1_endpose20_state_lbfgs_s2: final rms 0.671 mm, solved True, 199 rollouts, stop: line search found no admissible decrease
+ok   P1_endpose20_state_lbfgs_s3: final rms 0.078 mm, solved True, 36 rollouts, stop: rms 0.0782 mm <= stop_rms 0.1 mm
+ok   P1_endpose20_state_lbfgs_s4: final rms 1.562 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_endpose20aimed_state_none_s0: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_endpose20aimed_state_none_s1: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0001 mm <= stop_rms 0.1 mm
+ok   P1_endpose20aimed_state_none_s2: final rms 76.036 mm, solved False, 1 rollouts, stop: no optimization (evaluation only)
+ok   P1_endpose20aimed_state_none_s3: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_endpose20aimed_state_none_s4: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_endpose60_state_lbfgs_s0: final rms 0.092 mm, solved True, 56 rollouts, stop: rms 0.0917 mm <= stop_rms 0.1 mm
+ok   P1_endpose60_state_lbfgs_s1: final rms 0.075 mm, solved True, 33 rollouts, stop: rms 0.0746 mm <= stop_rms 0.1 mm
+ok   P1_endpose60_state_lbfgs_s2: final rms 0.632 mm, solved True, 120 rollouts, stop: line search found no admissible decrease
+ok   P1_endpose60_state_lbfgs_s3: final rms 0.078 mm, solved True, 36 rollouts, stop: rms 0.0783 mm <= stop_rms 0.1 mm
+ok   P1_endpose60_state_lbfgs_s4: final rms 2.371 mm, solved True, 284 rollouts, stop: line search found no admissible decrease
+ok   P1_endpose60aimed_state_none_s0: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_endpose60aimed_state_none_s1: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_endpose60aimed_state_none_s2: final rms 76.036 mm, solved False, 1 rollouts, stop: no optimization (evaluation only)
+ok   P1_endpose60aimed_state_none_s3: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_endpose60aimed_state_none_s4: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_greedy_state_greedy_s0: final rms 0.000 mm, solved True, 5.07 rollouts, stop: trust radius below step_min
+ok   P1_net_proxy_adam_s0: final rms 3.553 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_proxy_adam_s1: final rms 0.217 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_proxy_adam_s2: final rms 116.018 mm, solved False, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_proxy_adam_s3: final rms 0.100 mm, solved True, 382 rollouts, stop: rms 0.0999 mm <= stop_rms 0.1 mm
+ok   P1_net_proxy_adam_s4: final rms 5.834 mm, solved False, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_proxy_lbfgs_s0: final rms 8.726 mm, solved False, 127 rollouts, stop: line search found no admissible decrease
+ok   P1_net_proxy_lbfgs_s1: final rms 0.306 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_proxy_lbfgs_s2: final rms 13.906 mm, solved False, 120 rollouts, stop: line search found no admissible decrease
+ok   P1_net_proxy_lbfgs_s3: final rms 2.350 mm, solved True, 51 rollouts, stop: line search found no admissible decrease
+ok   P1_net_proxy_lbfgs_s4: final rms 12.339 mm, solved False, 49 rollouts, stop: line search found no admissible decrease
+ok   P1_net_state_adam_s0: final rms 1.575 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_adam_s1: final rms 0.297 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_adam_s2: final rms 8.300 mm, solved False, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_adam_s3: final rms 0.972 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_adam_s4: final rms 0.922 mm, solved True, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_lbfgs_nopegs_s0: final rms 6.874 mm, solved False, 174 rollouts, stop: line search found no admissible decrease
+ok   P1_net_state_lbfgs_nopegs_s1: final rms 6.874 mm, solved False, 143 rollouts, stop: line search found no admissible decrease
+ok   P1_net_state_lbfgs_nopegs_s2: final rms 6.874 mm, solved False, 234 rollouts, stop: line search found no admissible decrease
+ok   P1_net_state_lbfgs_nopegs_s3: final rms 6.874 mm, solved False, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_lbfgs_nopegs_s4: final rms 6.874 mm, solved False, 500 rollouts, stop: rollout budget (500) used
+ok   P1_net_state_lbfgs_s0: final rms 0.098 mm, solved True, 24 rollouts, stop: rms 0.0977 mm <= stop_rms 0.1 mm
+ok   P1_net_state_lbfgs_s1: final rms 0.048 mm, solved True, 23 rollouts, stop: rms 0.0478 mm <= stop_rms 0.1 mm
+ok   P1_net_state_lbfgs_s2: final rms 0.743 mm, solved True, 133 rollouts, stop: line search found no admissible decrease
+ok   P1_net_state_lbfgs_s3: final rms 0.086 mm, solved True, 36 rollouts, stop: rms 0.0864 mm <= stop_rms 0.1 mm
+ok   P1_net_state_lbfgs_s4: final rms 1.219 mm, solved True, 163 rollouts, stop: line search found no admissible decrease
+ok   P1_rates_state_lbfgs_s0: final rms 0.079 mm, solved True, 58 rollouts, stop: rms 0.0788 mm <= stop_rms 0.1 mm
+ok   P1_rates_state_lbfgs_s1: final rms 0.087 mm, solved True, 44 rollouts, stop: rms 0.0871 mm <= stop_rms 0.1 mm
+ok   P1_rates_state_lbfgs_s2: final rms 0.577 mm, solved True, 232 rollouts, stop: line search found no admissible decrease
+ok   P1_rates_state_lbfgs_s3: final rms 0.077 mm, solved True, 37 rollouts, stop: rms 0.0765 mm <= stop_rms 0.1 mm
+ok   P1_rates_state_lbfgs_s4: final rms 2.182 mm, solved True, 401 rollouts, stop: line search found no admissible decrease
+51 runs, 0 with problems
+done: runs/shape_p1/report.md

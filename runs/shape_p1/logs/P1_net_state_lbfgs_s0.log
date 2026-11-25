@@ -1,0 +1,35 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-212101-P1_net_state_lbfgs_s0
+Task: 3D shape formation, target P1 -- straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact, untwisted start: touching from steps [49, 48], nodes [8-9] and [18-20], 3.4 / 2.8 N, max penetration 0.14 mm; without pegs it ends 35 mm from the target)
+Trajectory: net (P = 4678), init designed (fit rms 5.10e-05)
+Gradient: state   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 2 peg(s) in training
+Initial trajectory: rms 32.52 mm, pegs touched at the end [True, True], onset [57, 77]
+[P1_net_state_lbfgs_s0 it 001] rms=  17.939 mm  rollouts=3  snaps=0  pen=0.000 mm  t=    9.1s  alpha=0.0215 ls=4
+[P1_net_state_lbfgs_s0 it 002] rms=  16.964 mm  rollouts=4  snaps=0  pen=0.097 mm  t=   12.0s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 003] rms=  12.028 mm  rollouts=5  snaps=0  pen=0.096 mm  t=   15.2s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 004] rms=  10.602 mm  rollouts=6  snaps=0  pen=0.094 mm  t=   18.4s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 005] rms=   7.815 mm  rollouts=7  snaps=0  pen=0.097 mm  t=   21.6s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 006] rms=   6.693 mm  rollouts=8  snaps=0  pen=0.105 mm  t=   25.0s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 007] rms=   6.618 mm  rollouts=9  snaps=0  pen=0.106 mm  t=   28.3s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 008] rms=   6.610 mm  rollouts=10  snaps=0  pen=0.106 mm  t=   31.6s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 009] rms=   6.596 mm  rollouts=11  snaps=0  pen=0.106 mm  t=   34.9s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 010] rms=   6.566 mm  rollouts=12  snaps=0  pen=0.107 mm  t=   38.3s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 011] rms=   6.480 mm  rollouts=13  snaps=0  pen=0.108 mm  t=   41.6s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 012] rms=   6.244 mm  rollouts=14  snaps=0  pen=0.111 mm  t=   45.0s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 013] rms=   5.066 mm  rollouts=15  snaps=0  pen=0.121 mm  t=   48.5s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 014] rms=   4.176 mm  rollouts=17  snaps=0  pen=0.133 mm  t=   55.9s  alpha=0.537 ls=2
+[P1_net_state_lbfgs_s0 it 015] rms=   2.874 mm  rollouts=18  snaps=0  pen=0.136 mm  t=   59.7s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 016] rms=   2.468 mm  rollouts=20  snaps=0  pen=0.138 mm  t=   67.4s  alpha=0.376 ls=2
+[P1_net_state_lbfgs_s0 it 017] rms=   1.431 mm  rollouts=21  snaps=0  pen=0.136 mm  t=   71.2s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 018] rms=   0.356 mm  rollouts=22  snaps=0  pen=0.134 mm  t=   74.9s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0 it 019] rms=   0.155 mm  rollouts=23  snaps=0  pen=0.134 mm  t=   78.7s  alpha=1 ls=1
+[P1_net_state_lbfgs_s0] stopped: rms 0.0977 mm <= stop_rms 0.1 mm
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-212101-P1_net_state_lbfgs_s0/P1_net_state_lbfgs_s0_shape.{pdf,svg}  3.50 x 4.09 in (88.9 x 103.9 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-212101-P1_net_state_lbfgs_s0/P1_net_state_lbfgs_s0_error.{pdf,svg}  3.50 x 1.48 in (88.9 x 37.7 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-212101-P1_net_state_lbfgs_s0/P1_net_state_lbfgs_s0_rms.{pdf,svg}  3.50 x 1.80 in (88.9 x 45.8 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-212101-P1_net_state_lbfgs_s0/P1_net_state_lbfgs_s0.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-212101-P1_net_state_lbfgs_s0/summary.json  (finished)
+[P1_net_state_lbfgs_s0] final rms 0.098 mm (best 0.098 mm), solved True, 19 updates, 24 rollouts, 2 failed, max penetration 0.134 mm, 82s -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-212101-P1_net_state_lbfgs_s0

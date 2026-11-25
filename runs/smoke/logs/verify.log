@@ -1,0 +1,12 @@
+ok   P1_endpose20_state_lbfgs_s0: final rms 27.026 mm, solved False, 4 rollouts, stop: iteration cap (2) reached
+ok   P1_endpose20aimed_state_none_s0: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_endpose60_state_lbfgs_s0: final rms 27.026 mm, solved False, 4 rollouts, stop: iteration cap (2) reached
+ok   P1_endpose60aimed_state_none_s0: final rms 0.000 mm, solved True, 1 rollouts, stop: rms 0.0000 mm <= stop_rms 0.1 mm
+ok   P1_greedy_state_greedy_s0: final rms 155.171 mm, solved False, 0.06 rollouts, stop: max_steps
+ok   P1_net_proxy_adam_s0: final rms 17.014 mm, solved False, 3 rollouts, stop: iteration cap (2) reached
+ok   P1_net_proxy_lbfgs_s0: final rms 13.156 mm, solved False, 4 rollouts, stop: iteration cap (2) reached
+ok   P1_net_state_adam_s0: final rms 21.326 mm, solved False, 3 rollouts, stop: iteration cap (2) reached
+ok   P1_net_state_lbfgs_nopegs_s0: final rms 28.049 mm, solved False, 4 rollouts, stop: iteration cap (2) reached
+ok   P1_net_state_lbfgs_s0: final rms 20.919 mm, solved False, 5 rollouts, stop: iteration cap (2) reached
+ok   P1_rates_state_lbfgs_s0: final rms 30.244 mm, solved False, 3 rollouts, stop: iteration cap (2) reached
+11 runs, 0 with problems

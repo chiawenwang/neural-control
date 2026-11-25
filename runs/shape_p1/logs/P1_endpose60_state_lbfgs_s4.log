@@ -1,0 +1,39 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-234338-P1_endpose60_state_lbfgs_s4
+Task: 3D shape formation, target P1 -- straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact, untwisted start: touching from steps [49, 48], nodes [8-9] and [18-20], 3.4 / 2.8 N, max penetration 0.14 mm; without pegs it ends 35 mm from the target)
+Trajectory: endpose60 (P = 6), init designed + end pose offset 0 (fit rms 0.00e+00)
+Gradient: state   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 2 peg(s) in training
+Initial trajectory: rms 41.90 mm, pegs touched at the end [True, True], onset [97, 95]
+[P1_endpose60_state_lbfgs_s4 it 001] rms=  30.853 mm  rollouts=4  snaps=0  pen=0.145 mm  t=   18.8s  alpha=0.166 ls=3
+[P1_endpose60_state_lbfgs_s4 it 002] rms=  27.368 mm  rollouts=6  snaps=0  pen=0.079 mm  t=   27.7s  alpha=2 ls=2
+[P1_endpose60_state_lbfgs_s4 it 003] rms=  17.203 mm  rollouts=8  snaps=0  pen=0.100 mm  t=   36.1s  alpha=0.589 ls=2
+[P1_endpose60_state_lbfgs_s4 it 004] rms=  11.677 mm  rollouts=9  snaps=0  pen=0.114 mm  t=   40.5s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s4 it 005] rms=   6.688 mm  rollouts=10  snaps=0  pen=0.111 mm  t=   45.0s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s4 it 006] rms=   6.190 mm  rollouts=11  snaps=0  pen=0.111 mm  t=   49.6s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s4 it 007] rms=   5.443 mm  rollouts=12  snaps=0  pen=0.117 mm  t=   54.0s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s4 it 008] rms=   5.179 mm  rollouts=13  snaps=0  pen=0.120 mm  t=   58.6s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s4 it 009] rms=   5.154 mm  rollouts=14  snaps=0  pen=0.120 mm  t=   63.1s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s4 it 010] rms=   4.783 mm  rollouts=15  snaps=0  pen=0.123 mm  t=   67.6s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s4 it 011] rms=   4.285 mm  rollouts=17  snaps=0  pen=0.127 mm  t=   77.0s  alpha=0.555 ls=2
+[P1_endpose60_state_lbfgs_s4 it 012] rms=   3.674 mm  rollouts=18  snaps=0  pen=0.126 mm  t=   81.9s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s4 it 013] rms=   2.859 mm  rollouts=20  snaps=0  pen=0.128 mm  t=   91.4s  alpha=0.5 ls=2
+[P1_endpose60_state_lbfgs_s4 it 014] rms=   2.493 mm  rollouts=24  snaps=0  pen=0.130 mm  t=  110.4s  alpha=0.125 ls=4
+[P1_endpose60_state_lbfgs_s4 it 015] rms=   2.418 mm  rollouts=44  snaps=0  pen=0.130 mm  t=  209.5s  alpha=0.0274 ls=20
+[P1_endpose60_state_lbfgs_s4 it 016] rms=   2.418 mm  rollouts=64  snaps=0  pen=0.130 mm  t=  309.7s  alpha=0.000286 ls=20
+[P1_endpose60_state_lbfgs_s4 it 017] rms=   2.377 mm  rollouts=84  snaps=0  pen=0.130 mm  t=  412.9s  alpha=0.0161 ls=20
+[P1_endpose60_state_lbfgs_s4 it 018] rms=   2.372 mm  rollouts=104  snaps=0  pen=0.130 mm  t=  523.2s  alpha=0.00226 ls=20
+[P1_endpose60_state_lbfgs_s4 it 019] rms=   2.371 mm  rollouts=124  snaps=0  pen=0.130 mm  t=  651.2s  alpha=0.000296 ls=20
+[P1_endpose60_state_lbfgs_s4 it 020] rms=   2.371 mm  rollouts=144  snaps=0  pen=0.130 mm  t=  815.6s  alpha=1.53e-05 ls=20
+[P1_endpose60_state_lbfgs_s4 it 021] rms=   2.371 mm  rollouts=184  snaps=0  pen=0.130 mm  t= 1135.1s  alpha=5.97e-06 ls=20
+[P1_endpose60_state_lbfgs_s4 it 022] rms=   2.371 mm  rollouts=204  snaps=0  pen=0.130 mm  t= 1320.3s  alpha=1.91e-06 ls=20
+[P1_endpose60_state_lbfgs_s4 it 023] rms=   2.371 mm  rollouts=244  snaps=0  pen=0.130 mm  t= 1654.3s  alpha=8.63e-05 ls=20
+[P1_endpose60_state_lbfgs_s4] stopped: line search found no admissible decrease
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-234338-P1_endpose60_state_lbfgs_s4/P1_endpose60_state_lbfgs_s4_shape.{pdf,svg}  3.50 x 4.05 in (88.9 x 102.9 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-234338-P1_endpose60_state_lbfgs_s4/P1_endpose60_state_lbfgs_s4_error.{pdf,svg}  3.50 x 1.51 in (88.9 x 38.4 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-234338-P1_endpose60_state_lbfgs_s4/P1_endpose60_state_lbfgs_s4_rms.{pdf,svg}  3.50 x 1.82 in (88.9 x 46.2 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-234338-P1_endpose60_state_lbfgs_s4/P1_endpose60_state_lbfgs_s4.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-234338-P1_endpose60_state_lbfgs_s4/summary.json  (finished)
+[P1_endpose60_state_lbfgs_s4] final rms 2.371 mm (best 2.371 mm), solved True, 23 updates, 284 rollouts, 0 failed, max penetration 0.130 mm, 1997s -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-234338-P1_endpose60_state_lbfgs_s4

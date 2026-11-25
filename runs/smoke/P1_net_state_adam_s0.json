@@ -1,0 +1,244 @@
+{
+ "task": "shape",
+ "status": "done",
+ "target_name": "P1",
+ "config": "configs/task_shape_pegs_3d.yaml",
+ "param": "net",
+ "grad_method": "state",
+ "optimizer": "adam",
+ "optimizer_settings": {
+  "lr": 0.0003
+ },
+ "trained_without_pegs": false,
+ "seed": 0,
+ "P": 4678,
+ "init": {
+  "init": "designed",
+  "calibration": {
+   "attempt": 0,
+   "scale": 1.939328162104504,
+   "rms": 0.032510961165466104,
+   "rms_band": [
+    0.03,
+    0.05
+   ]
+  },
+  "fit_rms_pose": 3.1194299012969875e-05,
+  "fit_max_pos": 2.574956258991068e-05,
+  "fit_max_ang": 0.0001869222509072871,
+  "fit_iters": 20000
+ },
+ "nv": 31,
+ "N": 100,
+ "n_free_nodes": 27,
+ "stop_rms": 0.0001,
+ "solve_rms": 0.005,
+ "epochs_cap": 2,
+ "max_rollouts": 500,
+ "max_failures": 20,
+ "workspace_mode": "reject",
+ "stop": "iteration cap (2) reached",
+ "train_time": 9.112597465515137,
+ "updates": 2,
+ "rollouts": 3,
+ "evaluations": 3,
+ "failures": 0,
+ "failure_reasons": [],
+ "adjoint_solves": 3,
+ "grad_time_median": 0.0009007453918457031,
+ "init_rms": 0.03250889027247733,
+ "init_ok": true,
+ "init_onset": [
+  57,
+  77
+ ],
+ "init_final_touching": [
+  true,
+  true
+ ],
+ "final_rms": 0.021325528981731803,
+ "final_loss": 0.00045477818635068307,
+ "final_ok": true,
+ "best_rms": 0.021325528981731803,
+ "solved": false,
+ "admissible": true,
+ "admissibility": {
+  "all_steps_stable": true,
+  "in_workspace": true,
+  "penetration_le_max": true,
+  "no_cap_contact": true
+ },
+ "final_snaps": 0,
+ "final_snap_steps": [],
+ "final_max_penetration": 8.74164955953563e-05,
+ "final_max_strain": 5.6914467208346586e-05,
+ "final_max_abs_holonomy": 0.5212288547063102,
+ "final_ws_violation": 0.0,
+ "final_onset": [
+  41,
+  null
+ ],
+ "final_touching": [
+  true,
+  false
+ ],
+ "final_force": [
+  1.7482254773078911,
+  0.0
+ ],
+ "snaps_total": 0,
+ "updates_to_5mm": null,
+ "updates_to_1mm": null,
+ "iterates": [
+  {
+   "eval": 0,
+   "loss": 0.001056827946747971,
+   "rms": 0.03250889027247733
+  },
+  {
+   "eval": 1,
+   "loss": 0.0009408003164243702,
+   "rms": 0.030672468378406884
+  },
+  {
+   "eval": 2,
+   "loss": 0.00045477818635068307,
+   "rms": 0.021325528981731803
+  }
+ ],
+ "evals": {
+  "loss": [
+   0.001056827946747971,
+   0.0009408003164243702,
+   0.00045477818635068307
+  ],
+  "rms": [
+   0.03250889027247733,
+   0.030672468378406884,
+   0.021325528981731803
+  ],
+  "gnorm": [
+   0.1741432091934679,
+   0.3340781269702641,
+   0.14990436110204286
+  ],
+  "ok": [
+   true,
+   true,
+   true
+  ],
+  "reason": [
+   "",
+   "",
+   ""
+  ],
+  "time": [
+   3.3953282833099365,
+   6.145721435546875,
+   9.112570762634277
+  ],
+  "rollouts": [
+   1,
+   2,
+   3
+  ],
+  "snaps": [
+   0,
+   0,
+   0
+  ],
+  "max_substeps": [
+   1,
+   1,
+   1
+  ],
+  "newton_iterations": [
+   140,
+   100,
+   110
+  ],
+  "max_penetration": [
+   9.011805785456156e-05,
+   0.0,
+   8.74164955953563e-05
+  ],
+  "max_strain": [
+   5.483099045366924e-05,
+   3.523813083683436e-05,
+   5.6914467208346586e-05
+  ],
+  "max_abs_holonomy": [
+   0.37890536588901824,
+   0.3779632235155586,
+   0.5212288547063102
+  ],
+  "ws_violation": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "end_contact": [
+   false,
+   false,
+   false
+  ],
+  "onset": [
+   [
+    57,
+    77
+   ],
+   [
+    -1,
+    -1
+   ],
+   [
+    41,
+    -1
+   ]
+  ],
+  "final_touching": [
+   [
+    true,
+    true
+   ],
+   [
+    false,
+    false
+   ],
+   [
+    true,
+    false
+   ]
+  ],
+  "final_force": [
+   [
+    0.614267558570475,
+    1.7346364510869032
+   ],
+   [
+    0.0,
+    0.0
+   ],
+   [
+    1.7482254773078911,
+    0.0
+   ]
+  ]
+ },
+ "target": {
+  "description": "straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact, untwisted start: touching from steps [49, 48], nodes [8-9] and [18-20], 3.4 / 2.8 N, max penetration 0.14 mm; without pegs it ends 35 mm from the target)",
+  "du": [
+   -0.0821,
+   -0.1843,
+   -0.0367,
+   -0.0124,
+   0.1182,
+   0.0
+  ],
+  "onset_step": [
+   49,
+   48
+  ],
+  "criteria_ok": true
+ }
+}

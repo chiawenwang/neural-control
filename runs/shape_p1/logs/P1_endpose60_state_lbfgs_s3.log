@@ -1,0 +1,46 @@
+Run log -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-232728-P1_endpose60_state_lbfgs_s3
+Task: 3D shape formation, target P1 -- straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact, untwisted start: touching from steps [49, 48], nodes [8-9] and [18-20], 3.4 / 2.8 N, max penetration 0.14 mm; without pegs it ends 35 mm from the target)
+Trajectory: endpose60 (P = 6), init designed + end pose offset 0 (fit rms 0.00e+00)
+Gradient: state   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Scene: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2; 100 steps, nv = 31, 2 peg(s) in training
+Initial trajectory: rms 38.35 mm, pegs touched at the end [True, True], onset [73, 71]
+[P1_endpose60_state_lbfgs_s3 it 001] rms=  10.701 mm  rollouts=3  snaps=0  pen=0.107 mm  t=   10.2s  alpha=0.286 ls=2
+[P1_endpose60_state_lbfgs_s3 it 002] rms=   6.704 mm  rollouts=4  snaps=0  pen=0.110 mm  t=   13.7s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 003] rms=   5.753 mm  rollouts=6  snaps=0  pen=0.111 mm  t=   20.7s  alpha=2 ls=2
+[P1_endpose60_state_lbfgs_s3 it 004] rms=   3.043 mm  rollouts=7  snaps=0  pen=0.119 mm  t=   24.3s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 005] rms=   2.551 mm  rollouts=8  snaps=0  pen=0.118 mm  t=   27.9s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 006] rms=   2.402 mm  rollouts=9  snaps=0  pen=0.117 mm  t=   31.4s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 007] rms=   2.367 mm  rollouts=10  snaps=0  pen=0.117 mm  t=   35.0s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 008] rms=   2.357 mm  rollouts=11  snaps=0  pen=0.117 mm  t=   38.6s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 009] rms=   2.351 mm  rollouts=12  snaps=0  pen=0.117 mm  t=   42.1s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 010] rms=   2.341 mm  rollouts=13  snaps=0  pen=0.117 mm  t=   45.7s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 011] rms=   2.320 mm  rollouts=14  snaps=0  pen=0.117 mm  t=   49.3s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 012] rms=   2.264 mm  rollouts=15  snaps=0  pen=0.117 mm  t=   52.8s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 013] rms=   2.034 mm  rollouts=16  snaps=0  pen=0.118 mm  t=   56.4s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 014] rms=   1.629 mm  rollouts=17  snaps=0  pen=0.119 mm  t=   60.0s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 015] rms=   0.950 mm  rollouts=18  snaps=0  pen=0.124 mm  t=   63.6s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 016] rms=   0.558 mm  rollouts=20  snaps=0  pen=0.123 mm  t=   70.9s  alpha=0.594 ls=2
+[P1_endpose60_state_lbfgs_s3 it 017] rms=   0.446 mm  rollouts=21  snaps=0  pen=0.122 mm  t=   74.5s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 018] rms=   0.411 mm  rollouts=22  snaps=0  pen=0.122 mm  t=   78.1s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 019] rms=   0.408 mm  rollouts=23  snaps=0  pen=0.123 mm  t=   81.8s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 020] rms=   0.407 mm  rollouts=24  snaps=0  pen=0.123 mm  t=   85.4s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 021] rms=   0.407 mm  rollouts=25  snaps=0  pen=0.123 mm  t=   89.1s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 022] rms=   0.407 mm  rollouts=26  snaps=0  pen=0.123 mm  t=   92.7s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 023] rms=   0.405 mm  rollouts=27  snaps=0  pen=0.123 mm  t=   96.5s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 024] rms=   0.402 mm  rollouts=28  snaps=0  pen=0.123 mm  t=  100.2s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 025] rms=   0.394 mm  rollouts=29  snaps=0  pen=0.123 mm  t=  103.8s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 026] rms=   0.374 mm  rollouts=30  snaps=0  pen=0.123 mm  t=  107.5s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 027] rms=   0.327 mm  rollouts=31  snaps=0  pen=0.123 mm  t=  111.1s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 028] rms=   0.305 mm  rollouts=33  snaps=0  pen=0.123 mm  t=  118.3s  alpha=0.334 ls=2
+[P1_endpose60_state_lbfgs_s3 it 029] rms=   0.210 mm  rollouts=34  snaps=0  pen=0.125 mm  t=  121.9s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3 it 030] rms=   0.105 mm  rollouts=35  snaps=0  pen=0.126 mm  t=  125.6s  alpha=1 ls=1
+[P1_endpose60_state_lbfgs_s3] stopped: rms 0.0783 mm <= stop_rms 0.1 mm
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-232728-P1_endpose60_state_lbfgs_s3/P1_endpose60_state_lbfgs_s3_shape.{pdf,svg}  3.50 x 4.09 in (88.9 x 103.9 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-232728-P1_endpose60_state_lbfgs_s3/P1_endpose60_state_lbfgs_s3_error.{pdf,svg}  3.50 x 1.47 in (88.9 x 37.2 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-232728-P1_endpose60_state_lbfgs_s3/P1_endpose60_state_lbfgs_s3_rms.{pdf,svg}  3.50 x 1.76 in (88.9 x 44.8 mm), font: Liberation Serif
+Saved 100-frame animation to /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-232728-P1_endpose60_state_lbfgs_s3/P1_endpose60_state_lbfgs_s3.gif
+Run summary -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-232728-P1_endpose60_state_lbfgs_s3/summary.json  (finished)
+[P1_endpose60_state_lbfgs_s3] final rms 0.078 mm (best 0.078 mm), solved True, 30 updates, 36 rollouts, 0 failed, max penetration 0.126 mm, 129s -> /home/sciarm20/neural-control/experiments/shape_pegs_3d/runs/20261124-232728-P1_endpose60_state_lbfgs_s3

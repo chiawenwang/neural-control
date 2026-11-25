@@ -1,0 +1,130 @@
+{
+ "task": "shape",
+ "status": "done",
+ "target_name": "P1",
+ "config": "configs/task_shape_pegs_3d.yaml",
+ "param": "greedy",
+ "grad_method": "state",
+ "optimizer": "greedy",
+ "optimizer_settings": {
+  "schedule": "direct",
+  "dlam": 0.01,
+  "advance_tol": 0.02,
+  "step_cap": 0.002012885106309703,
+  "step_min": 0.0001,
+  "angle_scale": 0.1,
+  "alphas": [
+   1.0,
+   0.5,
+   0.25
+  ],
+  "damping": 0.0001,
+  "reg": null,
+  "ref_final": null,
+  "max_steps": 2,
+  "patience": 50,
+  "rel_tol": 0.001,
+  "time_limit": null,
+  "max_retreats": 0,
+  "retreat": 0.05
+ },
+ "trained_without_pegs": false,
+ "seed": 0,
+ "P": 0,
+ "init": {
+  "init": "u0 (no trajectory)"
+ },
+ "nv": 31,
+ "N": 100,
+ "greedy_steps": 2,
+ "step_cap_source": [
+  "P1_net_state_lbfgs_s0.npz"
+ ],
+ "stop": "max_steps",
+ "train_time": 0.22740626335144043,
+ "updates": 2,
+ "rollouts": 0.06,
+ "env_steps": 6,
+ "evaluations": 6,
+ "failures": 0,
+ "failure_reasons": [],
+ "rejected": {
+  "newton": 0,
+  "unstable": 0,
+  "singular": 0,
+  "wrap": 0,
+  "no_decrease": 0
+ },
+ "snap_trials": 0,
+ "init_rms": 0.15723690749945018,
+ "init_ok": true,
+ "final_rms": 0.15517073488772526,
+ "final_loss": 0.024077956965596718,
+ "final_ok": true,
+ "best_rms": 0.15517073488772526,
+ "replay_max_deviation": 0.0,
+ "solved": false,
+ "admissible": true,
+ "admissibility": {
+  "all_steps_stable": true,
+  "in_workspace": true,
+  "penetration_le_max": true,
+  "no_cap_contact": true
+ },
+ "final_snaps": 0,
+ "final_snap_steps": [],
+ "final_max_penetration": 0.0,
+ "final_max_strain": 1.4526617552634846e-05,
+ "final_max_abs_holonomy": 0.004381955477003423,
+ "final_ws_violation": 0.0,
+ "final_onset": [
+  null,
+  null
+ ],
+ "final_touching": [
+  false,
+  false
+ ],
+ "final_force": [
+  0.0,
+  0.0
+ ],
+ "snaps_total": 0,
+ "iterates": [
+  {
+   "eval": 0,
+   "rms": 0.15723690749945018
+  },
+  {
+   "eval": 1,
+   "rms": 0.15618888196414965
+  },
+  {
+   "eval": 2,
+   "rms": 0.15517073488772526
+  }
+ ],
+ "evals": {
+  "rms": [
+   0.15723690749945018,
+   0.15618888196414965,
+   0.15517073488772526
+  ]
+ },
+ "target": {
+  "description": "straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact, untwisted start: touching from steps [49, 48], nodes [8-9] and [18-20], 3.4 / 2.8 N, max penetration 0.14 mm; without pegs it ends 35 mm from the target)",
+  "du": [
+   -0.0821,
+   -0.1843,
+   -0.0367,
+   -0.0124,
+   0.1182,
+   0.0
+  ],
+  "onset_step": [
+   49,
+   48
+  ],
+  "criteria_ok": true
+ }
+}
