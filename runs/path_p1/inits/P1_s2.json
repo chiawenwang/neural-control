@@ -1,0 +1,69 @@
+{
+ "target": "P1",
+ "seed": 2,
+ "attempt": 1,
+ "scale": 0.4114647467674344,
+ "rms": 0.017184757643993475,
+ "rms_band": [
+  0.01,
+  0.02
+ ],
+ "end_offset": [
+  0.0033735304498338442,
+  -0.00627195004600971,
+  -0.0103991971418489,
+  0.01345517337976788,
+  -0.024318454347422542,
+  0.013284771600478005
+ ],
+ "bump": [
+  0.04297844764528214,
+  0.026682571249724694,
+  -0.004436865081606311,
+  -0.018314904436711223,
+  -0.0164294432775531,
+  -0.14748785313870447
+ ],
+ "onset": [
+  122
+ ],
+ "contact_fraction": 0.39,
+ "contact_fraction_per_peg": [
+  0.39
+ ],
+ "contact_transitions": 1,
+ "touching_at_end": true,
+ "max_penetration": 0.0,
+ "tried": [
+  {
+   "attempt": 0,
+   "c": 1.0,
+   "ok": true,
+   "reason": "",
+   "ws_violation": 0.0,
+   "rms": 0.015999211893973665,
+   "same_side": true,
+   "touching": false
+  },
+  {
+   "attempt": 1,
+   "c": 1.0,
+   "ok": true,
+   "reason": "",
+   "ws_violation": 0.0,
+   "rms": 0.03645512797352286,
+   "same_side": true,
+   "touching": true
+  },
+  {
+   "attempt": 1,
+   "c": 0.4114647467674344,
+   "ok": true,
+   "reason": "",
+   "ws_violation": 0.0,
+   "rms": 0.017184757643993475,
+   "same_side": true,
+   "touching": true
+  }
+ ]
+}

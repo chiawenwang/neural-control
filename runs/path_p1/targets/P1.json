@@ -1,0 +1,111 @@
+{
+ "name": "P1",
+ "description": "P1, basic: one peg on the convex side of the arc; free for the first third of the path, then on the peg to the end",
+ "spec": {
+  "kind": "sine_xz",
+  "amp": 0.01,
+  "periods": 0.5,
+  "dx": -0.125,
+  "dy": -0.12,
+  "build": "contact",
+  "touch": [
+   0
+  ],
+  "description": "P1, basic: one peg on the convex side of the arc; free for the first third of the path, then on the peg to the end"
+ },
+ "build": "contact",
+ "require_touch": [
+  0
+ ],
+ "N": 200,
+ "nv": 51,
+ "mid_node": 25,
+ "m0": [
+  0.161030857332082,
+  1.5939308718146334e-19,
+  0.4586425350037186
+ ],
+ "config": "configs/task_path_peg_3d.yaml",
+ "contact_model": "smooth",
+ "smoothing": 0.0001,
+ "tracker": {
+  "damping": 0.03,
+  "angle_scale": 0.2,
+  "max_step": 0.03,
+  "alphas": [
+   1.0,
+   0.5,
+   0.25
+  ],
+  "rms_on_sine": 2.942574848348734e-06,
+  "max_on_sine": 7.796461032635015e-06,
+  "held": 0,
+  "rejected": {
+   "newton": 0,
+   "unstable": 0,
+   "error": 0,
+   "snap": 0,
+   "tunnel": 0,
+   "workspace_clip": 0
+  },
+  "time": 27.30852770805359
+ },
+ "designed_rms_vs_ref": 0.0,
+ "start_clearance": [
+  0.029976461216290537
+ ],
+ "onset_step": [
+  72
+ ],
+ "contact_fraction": 0.64,
+ "contact_fraction_per_peg": [
+  0.64
+ ],
+ "contact_transitions": 1,
+ "touching_at_end": true,
+ "final_force": [
+  0.33121562750273104
+ ],
+ "max_force": 0.9102553751575017,
+ "max_penetration": 0.0,
+ "max_strain": 5.89369082870661e-05,
+ "max_abs_holonomy": 0.3843493621996469,
+ "min_self_clearance": 0.03395761411890532,
+ "mid_clearance": 0.060838528737485534,
+ "snap_steps": [],
+ "max_substeps": 1,
+ "newton_iterations": 326,
+ "rollout_time": 46.999266386032104,
+ "u_final": [
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  1.5707,
+  0.0,
+  0.5023482195207345,
+  -0.052499896886148215,
+  0.5528683739371885,
+  0.3791348027083679,
+  0.3028514152151876,
+  0.004734455640437105
+ ],
+ "path_length": 0.18119311704184338,
+ "ref_vs_sine_rms": 0.010685675354117944,
+ "ref_vs_sine_max": 0.01790597519239646,
+ "free_rod_vs_ref_rms": 0.010685712427421775,
+ "criteria": {
+  "start_clearance_ge_5mm": true,
+  "no_contact_first_25pct": true,
+  "required_pegs_touch_at_end": true,
+  "contact_fraction_ge_30pct": true,
+  "mid_node_off_pegs_ge_15mm": true,
+  "max_penetration_le_0.5mm": true,
+  "no_cap_contact": true,
+  "no_self_contact": true,
+  "no_snap": true,
+  "in_workspace": true,
+  "designed_tracks_ref": true
+ },
+ "criteria_ok": true
+}

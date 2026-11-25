@@ -1,0 +1,15 @@
+Greedy on P1: step cap 0.0009115 (from ['P1_net_state_lbfgs_s0.npz', 'P1_net_state_lbfgs_s1.npz', 'P1_net_state_lbfgs_s2.npz', 'P1_net_state_lbfgs_s3.npz', 'P1_net_state_lbfgs_s4.npz']), alphas (1.0, 0.5, 0.25), damping 0.03
+  step   25/200  error   0.00 mm  alpha 1.00  u [ 0.61  -0.008  0.61   0.065  0.043  0.   ]  4s
+  step   50/200  error   0.00 mm  alpha 1.00  u [ 0.597 -0.016  0.603  0.124  0.068  0.001]  7s
+  step   75/200  error   0.05 mm  alpha 1.00  u [ 0.583 -0.023  0.596  0.181  0.098  0.001]  11s
+  step  100/200  error   0.04 mm  alpha 1.00  u [ 0.568 -0.029  0.589  0.227  0.119  0.001]  15s
+  step  125/200  error   0.02 mm  alpha 1.00  u [ 0.553 -0.035  0.578  0.268  0.152  0.001]  19s
+  step  150/200  error   0.03 mm  alpha 1.00  u [ 0.538 -0.041  0.565  0.302  0.187 -0.   ]  23s
+  step  175/200  error   0.01 mm  alpha 1.00  u [ 0.522 -0.048  0.554  0.335  0.219 -0.002]  28s
+  step  200/200  error   0.03 mm  alpha 1.00  u [ 0.504 -0.055  0.545  0.368  0.237 -0.003]  32s
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] runs/path_p1/P1_greedy_state_greedy_s0_path.{pdf,svg}  3.50 x 4.37 in (88.9 x 110.9 mm), font: Liberation Serif
+[tro_style] runs/path_p1/P1_greedy_state_greedy_s0_error.{pdf,svg}  3.49 x 1.46 in (88.6 x 37.0 mm), font: Liberation Serif
+Saved 200-frame animation to runs/path_p1/P1_greedy_state_greedy_s0.gif
+[P1_greedy_state_greedy_s0] 200 steps, 0 held, rejected {'newton': 0, 'unstable': 0, 'error': 0, 'snap': 0, 'tunnel': 0, 'workspace_clip': 0}; final rms 0.028 mm, max 0.12 mm, solved True, admissible True, replay deviation 0.0, 32s -> runs/path_p1

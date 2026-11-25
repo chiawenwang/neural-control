@@ -1,0 +1,105 @@
+{
+ "task": "path",
+ "status": "done",
+ "target_name": "P1",
+ "config": "configs/task_path_peg_3d.yaml",
+ "param": "greedy",
+ "grad_method": "state",
+ "optimizer": "greedy",
+ "optimizer_settings": {
+  "damping": 0.03,
+  "angle_scale": 0.2,
+  "max_step": 0.03,
+  "alphas": [
+   1.0,
+   0.5,
+   0.25
+  ],
+  "cap": 0.0009115399527195867
+ },
+ "reject_snap": true,
+ "seed": 0,
+ "P": 0,
+ "init": {
+  "init": "u0 (no trajectory)"
+ },
+ "nv": 51,
+ "N": 200,
+ "mid_node": 25,
+ "step_cap_source": [
+  "P1_net_state_lbfgs_s0.npz",
+  "P1_net_state_lbfgs_s1.npz",
+  "P1_net_state_lbfgs_s2.npz",
+  "P1_net_state_lbfgs_s3.npz",
+  "P1_net_state_lbfgs_s4.npz"
+ ],
+ "stop": "end of the path",
+ "train_time": 31.952035427093506,
+ "updates": 200,
+ "rollouts": 4.0,
+ "evaluations": 200,
+ "failures": 0,
+ "failure_reasons": [],
+ "rejected": {
+  "newton": 0,
+  "unstable": 0,
+  "error": 0,
+  "snap": 0,
+  "tunnel": 0,
+  "workspace_clip": 0
+ },
+ "held_steps": 0,
+ "snap_rejections": 0,
+ "init_rms": null,
+ "final_rms": 2.7890268676562087e-05,
+ "final_ok": true,
+ "final_loss": 7.778670868508203e-10,
+ "final_max_err": 0.00012236431409993283,
+ "final_end_err": 3.329554997708373e-05,
+ "final_contact_fraction": 0.63,
+ "final_contact_transitions": 1,
+ "final_touching_at_end": true,
+ "final_onset": [
+  74
+ ],
+ "final_snaps": 0,
+ "final_snap_steps": [],
+ "final_max_penetration": 1.9459696666557225e-06,
+ "final_max_strain": 5.904117495891814e-05,
+ "final_max_abs_holonomy": 0.39130356323950016,
+ "final_ws_violation": 0.0,
+ "final_min_self_clearance": 0.03395776359981585,
+ "final_final_touching": [
+  true
+ ],
+ "final_final_force": [
+  0.5267510469495302
+ ],
+ "best_rms": 2.7890268676562087e-05,
+ "replay_max_deviation": 0.0,
+ "solved": true,
+ "admissible": true,
+ "admissibility": {
+  "all_steps_stable": true,
+  "in_workspace": true,
+  "no_self_contact": true,
+  "penetration_le_max": true,
+  "no_cap_contact": true,
+  "no_snap": true
+ },
+ "iterates": [
+  {
+   "eval": 0,
+   "rms": 2.7890268676562087e-05
+  }
+ ],
+ "evals": {},
+ "target": {
+  "description": "P1, basic: one peg on the convex side of the arc; free for the first third of the path, then on the peg to the end",
+  "build": "contact",
+  "onset_step": [
+   72
+  ],
+  "criteria_ok": true
+ }
+}

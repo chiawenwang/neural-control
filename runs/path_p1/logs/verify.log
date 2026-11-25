@@ -1,0 +1,37 @@
+ok   P1_endpose20_state_lbfgs_s0: final rms 16.892 mm, solved False, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_endpose20_state_lbfgs_s1: final rms 15.672 mm, solved False, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_endpose20_state_lbfgs_s2: final rms 17.140 mm, solved False, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_endpose20_state_lbfgs_s3: final rms 15.852 mm, solved False, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_endpose20_state_lbfgs_s4: final rms 16.411 mm, solved False, 224 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P1_endpose60_state_lbfgs_s0: final rms 14.776 mm, solved False, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_endpose60_state_lbfgs_s1: final rms 15.464 mm, solved False, 207 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P1_endpose60_state_lbfgs_s2: final rms 16.099 mm, solved False, 86 rollouts, snap rejections 0, stop: 20 failed rollouts (last: workspace (+0.00325))
+ok   P1_endpose60_state_lbfgs_s3: final rms 15.257 mm, solved False, 336 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P1_endpose60_state_lbfgs_s4: final rms 15.212 mm, solved False, 286 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P1_greedy_state_greedy_s0: final rms 0.028 mm, solved True, 4.0 rollouts, snap rejections 0, stop: end of the path
+ok   P1_net_proxy_adam_s0: final rms 2.291 mm, solved False, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_net_proxy_adam_s1: final rms 0.964 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_net_proxy_adam_s2: final rms 1.862 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_net_proxy_adam_s3: final rms 0.572 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_net_proxy_adam_s4: final rms 2.725 mm, solved False, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_net_proxy_lbfgs_s0: final rms 5.716 mm, solved False, 80 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P1_net_proxy_lbfgs_s1: final rms 2.827 mm, solved False, 130 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P1_net_proxy_lbfgs_s2: final rms 3.307 mm, solved False, 101 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P1_net_proxy_lbfgs_s3: final rms 2.129 mm, solved False, 155 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P1_net_proxy_lbfgs_s4: final rms 2.920 mm, solved False, 116 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P1_net_state_adam_s0: final rms 0.219 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_net_state_adam_s1: final rms 0.479 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_net_state_adam_s2: final rms 0.316 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_net_state_adam_s3: final rms 0.300 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_net_state_adam_s4: final rms 0.245 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_net_state_lbfgs_s0: final rms 0.109 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_net_state_lbfgs_s1: final rms 0.099 mm, solved True, 248 rollouts, snap rejections 0, stop: rms 0.0990 mm <= stop_rms 0.1 mm
+ok   P1_net_state_lbfgs_s2: final rms 0.099 mm, solved True, 231 rollouts, snap rejections 0, stop: rms 0.0993 mm <= stop_rms 0.1 mm
+ok   P1_net_state_lbfgs_s3: final rms 0.100 mm, solved True, 212 rollouts, snap rejections 0, stop: rms 0.1000 mm <= stop_rms 0.1 mm
+ok   P1_net_state_lbfgs_s4: final rms 0.117 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P1_rates_state_lbfgs_s0: final rms 0.096 mm, solved True, 27 rollouts, snap rejections 0, stop: rms 0.0959 mm <= stop_rms 0.1 mm
+ok   P1_rates_state_lbfgs_s1: final rms 0.096 mm, solved True, 50 rollouts, snap rejections 0, stop: rms 0.0956 mm <= stop_rms 0.1 mm
+ok   P1_rates_state_lbfgs_s2: final rms 0.090 mm, solved True, 36 rollouts, snap rejections 0, stop: rms 0.0901 mm <= stop_rms 0.1 mm
+ok   P1_rates_state_lbfgs_s3: final rms 0.100 mm, solved True, 51 rollouts, snap rejections 0, stop: rms 0.0998 mm <= stop_rms 0.1 mm
+ok   P1_rates_state_lbfgs_s4: final rms 0.100 mm, solved True, 43 rollouts, snap rejections 0, stop: rms 0.0996 mm <= stop_rms 0.1 mm
+36 runs, 0 with problems

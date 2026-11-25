@@ -1,0 +1,22 @@
+Run log -> /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-071453-P1_net_proxy_lbfgs_s0
+Task: 3D path tracking, target P1 -- P1, basic: one peg on the convex side of the arc; free for the first third of the path, then on the peg to the end
+Trajectory: net (P = 4678), init designed (fit rms 1.91e-04)
+Objective: trajectory (mid node, 200 terms); snap-through: rejected (infeasible trial)
+Gradient: proxy   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Initial trajectory: rms 17.41 mm, max 25.79 mm, contact 38 % of the steps, snaps 0
+[P1_net_proxy_lbfgs_s0 it 001] rms=   6.750 mm  rollouts=3  snaps=0  pen=0.000 mm  t=   38.7s  alpha=0.0302 ls=4
+[P1_net_proxy_lbfgs_s0 it 002] rms=   6.284 mm  rollouts=4  snaps=0  pen=0.000 mm  t=   50.8s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s0 it 003] rms=   6.203 mm  rollouts=5  snaps=0  pen=0.000 mm  t=   62.8s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s0 it 004] rms=   5.887 mm  rollouts=6  snaps=0  pen=0.000 mm  t=   73.9s  alpha=1 ls=1
+[P1_net_proxy_lbfgs_s0 it 005] rms=   5.887 mm  rollouts=23  snaps=0  pen=0.000 mm  t=  261.6s  alpha=7.68e-13 ls=17
+[P1_net_proxy_lbfgs_s0 it 006] rms=   5.716 mm  rollouts=45  snaps=0  pen=0.000 mm  t=  499.3s  alpha=0.0601 ls=3
+[P1_net_proxy_lbfgs_s0] stopped: line search found no admissible decrease
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-071453-P1_net_proxy_lbfgs_s0/P1_net_proxy_lbfgs_s0_path.{pdf,svg}  3.50 x 4.34 in (88.9 x 110.2 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-071453-P1_net_proxy_lbfgs_s0/P1_net_proxy_lbfgs_s0_error.{pdf,svg}  3.50 x 1.49 in (88.9 x 37.8 mm), font: Liberation Serif
+Saved 200-frame animation to /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-071453-P1_net_proxy_lbfgs_s0/P1_net_proxy_lbfgs_s0.gif
+[tro_style] /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-071453-P1_net_proxy_lbfgs_s0/P1_net_proxy_lbfgs_s0_rms.{pdf,svg}  3.50 x 1.81 in (88.9 x 45.9 mm), font: Liberation Serif
+Run summary -> /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-071453-P1_net_proxy_lbfgs_s0/summary.json  (finished)
+[P1_net_proxy_lbfgs_s0] final rms 5.716 mm (best 5.716 mm), solved False, 6 updates, 80 rollouts, 2 failed (0 by the snap rule), 881s -> /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-071453-P1_net_proxy_lbfgs_s0

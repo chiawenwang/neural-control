@@ -1,0 +1,8 @@
+Rod: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2
+Horizon: 200 steps, nv = 51, mid node 25 at [0.161, 0.0, 0.4586], 1 peg(s), contact model smooth
+Start rod: clearance to the pegs [30.0] mm (rod surface), holonomy -0.000 rad
+[P1] P1, basic: one peg on the convex side of the arc; free for the first third of the path, then on the peg to the end
+   build contact: tracker on the sine rms 0.003 mm (0 held steps); designed motion vs reference 0.000 mm; reference vs sine rms 10.7 mm (max 17.9)
+   path length 181 mm; contact from step [72] (64 % of the steps, 1 transitions, at the end [True]), final force [0.33] N, max penetration 0.000 mm, mid node >= 61 mm from the pegs, snaps none, self clearance 34.0 mm
+   the same motion without the pegs: mid node 10.7 mm (rms) from the reference
+   criteria: all OK

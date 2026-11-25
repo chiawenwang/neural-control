@@ -1,0 +1,55 @@
+Run log -> /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-080430-P1_rates_state_lbfgs_s1
+Task: 3D path tracking, target P1 -- P1, basic: one peg on the convex side of the arc; free for the first third of the path, then on the peg to the end
+Trajectory: rates (P = 1200), init designed (fit rms 0.00e+00)
+Objective: trajectory (mid node, 200 terms); snap-through: rejected (infeasible trial)
+Gradient: state   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Initial trajectory: rms 15.77 mm, max 24.56 mm, contact 76 % of the steps, snaps 0
+[P1_rates_state_lbfgs_s1 it 001] rms=  13.515 mm  rollouts=7  snaps=0  pen=0.023 mm  t=   88.2s  alpha=32 ls=6
+[P1_rates_state_lbfgs_s1 it 002] rms=   6.878 mm  rollouts=8  snaps=0  pen=0.000 mm  t=   99.9s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 003] rms=   6.187 mm  rollouts=9  snaps=0  pen=0.000 mm  t=  111.8s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 004] rms=   3.289 mm  rollouts=10  snaps=0  pen=0.000 mm  t=  123.8s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 005] rms=   2.863 mm  rollouts=11  snaps=0  pen=0.000 mm  t=  135.8s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 006] rms=   2.294 mm  rollouts=12  snaps=0  pen=0.000 mm  t=  147.8s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 007] rms=   1.816 mm  rollouts=13  snaps=0  pen=0.000 mm  t=  159.7s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 008] rms=   1.170 mm  rollouts=14  snaps=0  pen=0.000 mm  t=  171.8s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 009] rms=   0.629 mm  rollouts=15  snaps=0  pen=0.000 mm  t=  183.9s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 010] rms=   0.487 mm  rollouts=16  snaps=0  pen=0.000 mm  t=  195.9s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 011] rms=   0.447 mm  rollouts=17  snaps=0  pen=0.000 mm  t=  208.0s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 012] rms=   0.434 mm  rollouts=18  snaps=0  pen=0.000 mm  t=  220.2s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 013] rms=   0.412 mm  rollouts=19  snaps=0  pen=0.000 mm  t=  232.4s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 014] rms=   0.361 mm  rollouts=20  snaps=0  pen=0.000 mm  t=  244.6s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 015] rms=   0.356 mm  rollouts=22  snaps=0  pen=0.000 mm  t=  269.1s  alpha=0.166 ls=2
+[P1_rates_state_lbfgs_s1 it 016] rms=   0.337 mm  rollouts=23  snaps=0  pen=0.000 mm  t=  281.4s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 017] rms=   0.326 mm  rollouts=24  snaps=0  pen=0.000 mm  t=  293.6s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 018] rms=   0.300 mm  rollouts=25  snaps=0  pen=0.000 mm  t=  305.7s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 019] rms=   0.262 mm  rollouts=26  snaps=0  pen=0.000 mm  t=  317.8s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 020] rms=   0.224 mm  rollouts=27  snaps=0  pen=0.000 mm  t=  330.0s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 021] rms=   0.216 mm  rollouts=28  snaps=0  pen=0.000 mm  t=  342.2s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 022] rms=   0.207 mm  rollouts=29  snaps=0  pen=0.000 mm  t=  354.4s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 023] rms=   0.205 mm  rollouts=30  snaps=0  pen=0.000 mm  t=  366.6s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 024] rms=   0.197 mm  rollouts=31  snaps=0  pen=0.000 mm  t=  378.9s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 025] rms=   0.183 mm  rollouts=32  snaps=0  pen=0.000 mm  t=  391.1s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 026] rms=   0.168 mm  rollouts=33  snaps=0  pen=0.000 mm  t=  403.3s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 027] rms=   0.165 mm  rollouts=35  snaps=0  pen=0.000 mm  t=  427.8s  alpha=0.128 ls=2
+[P1_rates_state_lbfgs_s1 it 028] rms=   0.159 mm  rollouts=36  snaps=0  pen=0.000 mm  t=  440.0s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 029] rms=   0.157 mm  rollouts=37  snaps=0  pen=0.000 mm  t=  452.3s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 030] rms=   0.155 mm  rollouts=38  snaps=0  pen=0.000 mm  t=  464.5s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 031] rms=   0.151 mm  rollouts=39  snaps=0  pen=0.000 mm  t=  476.7s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 032] rms=   0.143 mm  rollouts=40  snaps=0  pen=0.000 mm  t=  489.0s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 033] rms=   0.142 mm  rollouts=42  snaps=0  pen=0.000 mm  t=  513.5s  alpha=0.162 ls=2
+[P1_rates_state_lbfgs_s1 it 034] rms=   0.138 mm  rollouts=43  snaps=0  pen=0.000 mm  t=  525.7s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 035] rms=   0.133 mm  rollouts=44  snaps=0  pen=0.000 mm  t=  538.0s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 036] rms=   0.124 mm  rollouts=45  snaps=0  pen=0.000 mm  t=  550.2s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 037] rms=   0.111 mm  rollouts=46  snaps=0  pen=0.000 mm  t=  562.4s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1 it 038] rms=   0.108 mm  rollouts=48  snaps=0  pen=0.000 mm  t=  586.8s  alpha=0.178 ls=2
+[P1_rates_state_lbfgs_s1 it 039] rms=   0.100 mm  rollouts=49  snaps=0  pen=0.000 mm  t=  598.9s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s1] stopped: rms 0.0956 mm <= stop_rms 0.1 mm
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-080430-P1_rates_state_lbfgs_s1/P1_rates_state_lbfgs_s1_path.{pdf,svg}  3.50 x 4.42 in (88.9 x 112.1 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-080430-P1_rates_state_lbfgs_s1/P1_rates_state_lbfgs_s1_error.{pdf,svg}  3.50 x 1.49 in (88.9 x 37.8 mm), font: Liberation Serif
+Saved 200-frame animation to /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-080430-P1_rates_state_lbfgs_s1/P1_rates_state_lbfgs_s1.gif
+[tro_style] /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-080430-P1_rates_state_lbfgs_s1/P1_rates_state_lbfgs_s1_rms.{pdf,svg}  3.50 x 1.78 in (88.9 x 45.3 mm), font: Liberation Serif
+Run summary -> /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-080430-P1_rates_state_lbfgs_s1/summary.json  (finished)
+[P1_rates_state_lbfgs_s1] final rms 0.096 mm (best 0.096 mm), solved True, 39 updates, 50 rollouts, 0 failed (0 by the snap rule), 611s -> /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-080430-P1_rates_state_lbfgs_s1

@@ -1,0 +1,44 @@
+Run log -> /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-081935-P1_rates_state_lbfgs_s2
+Task: 3D path tracking, target P1 -- P1, basic: one peg on the convex side of the arc; free for the first third of the path, then on the peg to the end
+Trajectory: rates (P = 1200), init designed (fit rms 0.00e+00)
+Objective: trajectory (mid node, 200 terms); snap-through: rejected (infeasible trial)
+Gradient: state   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Initial trajectory: rms 17.18 mm, max 27.47 mm, contact 39 % of the steps, snaps 0
+[P1_rates_state_lbfgs_s2 it 001] rms=  15.204 mm  rollouts=7  snaps=0  pen=0.000 mm  t=   77.2s  alpha=32 ls=6
+[P1_rates_state_lbfgs_s2 it 002] rms=   8.137 mm  rollouts=8  snaps=0  pen=0.011 mm  t=   89.5s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 003] rms=   6.232 mm  rollouts=9  snaps=0  pen=0.000 mm  t=  101.4s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 004] rms=   5.511 mm  rollouts=10  snaps=0  pen=0.000 mm  t=  113.5s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 005] rms=   1.483 mm  rollouts=11  snaps=0  pen=0.000 mm  t=  125.8s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 006] rms=   1.144 mm  rollouts=12  snaps=0  pen=0.000 mm  t=  138.0s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 007] rms=   0.939 mm  rollouts=13  snaps=0  pen=0.000 mm  t=  150.2s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 008] rms=   0.685 mm  rollouts=14  snaps=0  pen=0.000 mm  t=  162.3s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 009] rms=   0.534 mm  rollouts=15  snaps=0  pen=0.000 mm  t=  174.4s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 010] rms=   0.403 mm  rollouts=16  snaps=0  pen=0.000 mm  t=  186.6s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 011] rms=   0.355 mm  rollouts=17  snaps=0  pen=0.000 mm  t=  198.6s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 012] rms=   0.331 mm  rollouts=18  snaps=0  pen=0.000 mm  t=  210.8s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 013] rms=   0.295 mm  rollouts=19  snaps=0  pen=0.000 mm  t=  222.9s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 014] rms=   0.274 mm  rollouts=20  snaps=0  pen=0.000 mm  t=  235.0s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 015] rms=   0.246 mm  rollouts=21  snaps=0  pen=0.000 mm  t=  247.0s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 016] rms=   0.232 mm  rollouts=22  snaps=0  pen=0.000 mm  t=  259.1s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 017] rms=   0.210 mm  rollouts=23  snaps=0  pen=0.000 mm  t=  271.3s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 018] rms=   0.192 mm  rollouts=24  snaps=0  pen=0.000 mm  t=  283.5s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 019] rms=   0.175 mm  rollouts=25  snaps=0  pen=0.001 mm  t=  295.8s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 020] rms=   0.164 mm  rollouts=26  snaps=0  pen=0.001 mm  t=  308.1s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 021] rms=   0.155 mm  rollouts=27  snaps=0  pen=0.002 mm  t=  320.3s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 022] rms=   0.141 mm  rollouts=28  snaps=0  pen=0.003 mm  t=  332.5s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 023] rms=   0.125 mm  rollouts=29  snaps=0  pen=0.003 mm  t=  344.6s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 024] rms=   0.117 mm  rollouts=30  snaps=0  pen=0.003 mm  t=  356.9s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 025] rms=   0.113 mm  rollouts=31  snaps=0  pen=0.003 mm  t=  369.1s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 026] rms=   0.112 mm  rollouts=33  snaps=0  pen=0.003 mm  t=  393.5s  alpha=0.264 ls=2
+[P1_rates_state_lbfgs_s2 it 027] rms=   0.108 mm  rollouts=34  snaps=0  pen=0.003 mm  t=  405.8s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2 it 028] rms=   0.100 mm  rollouts=35  snaps=0  pen=0.003 mm  t=  418.0s  alpha=1 ls=1
+[P1_rates_state_lbfgs_s2] stopped: rms 0.0901 mm <= stop_rms 0.1 mm
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-081935-P1_rates_state_lbfgs_s2/P1_rates_state_lbfgs_s2_path.{pdf,svg}  3.50 x 4.38 in (88.9 x 111.3 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-081935-P1_rates_state_lbfgs_s2/P1_rates_state_lbfgs_s2_error.{pdf,svg}  3.50 x 1.49 in (88.9 x 37.8 mm), font: Liberation Serif
+Saved 200-frame animation to /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-081935-P1_rates_state_lbfgs_s2/P1_rates_state_lbfgs_s2.gif
+[tro_style] /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-081935-P1_rates_state_lbfgs_s2/P1_rates_state_lbfgs_s2_rms.{pdf,svg}  3.50 x 1.78 in (88.9 x 45.3 mm), font: Liberation Serif
+Run summary -> /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-081935-P1_rates_state_lbfgs_s2/summary.json  (finished)
+[P1_rates_state_lbfgs_s2] final rms 0.090 mm (best 0.090 mm), solved True, 28 updates, 36 rollouts, 0 failed (0 by the snap rule), 430s -> /home/sciarm20/neural-control/experiments/path_peg_3d/runs/20261125-081935-P1_rates_state_lbfgs_s2

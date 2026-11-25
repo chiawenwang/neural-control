@@ -1,0 +1,9 @@
+[check P1] initial rms 17.41 mm, P = 4678, Newton tol 1.27e-07
+   gradient cost: state 50 ms / 200 solves; proxy 50 ms / 200 solves
+   dir 0: fd +3.815139e-03  state +3.815139e-03 (rel err 3.27e-09)  proxy +2.922728e-03 (rel err 2.34e-01)
+   dir 1: fd -1.371107e-03  state -1.371107e-03 (rel err 1.50e-09)  proxy -1.176608e-03 (rel err 1.42e-01)
+   dir 2: fd +6.323651e-04  state +6.323651e-04 (rel err 1.00e-11)  proxy +5.591085e-04 (rel err 1.16e-01)
+   dir 3: fd -1.795765e-03  state -1.795765e-03 (rel err 5.43e-09)  proxy -2.066804e-03 (rel err 1.51e-01)
+   state: median rel err 2.39e-09, max 5.43e-09;  proxy median 1.46e-01
+   proxy vs state per rate: first contact at step 125; median rel diff before 0.32627200264130357, after 8.077e-02, last rate 0.00e+00
+   -> runs/path_p1/checks/check_P1_net_s0.json
