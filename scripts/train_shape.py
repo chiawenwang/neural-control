@@ -31,6 +31,8 @@ Usage
     python scripts/train_shape.py targets --config $C --out DIR [--targets P1]
     python scripts/train_shape.py check   --config $C --out DIR --target P1 [--param rates]
     python scripts/train_shape.py train   --config $C --out DIR --target P1 --optimizer lbfgs --seed 0
+    python scripts/train_shape.py sweep   --config $C --out DIR --targets P1          # Adam-rate sweep jobs
+    python scripts/train_shape.py sweep   --config $C --out DIR --targets P1 --pick   # -> DIR/adam_lr.json
     python scripts/train_shape.py jobs    --config $C --out DIR --targets P1 --seeds 0 1 2 3 4
     python scripts/train_shape.py report  --config $C --out DIR
     python scripts/train_shape.py figure  --config $C --npz RUN.npz [--view 22 -58] [--snapshots 3]
@@ -294,9 +296,87 @@ def rates_of(U, u0, k_end, M):
     return np.diff(V, axis=0) * M
 
 
-def initial_parameters(cfg, param, u0, k_end, M, U_ref, seed, init):
+def peg_sides(env, X):
+    """Per peg, the unit vector from its axis to the closest rod point (x-z plane):
+    which side of the peg the rod passes."""
+    out = []
+    for p in T.pegs_of(env):
+        v = X[:, [0, 2]] - np.array([p.cx, p.cz])
+        i = int(np.argmin(np.linalg.norm(v, axis=1)))
+        out.append(v[i] / max(np.linalg.norm(v[i]), 1e-12))
+    return out
+
+
+def calibrated_init(cfg, out_dir, target, seed, env, checkpoint, U_ref, target_shape, nodes, u0):
+    """The common initialization of (target, seed), calibrated and cached.
+
+    Direction: ``initial_commands`` (seeded).  Amplitude: a factor ``c`` on the
+    perturbation, adjusted until the initial shape RMS lies in
+    ``task.shape_init.rms_band`` (aim: its middle), by the secant-like update
+    ``c <- c * aim / rms`` on rollouts with the pegs.  Accepted only if the
+    rollout is admissible (converged, stable, in the workspace), has no snap,
+    passes every peg on the same side as the target and -- with
+    ``task.shape_init.require_contact`` (default, as in the RSS paper) --
+    ends touching every peg; otherwise the next
+    direction is drawn (``seed + 1000 * attempt``).  Cached in
+    OUT/inits/<target>_s<seed>.npz/.json, so every method of this (target,
+    seed) starts from the same commands.
+    """
+    d = Path(out_dir) / "inits"
+    f = d / f"{target}_s{seed}.json"
+    if f.exists():
+        rec = json.load(open(f))
+        return np.load(f.with_suffix(".npz"))["U_init"], rec
+    si = (cfg.get("task") or {}).get("shape_init") or {}
+    lo, hi = (float(v) for v in si.get("rms_band", [0.03, 0.05]))
+    aim = 0.5 * (lo + hi)
+    need_contact = bool(si.get("require_contact", True))
+    k_end = len(u0) // 2
+    ws = workspace_bounds(cfg, len(u0) - k_end)
+    side_t = peg_sides(env, target_shape)
+    tried = []
+    for attempt in range(12):
+        U_unit, pert = initial_commands(cfg, U_ref, seed + 1000 * attempt)
+        P = U_unit - U_ref
+        c = 1.0
+        for it in range(10):
+            U = U_ref + c * P
+            res = T.rollout(env, checkpoint, U, keep_J="last")
+            wsv = T.workspace_violation(U, k_end, ws)
+            row = {"attempt": attempt, "c": c, "ok": res["ok"], "reason": res["reason"],
+                   "snaps": res["snaps"], "ws_violation": wsv}
+            if not res["ok"] or wsv > 1e-9 or res["snaps"]:
+                tried.append(row)
+                c *= 0.7                       # too far: shrink and retry
+                continue
+            X = env.positions(res["q_list"][-1])
+            rms = float(np.sqrt(np.mean(np.sum((X[nodes] - target_shape[nodes]) ** 2, axis=1))))
+            same = all(float(a @ b) > 0 for a, b in zip(side_t, peg_sides(env, X)))
+            touch = all(res.get("final_touching") or [True])
+            row.update(rms=rms, same_side=same, touching=touch)
+            tried.append(row)
+            if lo <= rms <= hi and same and (touch or not need_contact):
+                rec = {"target": target, "seed": seed, "attempt": attempt, "scale": c, "rms": rms,
+                       "rms_band": [lo, hi], **pert, "final_touching": res.get("final_touching"),
+                       "onset": res["onset"], "max_penetration": res["max_penetration"], "tried": tried}
+                d.mkdir(parents=True, exist_ok=True)
+                np.savez_compressed(f.with_suffix(".npz"), U_init=U)
+                json.dump(rec, open(f, "w"), indent=1, default=_json_default)
+                return U, rec
+            if not same or (lo <= rms <= hi and need_contact and not touch):
+                break                          # wrong side / off the pegs: a new direction
+            c *= aim / max(rms, 1e-6)
+    raise SystemExit(f"no admissible initialization in the band {lo * 1e3:.0f}-{hi * 1e3:.0f} mm "
+                     f"for {target}, seed {seed}: {tried[-3:]}")
+
+
+def initial_parameters(cfg, param, u0, k_end, M, U_ref, seed, init, calib=None):
     if init == "designed":
-        U_init, pert = initial_commands(cfg, U_ref, seed)
+        if calib is not None:
+            U_init, rec = calib
+            pert = {"calibration": {k: rec[k] for k in ("attempt", "scale", "rms", "rms_band")}}
+        else:
+            U_init, pert = initial_commands(cfg, U_ref, seed)
         xi0, fit = param.from_rates(rates_of(U_init, u0, k_end, M))
         return xi0, {"init": "designed", **pert, **fit}
     if init == "random":
@@ -321,7 +401,12 @@ def setup(args, cfg):
     seed = getattr(args, "seed", 0)
     param = T.make_parameterization(cfg.train.param, M, k, hidden=int(cfg.train.get("hidden", 64)),
                                     seed=seed)
-    xi0, init_info = initial_parameters(cfg, param, u0, k_end, M, U_ref, seed, cfg.train.init)
+    nodes = T.free_nodes(env_eval)
+    calib = None
+    if cfg.train.init == "designed":
+        calib = calibrated_init(cfg, args.out, args.target, seed, env_eval, cp_eval, U_ref,
+                                target_shape, nodes, u0)
+    xi0, init_info = initial_parameters(cfg, param, u0, k_end, M, U_ref, seed, cfg.train.init, calib)
     return dict(env=env, checkpoint=checkpoint, env_eval=env_eval, cp_eval=cp_eval,
                 target_shape=target_shape, U_ref=U_ref, target_rec=target_rec, u0=u0, k_end=k_end,
                 k=k, M=M, param=param, xi0=xi0, init_info=init_info, nodes=T.free_nodes(env_eval),
@@ -373,7 +458,7 @@ def cmd_train(args):
     S = setup(args, cfg)
     env = S["env"]
     variant = "_nopegs" if args.train_without_pegs else ""
-    name = f"{args.target}_{tr.param}_{gm}_{optimizer}{variant}_s{args.seed}"
+    name = f"{args.target}_{tr.param}_{gm}_{optimizer}{variant}{args.tag}_s{args.seed}"
     run = RunLogger(cfg, env=env, root=_ROOT, tag=name,
                     enabled=bool((cfg.get("output") or {}).get("run_log", True)))
     out = Path(args.out)
@@ -707,6 +792,11 @@ def cmd_jobs(args):
     out = Path(args.out)
     cfg = experiment_config(args.config)
     names = check_names(args.targets, target_paths(cfg))
+    lr_file = out / "adam_lr.json"
+    adam_lr = json.load(open(lr_file))["lr"] if lr_file.exists() else None
+    if adam_lr is None and "adam" in args.optimizers:
+        print(f"# NOTE: no {lr_file} -- run the sweep first (sweep, then sweep --pick); "
+              "the Adam jobs below use train.adam.lr of the config")
     print(f"mkdir -p {out}/logs")
     for t in names:
         for gm in args.grad_methods:
@@ -715,8 +805,60 @@ def cmd_jobs(args):
                     name = f"{t}_{args.param}_{gm}_{o}{'_nopegs' if args.train_without_pegs else ''}_s{s}"
                     print(f"python scripts/train_shape.py train --config {args.config} --out {out} "
                           f"--target {t} --param {args.param} --grad-method {gm} --optimizer {o} --seed {s}"
+                          + (f" --lr {adam_lr:g}" if (o == "adam" and adam_lr is not None) else "")
                           + (" --train-without-pegs" if args.train_without_pegs else "")
                           + f" > {out}/logs/{name}.log 2>&1")
+
+
+#: Adam rates of the sweep (paper Sec. VII-A: the rate is chosen by a sweep on
+#: the first seed of each task).
+SWEEP_LRS = (1e-4, 3e-4, 1e-3, 3e-3, 1e-2)
+
+
+def cmd_sweep(args):
+    """The Adam-rate sweep (print the jobs) or its decision (``--pick``).
+
+    Protocol, fixed before the runs: seed 0 of each target, the frozen tangent
+    with Adam (the baseline's own optimizer; RSS paper), the full budget, the
+    rates SWEEP_LRS.  Rule: the rate at which the most targets are solved;
+    ties go to the lower median final RMS, then to the smaller rate.  The
+    chosen rate is written to OUT/adam_lr.json and used by ``jobs`` for every
+    Adam run (both gradients).  The sweep runs live in OUT/sweep.
+    """
+    out = Path(args.out)
+    sw = out / "sweep"
+    cfg = experiment_config(args.config)
+    names = check_names(args.targets, target_paths(cfg))
+    if not args.pick:
+        print(f"mkdir -p {sw}/logs && cp -r {out}/targets {out}/inits {sw}/ 2>/dev/null; true")
+        for t in names:
+            for lr in SWEEP_LRS:
+                tag = f"_lr{lr:g}"
+                print(f"python scripts/train_shape.py train --config {args.config} --out {sw} --target {t} "
+                      f"--param {args.param} --grad-method {args.grad_method} --optimizer adam --lr {lr:g} "
+                      f"--tag {tag} --seed 0 > {sw}/logs/{t}_{args.grad_method}_adam{tag}_s0.log 2>&1")
+        return
+    runs = [r for r in load_runs(sw) if r["optimizer"] == "adam" and r["grad_method"] == args.grad_method
+            and r["target_name"] in names]
+    rows = []
+    for lr in SWEEP_LRS:
+        R = [r for r in runs if abs(r["optimizer_settings"]["lr"] - lr) <= 1e-12 * max(lr, 1)]
+        if not R:
+            continue
+        fr = [r["final_rms"] if r["final_rms"] is not None else np.inf for r in R]
+        rows.append({"lr": lr, "runs": len(R), "solved": int(sum(r["solved"] for r in R)),
+                     "median_final_rms": float(np.median(fr)), "failures": int(sum(r["failures"] for r in R))})
+    if not rows:
+        raise SystemExit(f"no sweep runs in {sw}")
+    best = sorted(rows, key=lambda r: (-r["solved"], r["median_final_rms"], r["lr"]))[0]
+    for r in rows:
+        print(f"lr {r['lr']:g}: {r['solved']}/{r['runs']} solved, median final rms "
+              f"{r['median_final_rms'] * 1e3:.3f} mm, {r['failures']} failed rollouts"
+              + ("   <- chosen" if r is best else ""))
+    json.dump({"lr": best["lr"], "rule": "most solved, then lower median final rms, then smaller rate",
+               "grad_method": args.grad_method, "seed": 0, "rows": rows},
+              open(out / "adam_lr.json", "w"), indent=1)
+    print(f"-> {out / 'adam_lr.json'}")
 
 
 def load_runs(out):
@@ -791,14 +933,18 @@ def report(out, config=None):
 # ---------------------------------------------------------------- main
 
 def main():
-    cmds = ("train", "targets", "check", "jobs", "report", "figure")
+    cmds = ("train", "targets", "check", "jobs", "sweep", "report", "figure")
     argv = sys.argv[1:]
     cmd = argv.pop(0) if argv and argv[0] in cmds else "train"
     ap = argparse.ArgumentParser(description=f"3D shape formation against pegs ({cmd})")
     ap.add_argument("--config", default=str(DEFAULT_CONFIG))
     ap.add_argument("--out", required=cmd != "figure", help="experiment directory (targets/ lives in it)")
-    if cmd in ("targets", "jobs"):
+    if cmd in ("targets", "jobs", "sweep"):
         ap.add_argument("--targets", nargs="+", default=None)
+    if cmd == "sweep":
+        ap.add_argument("--param", choices=T.PARAMETERIZATIONS, default="net")
+        ap.add_argument("--grad-method", dest="grad_method", choices=GRAD_METHODS, default="proxy")
+        ap.add_argument("--pick", action="store_true", help="decide from the finished sweep runs")
     if cmd == "jobs":
         ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
         ap.add_argument("--optimizers", nargs="+", choices=T.OPTIMIZERS, default=list(T.OPTIMIZERS))
@@ -821,6 +967,7 @@ def main():
         ap.add_argument("--workspace", choices=("reject", "record"), default=None)
         ap.add_argument("--train-without-pegs", action="store_true",
                         help="'No obstacles' baseline: train without the pegs, evaluate with them")
+        ap.add_argument("--tag", default="", help="suffix of the run name (e.g. _lr1e-3 in a sweep)")
     if cmd == "check":
         ap.add_argument("--dirs", type=int, default=4)
         ap.add_argument("--h", type=float, default=1e-5, help="central-difference step in xi")
@@ -834,7 +981,7 @@ def main():
         ap.add_argument("--workspace", choices=("auto", "fit", "clip", "off"), default="off")
         ap.add_argument("--no-title", action="store_true")
     args = ap.parse_args(argv)
-    {"targets": cmd_targets, "check": cmd_check, "jobs": cmd_jobs, "figure": cmd_figure,
+    {"targets": cmd_targets, "check": cmd_check, "jobs": cmd_jobs, "sweep": cmd_sweep, "figure": cmd_figure,
      "report": lambda a: report(a.out, a.config), "train": cmd_train}[cmd](args)
 
 

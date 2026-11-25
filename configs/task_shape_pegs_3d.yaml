@@ -57,9 +57,14 @@ task:
   # target plus lambda * e + sin(pi lambda) * b on the gripper, e and b drawn
   # per seed from N(0, scale^2); the trajectory is fitted to it. One per
   # (target, seed), shared by every method. Scales: position [m], tangent
-  # angles [rad], yaw [rad]. PROVISIONAL -- to be fixed before the runs.
+  # angles [rad], yaw [rad] -- they set the direction's proportions; the
+  # amplitude is calibrated so that the initial RMS is in rms_band, the rod
+  # passes every peg on the target's side, and the motion is admissible
+  # without a snap (train_shape.calibrated_init, cached in OUT/inits/).
   shape_init:
     seed_base: 1000
+    rms_band: [0.03, 0.05]     # [m] initial shape RMS the perturbation is scaled into (RSS: 32-52 mm)
+    require_contact: true      # the initial trajectory must end touching every peg (RSS)
     end_pos: 0.02
     end_ang: 0.05
     end_yaw: 0.05
@@ -102,6 +107,7 @@ newton:
   max_substeps: 64
   stability_check: true
   snap_rule: true
+  predictor: tangent            # first-order predictor of each step's Newton start
 train:
   grad_method: state            # state (ours) | proxy (frozen tangent baseline)
   optimizer: adam               # adam | lbfgs (RSS protocol; --optimizer overrides)

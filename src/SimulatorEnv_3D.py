@@ -434,6 +434,9 @@ class SimulatorEnv_3D:
             self.q[self.n_pos:] = init_yaw
 
         self.u = np.zeros_like(self.q)
+        self._last_J = None
+        if hasattr(self.energy, "psi_ref"):
+            self.energy.psi_ref = None                  # principal branch until the first commit
         self.ctime = 0.0
         self.current_step = 0
         self.lamda = 0.0
@@ -473,6 +476,11 @@ class SimulatorEnv_3D:
         if res["snap"]:
             self.n_snaps += 1
         self.u_prev = control.copy()
+        # Hessian of the committed equilibrium, for newton.predictor: tangent
+        # (continuation.tangent_prediction); only when it is a stable one.
+        self._last_J = res["J"] if (flag > 0 and res["stable"] is not False) else None
+        if flag > 0 and hasattr(self.energy, "commit_branch"):
+            self.energy.commit_branch(res["q"])      # holonomy branch of the committed state
         return {
             "converged": (flag > 0),
             "control": control,
@@ -560,6 +568,8 @@ class SimulatorEnv_3D:
             "current_step": self.current_step,
             "lamda": self.lamda,
             "u_prev": None if self.u_prev is None else self.u_prev.copy(),
+            "last_J": None if getattr(self, "_last_J", None) is None else self._last_J.copy(),
+            "psi_ref": getattr(self.energy, "psi_ref", None),
         }
         return state
 
@@ -572,6 +582,10 @@ class SimulatorEnv_3D:
         self.lamda = state["lamda"]
         u_prev = state.get("u_prev")
         self.u_prev = None if u_prev is None else np.asarray(u_prev, dtype=float).copy()
+        J = state.get("last_J")
+        self._last_J = None if J is None else np.asarray(J, dtype=float).copy()
+        if hasattr(self.energy, "psi_ref"):
+            self.energy.psi_ref = state.get("psi_ref")
 
     def render(self, saveimg=False, show=True,
                xlim=None, ylim=None, zlim=None):

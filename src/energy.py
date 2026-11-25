@@ -539,18 +539,44 @@ class DERElasticEnergy3DTwist(RodEnergy):
 
     # ---------- the twist term ----------
 
+    #: Branch reference of the holonomy (paper Sec. VI-A): ``rodframes.holonomy``
+    #: is an angle on (-pi, pi]; the energy uses the 2 pi branch closest to the
+    #: holonomy of the last committed equilibrium, so that Phi stays continuous
+    #: along a rollout even where H crosses +-pi.  None (after a reset): the
+    #: principal branch.  The environment sets it at every committed step
+    #: (:meth:`commit_branch`) and saves it with its state.
+    psi_ref = None
+
+    def lift(self, H):
+        """``H`` moved by a multiple of 2 pi to the branch closest to ``psi_ref``."""
+        if self.psi_ref is None:
+            return float(H)
+        return float(H) + 2.0 * np.pi * round((self.psi_ref - float(H)) / (2.0 * np.pi))
+
+    def holonomy(self, q):
+        """The lifted holonomy ``Psi`` of the centerline in ``q``."""
+        from rodframes import holonomy
+        return self.lift(holonomy(self.split(q)[0]))
+
+    def commit_branch(self, q):
+        """Make the (lifted) holonomy of the committed state the branch reference."""
+        self.psi_ref = self.holonomy(q)
+
     def total_twist(self, q):
         """``Phi``: the rod's total twist, in radians."""
-        from rodframes import holonomy
         pos, yaw = self.split(q)
-        return float(yaw[1] - yaw[0] - holonomy(pos))
+        return float(yaw[1] - yaw[0] - self.holonomy(q))
 
     def _twist_terms(self, q, need_hess=True):
-        """``(Phi, dH/dx, d2H/dx2)`` -- the pieces every caller below needs."""
+        """``(Phi, dH/dx, d2H/dx2)`` -- the pieces every caller below needs.
+
+        The lift is a constant shift of ``H``, so its derivatives are those
+        of the principal value.
+        """
         from rodframes import holonomy_grad_hess
         pos, yaw = self.split(q)
         H, gH, HH = holonomy_grad_hess(pos, need_hess=need_hess)
-        return float(yaw[1] - yaw[0] - H), gH, HH
+        return float(yaw[1] - yaw[0] - self.lift(H)), gH, HH
 
     # ---------- RodEnergy interface ----------
 

@@ -295,6 +295,8 @@ task:
   # the gripper, e and b ~ N(0, scale^2) drawn per seed (seed_base + seed).
   shape_init:
     seed_base: 1000
+    rms_band: [0.03, 0.05]     # [m] initial shape RMS the perturbation is scaled into (RSS: 32-52 mm)
+    require_contact: true      # the initial trajectory must end touching every peg (RSS)
     end_pos: 0.02              # [m]
     end_ang: 0.05              # [rad] theta, phi
     end_yaw: 0.05              # [rad]
@@ -523,6 +525,11 @@ newton:
   # clamped nodes plus snap_disp_eps rod lengths. On the twist example a steep
   # but continuous response (buckling onset) stays below 13x and 0.03 m, an
   # arch flipping over reaches 90-470x and 0.4-0.6 m.
+  predictor: none             # none: Newton starts from the previous equilibrium (with the new
+                              # boundary); tangent: from x_prev + S dx_b, the first-order
+                              # prediction along the branch (continuation.tangent_prediction),
+                              # falling back to the plain start if that does not converge
+                              # to a stable state. Same equilibrium, fewer iterations.
   snap_disp_ratio: 10.0       # kappa of eq. (23)
   snap_disp_eps: 0.05         # epsilon of eq. (23), as a fraction of rod_length
 

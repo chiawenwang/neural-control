@@ -6,7 +6,7 @@ This is the optimizer side of the shape-formation experiment
 that the same code trains
 
     * ``NetRates``    the network of the paper (1-64-64-n_u, tanh), float64,
-                      ``xi`` = its weights (needs torch), and
+                      ``xi`` = its weights (NumPy, PyTorch's layout and init), and
     * ``DirectRates`` no network, ``xi`` = the rates themselves (the "direct
                       rates" baseline; numpy only).
 
@@ -74,89 +74,98 @@ class DirectRates:
 
 
 class NetRates:
-    """The network of the paper: ``lambda -> rate``, 1-hidden-hidden-k, tanh, float64.
+    """The network of the paper, ``lambda -> rate``: 1-hidden-hidden-k, tanh, float64.
 
-    The input is ``lambda = k / M`` for the rate of step k (k = 0..M-1), as in
+    Written in NumPy (forward pass and its vector-Jacobian product by hand),
+    so the pipeline needs no PyTorch.  Layout and initialization are those of
+    ``torch.nn.Sequential(Linear(1,h), Tanh(), Linear(h,h), Tanh(), Linear(h,k))``:
+    ``xi = [W1 (h,1), b1, W2 (h,h), b2, W3 (k,h), b3]`` row-major, as
+    ``parameters_to_vector`` orders them, and every weight and bias of a layer
+    with ``fan_in`` inputs drawn from U(-1/sqrt(fan_in), 1/sqrt(fan_in))
+    (PyTorch's default), here from ``numpy.random.default_rng(seed)``.  The
+    input of the rate of step k (k = 0..M-1) is ``lambda = k / M``, as in
     neural_control.rollout.
     """
 
     kind = "net"
 
     def __init__(self, M, k, hidden=64, seed=0):
-        import torch
-        import torch.nn as nn
-        self.torch = torch
-        torch.manual_seed(int(seed))
-        self.M, self.k = int(M), int(k)
-        self.net = nn.Sequential(nn.Linear(1, hidden), nn.Tanh(), nn.Linear(hidden, hidden),
-                                 nn.Tanh(), nn.Linear(hidden, k)).double()
-        self.params = [p for p in self.net.parameters()]
-        self.P = int(sum(p.numel() for p in self.params))
-        self.lam = torch.arange(self.M, dtype=torch.float64).unsqueeze(1) / self.M
+        self.M, self.k, self.h = int(M), int(k), int(hidden)
+        h = self.h
+        self.shapes = [(h, 1), (h,), (h, h), (h,), (k, h), (k,)]
+        self.sizes = [int(np.prod(s)) for s in self.shapes]
+        self.P = int(sum(self.sizes))
+        rng = np.random.default_rng(int(seed))
+        parts = []
+        for (shape, fan_in) in zip(self.shapes, (1, 1, h, h, h, h)):
+            b = 1.0 / np.sqrt(fan_in)
+            parts.append(rng.uniform(-b, b, size=shape).reshape(-1))
+        self._xi = np.concatenate(parts)
+        self.lam = (np.arange(self.M, dtype=float) / self.M)[:, None]
 
     def get(self):
-        return self.torch.nn.utils.parameters_to_vector(self.params).detach().numpy().copy()
+        return self._xi.copy()
 
-    def set(self, xi):
-        self.torch.nn.utils.vector_to_parameters(
-            self.torch.as_tensor(np.asarray(xi, dtype=float), dtype=self.torch.float64), self.params)
+    def unpack(self, xi):
+        xi = np.asarray(xi, dtype=float)
+        out, i = [], 0
+        for shape, n in zip(self.shapes, self.sizes):
+            out.append(xi[i:i + n].reshape(shape))
+            i += n
+        return out
+
+    def _forward(self, xi):
+        W1, b1, W2, b2, W3, b3 = self.unpack(xi)
+        h1 = np.tanh(self.lam @ W1.T + b1)
+        h2 = np.tanh(h1 @ W2.T + b2)
+        return h1, h2, h2 @ W3.T + b3
 
     def rates(self, xi):
-        self.set(xi)
-        with self.torch.no_grad():
-            return self.net(self.lam).numpy().copy()
+        return self._forward(xi)[2]
 
     def vjp(self, xi, G):
-        torch = self.torch
-        self.set(xi)
-        out = self.net(self.lam)
-        grads = torch.autograd.grad(out, self.params,
-                                    grad_outputs=torch.as_tensor(np.asarray(G, float)))
-        return torch.cat([g.reshape(-1) for g in grads]).detach().numpy().copy()
+        """``dL/dxi`` from ``G = dL/d(rates)`` (M, k): backpropagation through the MLP."""
+        W1, b1, W2, b2, W3, b3 = self.unpack(xi)
+        h1, h2, _ = self._forward(xi)
+        G = np.asarray(G, dtype=float)
+        dW3, db3 = G.T @ h2, G.sum(0)
+        dz2 = (G @ W3) * (1.0 - h2 * h2)
+        dW2, db2 = dz2.T @ h1, dz2.sum(0)
+        dz1 = (dz2 @ W2) * (1.0 - h1 * h1)
+        dW1, db1 = dz1.T @ self.lam, dz1.sum(0)
+        return np.concatenate([a.reshape(-1) for a in (dW1, db1, dW2, db2, dW3, db3)])
 
-    def from_rates(self, R, iters=4000, lr=1e-2, polish=500):
+    def from_rates(self, R, maxiter=20000):
         """Fit the network so that its *integrated* command reproduces ``R``'s.
 
-        As neural_control.fit_policy: the loss is on the cumulative sum
-        ``dlam * cumsum(rates)`` (the pose offset), not on the rates, so that
-        errors do not pile up along the path.  Adam with cosine decay, then an
-        L-BFGS polish.  Returns ``(xi, info)``; ``fit_rms_pose`` is the RMS
-        pose error of the fit (m and rad mixed, as the rates are).
+        As neural_control.fit_policy: the loss is on the pose offsets
+        ``dlam * cumsum(rates)``, not on the rates, so that errors do not pile
+        up along the path; scaled per control so that metres and radians
+        weigh alike.  L-BFGS-B (scipy) from this network's initial weights.
+        Returns ``(xi, info)``; ``fit_rms_pose`` is the RMS pose error.
         """
-        torch = self.torch
+        from scipy.optimize import minimize
+        R = np.asarray(R, dtype=float)
         dlam = 1.0 / self.M
-        tgt = torch.as_tensor(dlam * np.cumsum(np.asarray(R, float), axis=0))
-        scale = float(tgt.abs().max()) + 1e-12
+        tgt = dlam * np.cumsum(R, axis=0)
+        scale = np.maximum(np.abs(tgt).max(axis=0), 1e-3)
+        n = tgt.size
 
-        def loss_fn():
-            u = dlam * torch.cumsum(self.net(self.lam), dim=0)
-            return (((u - tgt) / scale) ** 2).mean()
+        def fun(xi):
+            C = (dlam * np.cumsum(self.rates(xi), axis=0) - tgt) / scale
+            dC = 2.0 * C / scale / n
+            G = dlam * np.cumsum(dC[::-1], axis=0)[::-1]
+            return float(np.sum(C * C) / n), self.vjp(xi, G)
 
-        opt = torch.optim.Adam(self.params, lr=lr)
-        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, iters, eta_min=lr * 1e-2)
-        for _ in range(iters):
-            opt.zero_grad(set_to_none=True)
-            loss = loss_fn()
-            loss.backward()
-            opt.step()
-            sched.step()
-        if polish:
-            lb = torch.optim.LBFGS(self.params, lr=1.0, max_iter=polish, history_size=20,
-                                   line_search_fn="strong_wolfe", tolerance_grad=1e-14,
-                                   tolerance_change=1e-16)
-
-            def closure():
-                lb.zero_grad(set_to_none=True)
-                l_ = loss_fn()
-                l_.backward()
-                return l_
-            lb.step(closure)
-        with torch.no_grad():
-            u = dlam * torch.cumsum(self.net(self.lam), dim=0)
-            err = (u - tgt).numpy()
-        return self.get(), {"fit_rms_pose": float(np.sqrt(np.mean(err ** 2))),
-                            "fit_max_pos": float(np.abs(err[:, :3]).max()),
-                            "fit_max_ang": float(np.abs(err[:, 3:]).max())}
+        res = minimize(fun, self._xi, jac=True, method="L-BFGS-B",
+                       options={"maxiter": maxiter, "maxfun": 2 * maxiter, "ftol": 1e-20,
+                                "gtol": 1e-14, "maxcor": 30})
+        xi = res.x
+        err = dlam * np.cumsum(self.rates(xi), axis=0) - tgt
+        return xi.copy(), {"fit_rms_pose": float(np.sqrt(np.mean(err ** 2))),
+                           "fit_max_pos": float(np.abs(err[:, :3]).max()),
+                           "fit_max_ang": float(np.abs(err[:, 3:]).max()),
+                           "fit_iters": int(res.nit)}
 
 
 def make_parameterization(kind, M, k, hidden=64, seed=0):
@@ -239,7 +248,7 @@ def rollout(env, checkpoint, U, keep_J="last", record=False):
         X = env.positions(q)
         strain = np.abs(np.linalg.norm(np.diff(X, axis=0), axis=1) / env.deltaL - 1.0).max()
         out["max_strain"] = max(out["max_strain"], float(strain))
-        H = float(holonomy(X)) if getattr(env, "twist", False) else 0.0
+        H = float(env.energy.holonomy(q)) if getattr(env, "twist", False) else 0.0   # lifted
         out["max_abs_holonomy"] = max(out["max_abs_holonomy"], abs(H))
         for j, peg in enumerate(pegs):
             rep = peg.report(q)

@@ -139,6 +139,36 @@ def _follow_path(env, u_from, u_to, n, check, allow_snap):
             "snaps": snaps, "reason": ""}
 
 
+def tangent_prediction(env, control_node):
+    """First-order predictor of the next equilibrium (``newton.predictor: tangent``).
+
+    ``x_f ~ x_f,prev + S dx_b`` with ``S = -J_ff^{-1} J_fb`` at the committed
+    equilibrium (its Hessian ``env._last_J``, kept by the environment), i.e.
+    the interior follows the boundary along the tangent of the branch instead
+    of staying where it was.  Returns the plain warm start ``env.q`` when no
+    Hessian is available for the current state.  Newton then converges to the
+    same equilibrium of the branch from a closer start.
+    """
+    J = getattr(env, "_last_J", None)
+    if J is None:
+        return env.q
+    free, fixed = env.free_index, env.fixed_index
+    xb_new = control_node if env.boundary_rows is None else control_node[env.boundary_rows]
+    dxb = np.asarray(xb_new, dtype=float) - env.q[fixed]
+    J_ff = J[np.ix_(free, free)]
+    J_fb = J[np.ix_(free, fixed)]
+    try:
+        from scipy.linalg import cho_factor, cho_solve
+        dxf = -cho_solve(cho_factor(J_ff, lower=True, check_finite=False), J_fb @ dxb,
+                         check_finite=False)
+    except Exception:                                   # noqa: BLE001 -- not SPD: no prediction
+        return env.q
+    q = env.q.copy()
+    q[free] += dxf
+    q[fixed] = xb_new
+    return q
+
+
 def quasistatic_step(env, control, use_inertia=False):
     """Equilibrium at ``Gamma(control)``, reached along the pose path from ``env.u_prev``.
 
@@ -185,8 +215,20 @@ def quasistatic_step(env, control, use_inertia=False):
         return out
 
     node = env._control_node_from_pose(control)
-    q1, flag1, J1, ninfo1 = env._solve(env.q, node, use_inertia)
+    q_start = env.q
+    pred = quasi and cfg.get("predictor", "none") == "tangent"
+    if pred:
+        q_start = tangent_prediction(env, node)
+    q1, flag1, J1, ninfo1 = env._solve(q_start, node, use_inertia)
     stable1 = _stability(flag1, J1, env.free_index, check)
+    if pred and q_start is not env.q and not (flag1 > 0 and stable1 is not False):
+        # The predicted start did not give a stable equilibrium: fall back to
+        # the plain warm start before subdividing, so the predictor can only
+        # save iterations, never change what the stepping does otherwise.
+        it0 = int(ninfo1["iterations"])
+        q1, flag1, J1, ninfo1 = env._solve(env.q, node, use_inertia)
+        ninfo1 = dict(ninfo1, iterations=int(ninfo1["iterations"]) + it0)
+        stable1 = _stability(flag1, J1, env.free_index, check)
     out = {"q": q1, "flag": flag1, "J": J1, "newton": ninfo1, "substeps": 1,
            "newton_iterations": int(ninfo1["iterations"]), "stable": stable1,
            "snap": False, "snaps": [], "reason": ninfo1.get("reason", "")}

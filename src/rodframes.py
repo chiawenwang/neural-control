@@ -99,6 +99,19 @@ _UP = np.array([0.0, 0.0, 1.0])
 
 # --------------------------------------------------------------- primitives
 
+def _cross3(a, b):
+    """``np.cross`` of two 3-vectors, written out.
+
+    The same products in the same order as numpy's, so the same bits, without
+    numpy's axis handling -- which made ``np.cross`` about half the cost of a
+    rollout (it is called per node and per Newton iteration).  1-D 3-vectors
+    only; batched callers keep ``np.cross``.
+    """
+    a0, a1, a2 = float(a[0]), float(a[1]), float(a[2])
+    b0, b1, b2 = float(b[0]), float(b[1]), float(b[2])
+    return np.array([a1 * b2 - a2 * b1, a2 * b0 - a0 * b2, a0 * b1 - a1 * b0])
+
+
 def hat(v):
     """Skew-symmetric matrix with ``hat(v) @ w == cross(v, w)``."""
     return np.array([[0.0, -v[2], v[1]],
@@ -113,7 +126,7 @@ def parallel_transport(u, t_from, t_to):
     other; it is the unique rotation doing so that adds no twist about the
     tangent, which is what makes the Bishop frame twist-free.
     """
-    b = np.cross(t_from, t_to)
+    b = _cross3(t_from, t_to)
     nb = np.linalg.norm(b)
     if nb < _EPS:                      # tangents (anti)parallel: nothing to do
         return np.asarray(u, dtype=float).copy()
@@ -123,14 +136,14 @@ def parallel_transport(u, t_from, t_to):
     b = b / max(np.linalg.norm(b), _EPS)
     b = b - np.dot(b, t_to) * t_to
     b = b / max(np.linalg.norm(b), _EPS)
-    n_from = np.cross(t_from, b)
-    n_to = np.cross(t_to, b)
+    n_from = _cross3(t_from, b)
+    n_to = _cross3(t_to, b)
     return np.dot(u, t_from) * t_to + np.dot(u, n_from) * n_to + np.dot(u, b) * b
 
 
 def signed_angle(u, v, n):
     """Angle from ``u`` to ``v``, signed by the reference normal ``n``."""
-    w = np.cross(u, v)
+    w = _cross3(u, v)
     angle = np.arctan2(np.linalg.norm(w), float(np.dot(u, v)))
     return -angle if float(np.dot(n, w)) < 0.0 else angle
 
@@ -144,7 +157,7 @@ def tangents(pos):
 
 def curvature_binormal(te, tf):
     """``kb = 2 te x tf / (1 + te . tf)`` -- the discrete curvature binormal."""
-    return 2.0 * np.cross(te, tf) / (1.0 + float(np.dot(te, tf)))
+    return 2.0 * _cross3(te, tf) / (1.0 + float(np.dot(te, tf)))
 
 
 # ------------------------------------------------- the gripper's yaw reference
@@ -158,13 +171,13 @@ def gripper_director(t):
     tangent, where the control's own elevation angle is singular too.
     """
     t = np.asarray(t, dtype=float)
-    a = np.cross(_UP, t)
+    a = _cross3(_UP, t)
     na = np.linalg.norm(a)
     if na < _EPS:
         raise ValueError("gripper_director: tangent is vertical, the yaw "
                          "reference (and the control's elevation angle) is "
                          "singular there")
-    return np.cross(t, a / na)
+    return _cross3(t, a / na)
 
 
 def director_spin(t):
@@ -332,7 +345,7 @@ def psi_grad_hess(p0, p1, p2, need_hess=True):
     # -kb, so that scattering onto the nodes below lands on the paper's
     # +kb/(2|e^{i-1}|) and -kb/(2|e^i|); the sign is the orientation
     # convention of signed_angle, and check_twist.py pins it down.
-    kb = -2.0 * np.cross(te, tf) / chi
+    kb = -2.0 * _cross3(te, tf) / chi
 
     A = kb / (2.0 * ne)
     B = kb / (2.0 * nf)
