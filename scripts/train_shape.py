@@ -27,6 +27,18 @@ fitted; every method starts from the same one per (target, seed).
 
 Usage
 -----
+The whole batch of one target, in order (targets, gradient check, Adam-rate
+sweep, main runs and baselines in parallel, greedy, figures, verify, report):
+
+    bash scripts/run_shape_batch.sh P1 runs/shape_p1 <nproc>
+    bash scripts/run_shape_batch.sh P1 runs/smoke 2 "0" "--epochs 2"     # smoke test
+
+Baselines (paper Sec. VII-A, Table methods): ``--param rates`` (direct
+rates), ``--train-without-pegs`` (no obstacles), ``--param endpose --window W``
+with ``--optimizer lbfgs`` (end pose, tuned) or ``--aim --optimizer none``
+(end pose, aimed), the ``greedy`` command; ``--grad-method proxy`` (frozen
+tangent).  The single commands:
+
     C=configs/task_shape_pegs_3d.yaml
     python scripts/train_shape.py targets --config $C --out DIR [--targets P1]
     python scripts/train_shape.py check   --config $C --out DIR --target P1 [--param rates]
@@ -34,6 +46,8 @@ Usage
     python scripts/train_shape.py sweep   --config $C --out DIR --targets P1          # Adam-rate sweep jobs
     python scripts/train_shape.py sweep   --config $C --out DIR --targets P1 --pick   # -> DIR/adam_lr.json
     python scripts/train_shape.py jobs    --config $C --out DIR --targets P1 --seeds 0 1 2 3 4
+    python scripts/train_shape.py greedy  --config $C --out DIR --target P1           # after the main runs
+    python scripts/train_shape.py verify  --config $C --out DIR                       # every run complete
     python scripts/train_shape.py report  --config $C --out DIR
     python scripts/train_shape.py figure  --config $C --npz RUN.npz [--view 22 -58] [--snapshots 3]
 
@@ -190,7 +204,8 @@ def cmd_targets(args):
             touching_nodes.append(sorted(set(e.tolist()) | set((e + 1).tolist())))
         onset = [None if o is None else int(o) for o in res["onset"]]
         criteria = {
-            "start_clearance_ge_30mm": bool(min(start_clear) >= 0.03),
+            # rod SURFACE to peg surface, as stated in the paper (Sec. VII-A)
+            "start_clearance_ge_27mm": bool(min(start_clear) >= 0.027),
             "no_contact_first_30pct": bool(all(o is not None and o >= int(0.3 * M) for o in onset)),
             "both_touch_at_end": bool(all(res["final_touching"])),
             "max_penetration_le_0.5mm": bool(res["max_penetration"] <= 5e-4),
@@ -399,18 +414,32 @@ def setup(args, cfg):
     k = end_control_dim(env_dim(cfg), env_twist(cfg))
     M = env.Nsteps
     seed = getattr(args, "seed", 0)
-    param = T.make_parameterization(cfg.train.param, M, k, hidden=int(cfg.train.get("hidden", 64)),
-                                    seed=seed)
     nodes = T.free_nodes(env_eval)
     calib = None
-    if cfg.train.init == "designed":
+    if cfg.train.init == "designed" or cfg.train.param == "endpose":
         calib = calibrated_init(cfg, args.out, args.target, seed, env_eval, cp_eval, U_ref,
                                 target_shape, nodes, u0)
-    xi0, init_info = initial_parameters(cfg, param, u0, k_end, M, U_ref, seed, cfg.train.init, calib)
+    if cfg.train.param == "endpose":
+        # End pose only: the common initial trajectory with its final pose moved
+        # over its last `window` steps; aimed (--aim) at the designed end pose,
+        # or tuned by the optimizer from the initial trajectory's own end pose.
+        window = int(getattr(args, "window", 20) or 20)
+        param = T.EndPose(M, k, calib[0], u0, window)
+        aim = bool(getattr(args, "aim", False))
+        xi0 = param.aimed(np.asarray(target_rec["u_final"], float)) if aim else np.zeros(k)
+        init_info = {"init": "designed + end pose " + ("aimed" if aim else "offset 0"), "window": window,
+                     "calibration": {kk: calib[1][kk] for kk in ("attempt", "scale", "rms", "rms_band")},
+                     "aimed_offset": xi0.tolist() if aim else None}
+        label = f"endpose{window}" + ("aimed" if aim else "")
+    else:
+        param = T.make_parameterization(cfg.train.param, M, k, hidden=int(cfg.train.get("hidden", 64)),
+                                        seed=seed)
+        xi0, init_info = initial_parameters(cfg, param, u0, k_end, M, U_ref, seed, cfg.train.init, calib)
+        label = cfg.train.param
     return dict(env=env, checkpoint=checkpoint, env_eval=env_eval, cp_eval=cp_eval,
                 target_shape=target_shape, U_ref=U_ref, target_rec=target_rec, u0=u0, k_end=k_end,
-                k=k, M=M, param=param, xi0=xi0, init_info=init_info, nodes=T.free_nodes(env_eval),
-                ws=workspace_bounds(cfg, k))
+                k=k, M=M, param=param, xi0=xi0, init_info=init_info, nodes=nodes,
+                ws=workspace_bounds(cfg, k), label=label)
 
 
 def evaluation(S, xi, record=True):
@@ -458,7 +487,7 @@ def cmd_train(args):
     S = setup(args, cfg)
     env = S["env"]
     variant = "_nopegs" if args.train_without_pegs else ""
-    name = f"{args.target}_{tr.param}_{gm}_{optimizer}{variant}{args.tag}_s{args.seed}"
+    name = f"{args.target}_{S['label']}_{gm}_{optimizer}{variant}{args.tag}_s{args.seed}"
     run = RunLogger(cfg, env=env, root=_ROOT, tag=name,
                     enabled=bool((cfg.get("output") or {}).get("run_log", True)))
     out = Path(args.out)
@@ -468,7 +497,7 @@ def cmd_train(args):
     ocfg = opt_settings(cfg, optimizer)
 
     print(f"Task: 3D shape formation, target {args.target} -- {S['target_rec']['description']}")
-    print(f"Trajectory: {tr.param} (P = {S['param'].P}), init {S['init_info']['init']}"
+    print(f"Trajectory: {S['label']} (P = {S['param'].P}), init {S['init_info']['init']}"
           + (f" (fit rms {S['init_info'].get('fit_rms_pose', 0):.2e})" if tr.init == 'designed' else ""))
     print(f"Gradient: {gm}   Optimizer: {optimizer} {ocfg}")
     print(f"Stop: rms <= {float(tr.stop_rms) * 1e3:g} mm | {tr.epochs} updates | {tr.max_rollouts} rollouts "
@@ -499,7 +528,7 @@ def cmd_train(args):
 
     summary = {
         "task": "shape", "status": "done", "target_name": args.target, "config": str(args.config),
-        "param": tr.param, "grad_method": gm, "optimizer": optimizer, "optimizer_settings": ocfg,
+        "param": S["label"], "grad_method": gm, "optimizer": optimizer, "optimizer_settings": ocfg,
         "trained_without_pegs": bool(variant), "seed": args.seed, "P": int(S["param"].P),
         "init": S["init_info"], "nv": int(env.nv), "N": int(S["M"]), "n_free_nodes": int(len(S["nodes"])),
         "stop_rms": float(tr.stop_rms), "solve_rms": float(tr.solve_rms), "epochs_cap": int(tr.epochs),
@@ -513,6 +542,8 @@ def cmd_train(args):
         "init_rms": init_eval.get("rms"), "init_ok": init_eval["ok"],
         "init_onset": init_eval["res"]["onset"], "init_final_touching": init_eval["res"].get("final_touching"),
         "final_rms": fin.get("rms"), "final_loss": fin.get("loss"), "final_ok": fin["ok"],
+        # best_rms is measured in the TRAINING scene (without the pegs for the
+        # no-obstacles baseline); final_* and solved in the evaluation scene.
         "best_rms": None if ev_fn.best is None else ev_fn.best["rms"],
         "solved": solved, "admissible": adm, "admissibility": adm_checks,
         "final_snaps": fin["res"]["snaps"], "final_snap_steps": fin["res"]["snap_steps"],
@@ -582,6 +613,129 @@ def _json_default(o):
     if isinstance(o, (np.bool_,)):
         return bool(o)
     return str(o)
+
+
+# ---------------------------------------------------------------- greedy baseline
+
+def cmd_greedy(args):
+    """Greedy baseline (paper Sec. VII-A): a one-step horizon with the exact
+    per-step sensitivity.
+
+    From the initial equilibrium at u0, every step moves the gripper by the
+    increment that most lowers the task loss (mean squared error of the free
+    nodes) at the next equilibrium: a Levenberg-Marquardt direction of the
+    linearized shape map, bounded by the step cap, and the best of the trial
+    lengths ``greedy.alphas``, each a real quasi-static step
+    (src/greedy_control.py, schedule ``direct``).  The step cap is the largest
+    per-step pose change of our solutions (OUT/<target>_net_state_lbfgs_s*.npz;
+    positions in m, angles times ``greedy.angle_scale``), or ``--cap``.  It
+    stops when the trust radius collapses, the loss stalls, or after
+    ``--max-steps``.  Deterministic: one run per target.  The accepted
+    commands are then replayed on the evaluation scene, which gives the same
+    data as a training run (contact per step, snaps, penetration, figures).
+    """
+    from greedy_control import greedy_shape_control, DEFAULTS as GD
+    cfg = experiment_config(args.config)
+    env, cp = make_env(cfg)
+    target_shape, U_ref, trec = load_target(args.out, args.target, cfg, env)
+    u0 = initial_control(cfg)
+    k_end = len(u0) // 2
+    nodes = T.free_nodes(env)
+    o = dict(GD, **(cfg.get("greedy") or {}))
+    o.update(schedule="direct", reg=None, ref_final=None)
+    if args.max_steps is not None:
+        o["max_steps"] = int(args.max_steps)
+    cap_src = "--cap"
+    if args.cap is not None:
+        cap = float(args.cap)
+    else:
+        files = sorted(Path(args.out).glob(f"{args.target}_net_state_lbfgs_s*.npz"))
+        if files:
+            caps = []
+            for f in files:
+                D = np.diff(np.vstack([u0[None, :], np.load(f)["U_final"]]), axis=0)[:, k_end:]
+                D[:, 3:] *= float(o["angle_scale"])
+                caps.append(float(np.abs(D).max()))
+            cap, cap_src = max(caps), [f.name for f in files]
+        else:
+            cap, cap_src = float(o["step_cap"]), "greedy.step_cap (no state/L-BFGS runs found yet)"
+            print(f"NOTE: no {args.target}_net_state_lbfgs_s*.npz in {args.out}: the step cap is "
+                  f"greedy.step_cap = {cap:g}; run greedy after the main runs for the paper's bound")
+    o["step_cap"] = cap
+    cols = np.arange(k_end, len(u0))
+    print(f"Greedy on {args.target}: step cap {cap:.4g} (from {cap_src}), max steps {o['max_steps']}, "
+          f"alphas {o['alphas']}")
+    t0 = time.time()
+    res = greedy_shape_control(env, u0, env._last_J, lambda lam: target_shape, cols,
+                               angle_cols=cols[3:], opts=o, nodes=nodes,
+                               log=lambda m: print(m, flush=True), log_every=args.log_every)
+    t_run = time.time() - t0
+    U = np.asarray(res["u"])[1:]
+    name = f"{args.target}_greedy_state_greedy{args.tag}_s0"
+    out = Path(args.out)
+    if len(U) == 0:
+        raise SystemExit(f"[{name}] no step accepted ({res['stop']})")
+    rep = T.rollout(env, cp, U, keep_J="last", record=True)
+    ws = T.workspace_violation(U, k_end, workspace_bounds(cfg, len(cols)))
+    rep["ws_violation"] = ws
+    fin = {"U": U, "res": rep, "ok": rep["ok"]}
+    if rep["ok"]:
+        L, _, X = T.terminal_loss(env, rep["q_list"][-1], target_shape, nodes)
+        fin.update(loss=L, rms=float(np.sqrt(L)), shape=X,
+                   node_err=np.linalg.norm(X - target_shape, axis=1))
+        replay_dev = float(np.abs(env.positions(rep["q_list"][-1]) - env.positions(res["q"][-1])).max())
+    else:
+        replay_dev = None
+    adm, adm_checks = admissible(fin, cfg) if fin["ok"] else (False, {"all_steps_stable": False})
+    solved = bool(fin["ok"] and adm and fin["rms"] <= float(cfg.train.solve_rms))
+    rms_steps = np.asarray(res["rms_final"], float)
+    trials = np.asarray(res["trials"], float)
+    summary = {
+        "task": "shape", "status": "done", "target_name": args.target, "config": str(args.config),
+        "param": "greedy", "grad_method": "state", "optimizer": "greedy", "optimizer_settings": o,
+        "trained_without_pegs": False, "seed": 0, "P": 0, "init": {"init": "u0 (no trajectory)"},
+        "nv": int(env.nv), "N": int(env.Nsteps), "greedy_steps": int(len(U)), "step_cap_source": cap_src,
+        "stop": res["stop"], "train_time": t_run, "updates": int(len(U)),
+        "rollouts": float(np.sum(trials) / env.Nsteps), "env_steps": int(np.sum(trials)),
+        "evaluations": int(np.sum(trials)), "failures": int(sum(res["rejected"].values())),
+        "failure_reasons": [k for k, v in res["rejected"].items() if v], "rejected": res["rejected"],
+        "snap_trials": int(res["snap_trials"]),
+        "init_rms": float(rms_steps[0]), "init_ok": True,
+        "final_rms": fin.get("rms"), "final_loss": fin.get("loss"), "final_ok": fin["ok"],
+        "best_rms": float(np.nanmin(rms_steps)), "replay_max_deviation": replay_dev,
+        "solved": solved, "admissible": adm, "admissibility": adm_checks,
+        "final_snaps": rep["snaps"], "final_snap_steps": rep["snap_steps"],
+        "final_max_penetration": rep["max_penetration"], "final_max_strain": rep["max_strain"],
+        "final_max_abs_holonomy": rep["max_abs_holonomy"], "final_ws_violation": ws,
+        "final_onset": rep["onset"], "final_touching": rep.get("final_touching"),
+        "final_force": rep.get("final_force"), "snaps_total": rep["snaps"],
+        "iterates": [{"eval": i, "rms": float(r)} for i, r in enumerate(rms_steps)],
+        "evals": {"rms": rms_steps.tolist()},
+        "target": {kk: trec.get(kk) for kk in ("description", "du", "onset_step", "criteria_ok")},
+    }
+    arrays = {"target_shape": target_shape, "U_ref": U_ref, "U_final": U, "q_init": np.asarray(cp["q"]),
+              "q_traj": np.array(rep["q_list"]), "iter_rms": rms_steps,
+              "eval_rms": rms_steps, "eval_loss": rms_steps ** 2, "eval_ok": np.ones(len(rms_steps), bool),
+              "eval_rollouts": np.concatenate([[0.0], np.cumsum(trials[1:])]) / env.Nsteps,
+              "eval_time": np.linspace(0.0, t_run, len(rms_steps)),
+              "greedy_alpha": np.asarray(res["alpha"], float), "greedy_cap": np.asarray(res["cap"], float),
+              "greedy_snap": np.asarray(res["snap"], bool), "greedy_holonomy": np.asarray(res["holonomy"], float)}
+    for key, val in (rep.get("rec") or {}).items():
+        arrays[f"final_{key}"] = val
+    if fin["ok"]:
+        arrays["final_shape"] = fin["shape"]
+        arrays["final_node_err"] = fin["node_err"]
+    out.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(out / f"{name}.npz", **arrays)
+    json.dump(summary, open(out / f"{name}.json", "w"), indent=1, default=_json_default)
+    if fin["ok"]:
+        plot_shape_result(out / f"{name}_shape", target_shape, rep["q_list"][-1], env,
+                          f"{name}: rms {fin['rms'] * 1e3:.2f} mm", q_init=cp["q"])
+        plot_shape_error(target_shape, fin["shape"], nodes, out / f"{name}_error")
+    print(f"[{name}] {len(U)} steps ({res['stop']}), final rms "
+          f"{('%.3f mm' % (fin['rms'] * 1e3)) if fin['ok'] else 'n/a'}, solved {solved}, admissible {adm} "
+          f"{ {k: v for k, v in adm_checks.items() if not v} or ''}, snaps {rep['snaps']}, "
+          f"replay deviation {replay_dev}, {t_run:.0f}s -> {out}", flush=True)
 
 
 # ---------------------------------------------------------------- check (H1 and the proxy error)
@@ -789,25 +943,49 @@ def cmd_figure(args):
 # ---------------------------------------------------------------- jobs / report
 
 def cmd_jobs(args):
+    """Print the batch: the four main methods, and with ``--baselines`` the rest.
+
+    Main ({state, proxy} x {adam, lbfgs}, the network): one line per seed.
+    Baselines (state-based gradient): direct rates and no obstacles with
+    L-BFGS; end pose tuned (L-BFGS) and aimed (no optimization) over the last
+    20 and 60 steps -- per seed, since each starts from that seed's initial
+    trajectory.  Greedy is deterministic and its step cap comes from the
+    main L-BFGS runs, so it is printed last, to run after them.
+    """
     out = Path(args.out)
     cfg = experiment_config(args.config)
     names = check_names(args.targets, target_paths(cfg))
     lr_file = out / "adam_lr.json"
     adam_lr = json.load(open(lr_file))["lr"] if lr_file.exists() else None
-    if adam_lr is None and "adam" in args.optimizers:
-        print(f"# NOTE: no {lr_file} -- run the sweep first (sweep, then sweep --pick); "
-              "the Adam jobs below use train.adam.lr of the config")
-    print(f"mkdir -p {out}/logs")
+    base = f"python scripts/train_shape.py train --config {args.config} --out {out}"
+    lines = []
     for t in names:
         for gm in args.grad_methods:
             for o in args.optimizers:
                 for s in args.seeds:
                     name = f"{t}_{args.param}_{gm}_{o}{'_nopegs' if args.train_without_pegs else ''}_s{s}"
-                    print(f"python scripts/train_shape.py train --config {args.config} --out {out} "
-                          f"--target {t} --param {args.param} --grad-method {gm} --optimizer {o} --seed {s}"
-                          + (f" --lr {adam_lr:g}" if (o == "adam" and adam_lr is not None) else "")
-                          + (" --train-without-pegs" if args.train_without_pegs else "")
-                          + f" > {out}/logs/{name}.log 2>&1")
+                    lines.append((f"{base} --target {t} --param {args.param} --grad-method {gm} --optimizer {o} "
+                                  f"--seed {s}" + (f" --lr {adam_lr:g}" if (o == "adam" and adam_lr) else "")
+                                  + (" --train-without-pegs" if args.train_without_pegs else ""), name))
+        if args.baselines:
+            for s in args.seeds:
+                lines.append((f"{base} --target {t} --param rates --grad-method state --optimizer lbfgs --seed {s}",
+                              f"{t}_rates_state_lbfgs_s{s}"))
+                lines.append((f"{base} --target {t} --param net --grad-method state --optimizer lbfgs "
+                              f"--train-without-pegs --seed {s}", f"{t}_net_state_lbfgs_nopegs_s{s}"))
+                for w in (20, 60):
+                    lines.append((f"{base} --target {t} --param endpose --window {w} --grad-method state "
+                                  f"--optimizer lbfgs --seed {s}", f"{t}_endpose{w}_state_lbfgs_s{s}"))
+                    lines.append((f"{base} --target {t} --param endpose --window {w} --aim --grad-method state "
+                                  f"--optimizer none --seed {s}", f"{t}_endpose{w}aimed_state_none_s{s}"))
+    print(f"mkdir -p {out}/logs")
+    for cmd, name in lines:
+        print(f"{cmd} > {out}/logs/{name}.log 2>&1")
+    if args.baselines:
+        print("# after the runs above (greedy's step cap is the largest step of the state/L-BFGS solutions):")
+        for t in names:
+            print(f"python scripts/train_shape.py greedy --config {args.config} --out {out} --target {t} "
+                  f"> {out}/logs/{t}_greedy.log 2>&1")
 
 
 #: Adam rates of the sweep (paper Sec. VII-A: the rate is chosen by a sweep on
@@ -905,22 +1083,25 @@ def report(out, config=None):
     targets = sorted({r["target_name"] for r in runs})
     fig, axes = plt.subplots(len(targets), 2, figsize=(11, 3.4 * len(targets)), squeeze=False)
     for i, t in enumerate(targets):
-        for r in [r for r in runs if r["target_name"] == t]:
+        # the network runs only (the four methods; dashed: trained without the pegs)
+        for r in [r for r in runs if r["target_name"] == t and r["param"] == "net"]:
             z = np.load(out / f"{r['_name']}.npz")
             ok = z["eval_ok"]
-            y = 1e3 * np.minimum.accumulate(np.where(ok, z["eval_rms"], np.inf))
+            y = np.maximum(1e3 * np.minimum.accumulate(np.where(ok, z["eval_rms"], np.inf)), 1e-2)
             c = COLORS.get((r["grad_method"], r["optimizer"]), INK2)
             ls = "--" if r["trained_without_pegs"] else "-"
             axes[i][0].plot(z["eval_rollouts"], y, color=c, lw=1.0, ls=ls, alpha=0.8)
             axes[i][1].plot(z["eval_time"], y, color=c, lw=1.0, ls=ls, alpha=0.8)
         for ax, xl in zip(axes[i], ("rollouts", "wall time [s]")):
             ax.set_yscale("log")
+            ax.set_ylim(bottom=1e-2)
             ax.axhline(5.0, color=INK2, lw=0.8, ls=":")
             ax.set_xlabel(xl)
             ax.set_ylabel("best shape RMS so far [mm]")
             ax.set_title(t, loc="left", fontsize=9)
     handles = [plt.Line2D([], [], color=c, label=f"{g}, {o}") for (g, o), c in COLORS.items()]
-    fig.legend(handles=handles, loc="lower center", ncol=4, frameon=False, fontsize=8)
+    handles.append(plt.Line2D([], [], color=INK2, ls="--", label="state, lbfgs, trained without pegs"))
+    fig.legend(handles=handles, loc="lower center", ncol=5, frameon=False, fontsize=8)
     fig.tight_layout(rect=(0, 0.06, 1, 1))
     fig.savefig(out / "curves.png", dpi=140)
     plt.close(fig)
@@ -930,10 +1111,100 @@ def report(out, config=None):
     print(f"\nreport -> {out / 'report.md'}")
 
 
+# ---------------------------------------------------------------- verify
+
+#: What every finished run must have saved (train runs; greedy saves a subset).
+_REQ_JSON = ("task", "status", "target_name", "param", "grad_method", "optimizer", "seed", "stop",
+             "train_time", "updates", "rollouts", "failures", "init_rms", "final_rms", "final_ok",
+             "solved", "admissible", "admissibility", "final_snaps", "final_max_penetration",
+             "final_max_strain", "final_max_abs_holonomy", "final_ws_violation", "final_onset",
+             "final_touching", "final_force", "iterates", "target")
+_REQ_NPZ_TRAIN = ("target_shape", "U_ref", "xi_init", "xi_final", "xi_best", "U_init", "U_final",
+                  "q_init", "q_traj_init", "q_traj", "eval_loss", "eval_rms", "eval_ok",
+                  "eval_rollouts", "eval_time", "iter_rms", "iter_eval",
+                  "init_min_clearance", "init_force", "init_touching", "init_snap", "init_substeps",
+                  "init_holonomy", "init_twist", "init_shape", "init_node_err",
+                  "final_min_clearance", "final_force", "final_touching", "final_snap",
+                  "final_substeps", "final_holonomy", "final_twist", "final_shape", "final_node_err")
+_REQ_NPZ_GREEDY = ("target_shape", "U_ref", "U_final", "q_init", "q_traj", "iter_rms", "eval_rms",
+                   "eval_ok", "eval_rollouts", "eval_time", "final_min_clearance", "final_force",
+                   "final_touching", "final_snap", "final_shape", "final_node_err")
+
+
+def cmd_verify(args):
+    """Check every run in OUT: the summary and arrays are complete and consistent.
+
+    Per run: the required json fields and npz arrays exist; the arrays have
+    the shapes of the scene (M steps, nv nodes, n_u controls, P parameters);
+    the final shape saved equals the last state of the saved trajectory and
+    the recorded final RMS; the figures exist in the run folder (train runs)
+    or in OUT (greedy).  Prints one line per run and a summary; exits with an
+    error if anything is missing.
+    """
+    out = Path(args.out)
+    bad = 0
+    files = sorted(out.glob("*.json"))
+    n = 0
+    for js in files:
+        try:
+            s = json.load(open(js))
+        except (ValueError, OSError):
+            continue
+        if not (isinstance(s, dict) and s.get("task") == "shape"):
+            continue
+        n += 1
+        problems = []
+        greedy = s.get("optimizer") == "greedy"
+        miss = [k for k in _REQ_JSON if k not in s]
+        if miss:
+            problems.append(f"json misses {miss}")
+        npz = js.with_suffix(".npz")
+        if not npz.exists():
+            problems.append("no npz")
+        else:
+            z = np.load(npz)
+            req = _REQ_NPZ_GREEDY if greedy else _REQ_NPZ_TRAIN
+            if s.get("final_ok") is False:
+                req = tuple(k for k in req if k not in ("final_shape", "final_node_err"))
+            miss = [k for k in req if k not in z.files]
+            if miss:
+                problems.append(f"npz misses {miss}")
+            M, nv = int(s.get("N", 0)), int(s.get("nv", 0))
+            if "q_traj" in z.files and not greedy and z["q_traj"].shape[0] != M and s.get("final_ok"):
+                problems.append(f"q_traj has {z['q_traj'].shape[0]} steps, expected {M}")
+            if "U_final" in z.files and z["U_final"].shape[1] != 12:
+                problems.append(f"U_final has {z['U_final'].shape[1]} controls")
+            if not greedy and "xi_final" in z.files and z["xi_final"].size != int(s.get("P", -1)):
+                problems.append(f"xi has {z['xi_final'].size} entries, P = {s.get('P')}")
+            if "final_shape" in z.files and "q_traj" in z.files and len(z["q_traj"]):
+                X = z["q_traj"][-1][:3 * nv].reshape(nv, 3)
+                if np.abs(X - z["final_shape"]).max() > 1e-12:
+                    problems.append("final_shape != last state of q_traj")
+                nodes = np.arange(2, nv - 2)
+                rms = float(np.sqrt(np.mean(np.sum((X[nodes] - z["target_shape"][nodes]) ** 2, axis=1))))
+                if s.get("final_rms") is not None and abs(rms - s["final_rms"]) > 1e-9:
+                    problems.append(f"final_rms {s['final_rms']} != recomputed {rms}")
+            if "final_touching" in z.files and z["final_touching"].shape[1:] != (2, nv - 1):
+                problems.append(f"final_touching shape {z['final_touching'].shape}")
+        # figures: next to the run (greedy, `figure`) or in its run folder (train)
+        figs = list(out.glob(f"{js.stem}_shape.pdf"))
+        figs += list(Path(_ROOT / "experiments").glob(f"*/runs/*{js.stem}/{js.stem}_shape.pdf"))
+        if s.get("final_ok") and not figs:
+            problems.append("no shape figure (run `figure --npz` to make one)")
+        bad += bool(problems)
+        print(f"{'ok  ' if not problems else 'FAIL'} {js.stem}: final rms "
+              f"{'-' if s.get('final_rms') is None else '%.3f mm' % (1e3 * s['final_rms'])}, "
+              f"solved {s.get('solved')}, {s.get('rollouts')} rollouts, stop: {s.get('stop')}"
+              + ("" if not problems else "\n     " + "; ".join(problems)))
+    print(f"{n} runs, {bad} with problems")
+    if bad:
+        raise SystemExit(1)
+
+
 # ---------------------------------------------------------------- main
 
 def main():
-    cmds = ("train", "targets", "check", "jobs", "sweep", "report", "figure")
+    cmds = ("train", "targets", "check", "jobs", "sweep", "greedy", "report", "figure", "verify")
     argv = sys.argv[1:]
     cmd = argv.pop(0) if argv and argv[0] in cmds else "train"
     ap = argparse.ArgumentParser(description=f"3D shape formation against pegs ({cmd})")
@@ -947,10 +1218,12 @@ def main():
         ap.add_argument("--pick", action="store_true", help="decide from the finished sweep runs")
     if cmd == "jobs":
         ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
-        ap.add_argument("--optimizers", nargs="+", choices=T.OPTIMIZERS, default=list(T.OPTIMIZERS))
+        ap.add_argument("--optimizers", nargs="+", choices=("adam", "lbfgs"), default=["adam", "lbfgs"])
         ap.add_argument("--grad-methods", nargs="+", choices=GRAD_METHODS, default=list(GRAD_METHODS))
         ap.add_argument("--param", choices=T.PARAMETERIZATIONS, default="net")
         ap.add_argument("--train-without-pegs", action="store_true")
+        ap.add_argument("--baselines", action="store_true",
+                        help="also direct rates, no obstacles, end pose (tuned, aimed) and greedy")
     if cmd in ("train", "check"):
         ap.add_argument("--target", required=True)
         ap.add_argument("--seed", type=int, default=0, help="initialization seed")
@@ -968,9 +1241,21 @@ def main():
         ap.add_argument("--train-without-pegs", action="store_true",
                         help="'No obstacles' baseline: train without the pegs, evaluate with them")
         ap.add_argument("--tag", default="", help="suffix of the run name (e.g. _lr1e-3 in a sweep)")
+        ap.add_argument("--window", type=int, default=20,
+                        help="--param endpose: steps over which the final pose is moved")
+        ap.add_argument("--aim", action="store_true",
+                        help="--param endpose: aim the end pose at the designed one (use --optimizer none)")
+    if cmd == "greedy":
+        ap.add_argument("--target", required=True)
+        ap.add_argument("--cap", type=float, default=None,
+                        help="step cap (normalized); default: the largest step of our L-BFGS solutions")
+        ap.add_argument("--max-steps", "--epochs", dest="max_steps", type=int, default=None,
+                        help="cap on greedy steps (greedy.max_steps); --epochs is an alias")
+        ap.add_argument("--log-every", dest="log_every", type=int, default=10)
+        ap.add_argument("--tag", default="")
     if cmd == "check":
         ap.add_argument("--dirs", type=int, default=4)
-        ap.add_argument("--h", type=float, default=1e-5, help="central-difference step in xi")
+        ap.add_argument("--h", type=float, default=1e-6, help="central-difference step in xi")
         ap.add_argument("--tol-factor", dest="tol_factor", type=float, default=1e-3)
         ap.add_argument("--no-pegs-too", dest="no_pegs_too", action="store_true")
     if cmd == "figure":
@@ -981,7 +1266,8 @@ def main():
         ap.add_argument("--workspace", choices=("auto", "fit", "clip", "off"), default="off")
         ap.add_argument("--no-title", action="store_true")
     args = ap.parse_args(argv)
-    {"targets": cmd_targets, "check": cmd_check, "jobs": cmd_jobs, "sweep": cmd_sweep, "figure": cmd_figure,
+    {"targets": cmd_targets, "check": cmd_check, "jobs": cmd_jobs, "sweep": cmd_sweep, "greedy": cmd_greedy,
+     "figure": cmd_figure, "verify": cmd_verify,
      "report": lambda a: report(a.out, a.config), "train": cmd_train}[cmd](args)
 
 

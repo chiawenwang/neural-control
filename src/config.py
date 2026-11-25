@@ -109,7 +109,7 @@ def check_values(cfg) -> None:
     # neural_control.OPTIMIZERS (adam, linesearch: the task scripts built on
     # neural_control) and traj_opt.OPTIMIZERS (adam, lbfgs: train_shape.py),
     # listed here so that loading a config does not import torch.
-    OPTIMIZERS = ("adam", "linesearch", "lbfgs")
+    OPTIMIZERS = ("adam", "linesearch", "lbfgs", "none")
     train = cfg.get("train") or {}
     value = train.get("grad_method")
     if value not in GRAD_METHODS:

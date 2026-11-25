@@ -42,8 +42,8 @@ import numpy as np
 
 from implicit_grad_tools import multistep_adjoint_gradient, N_ADJOINT_SOLVES
 
-OPTIMIZERS = ("adam", "lbfgs")
-PARAMETERIZATIONS = ("net", "rates")
+OPTIMIZERS = ("adam", "lbfgs", "none")
+PARAMETERIZATIONS = ("net", "rates", "endpose")
 
 
 class StopTraining(Exception):
@@ -168,11 +168,53 @@ class NetRates:
                            "fit_iters": int(res.nit)}
 
 
-def make_parameterization(kind, M, k, hidden=64, seed=0):
+class EndPose:
+    """The "end pose only" baseline: a base trajectory with its final pose moved.
+
+    ``xi`` (k,) is an offset of the gripper pose, ramped in linearly over the
+    last ``window`` steps of the base commands ``U_base`` (M, n_u)::
+
+        u_k = u_base,k + w_k * xi,   w_k = clip((k + 1 - (M - window)) / window, 0, 1)
+
+    so the first ``M - window`` steps are those of the base trajectory and
+    the final pose is ``u_base,M + xi``.  Rates follow by differencing (with
+    ``u_{-1} = u0``), so the evaluator and both gradients apply unchanged.
+    """
+
+    kind = "endpose"
+
+    def __init__(self, M, k, U_base, u0, window):
+        self.M, self.k, self.window = int(M), int(k), int(window)
+        if not 1 <= self.window <= self.M:
+            raise ValueError(f"window must be in 1..{self.M}, got {window}")
+        self.P = self.k
+        self.k_end = len(u0) - self.k
+        self.U_base = np.asarray(U_base, dtype=float)
+        self.u0 = np.asarray(u0, dtype=float)
+        idx = np.arange(1, self.M + 1)
+        self.w = np.clip((idx - (self.M - self.window)) / self.window, 0.0, 1.0)
+        self.dw = np.diff(np.concatenate([[0.0], self.w])) * self.M       # (w_k - w_{k-1}) / dlam
+        V = np.vstack([self.u0[None, :], self.U_base])[:, self.k_end:]
+        self.R_base = np.diff(V, axis=0) * self.M
+
+    def rates(self, xi):
+        return self.R_base + self.dw[:, None] * np.asarray(xi, dtype=float)[None, :]
+
+    def vjp(self, xi, G):
+        return (self.dw[:, None] * np.asarray(G, dtype=float)).sum(axis=0)
+
+    def aimed(self, u_end):
+        """The offset that puts the final pose at ``u_end`` (gripper part)."""
+        return np.asarray(u_end, dtype=float)[self.k_end:] - self.U_base[-1, self.k_end:]
+
+
+def make_parameterization(kind, M, k, hidden=64, seed=0, U_base=None, u0=None, window=20):
     if kind == "rates":
         return DirectRates(M, k)
     if kind == "net":
         return NetRates(M, k, hidden=hidden, seed=seed)
+    if kind == "endpose":
+        return EndPose(M, k, U_base, u0, window)
     raise ValueError(f"parameterization must be one of {PARAMETERIZATIONS}, got {kind!r}")
 
 
@@ -618,6 +660,11 @@ def optimize(ev_fn, xi0, optimizer, max_iters, opt_cfg, tag=""):
         if optimizer == "adam":
             run_adam(ev_fn, xi0, float(opt_cfg.get("lr", 1e-3)), max_iters,
                              log_every=int(opt_cfg.get("log_every", 10)), tag=tag)
+        elif optimizer == "none":                # evaluate the start only (e.g. end pose, aimed)
+            cur = ev_fn(xi0)
+            ev_fn.current = cur if cur["ok"] else None
+            ev_fn.iters.append({"eval": cur["idx"], "loss": cur["loss"], "rms": cur["rms"]})
+            ev_fn.stop = "no optimization (evaluation only)" if cur["ok"] else f"failed: {cur['reason']}"
         elif optimizer == "lbfgs":
             run_lbfgs(ev_fn, xi0, max_iters, history=int(opt_cfg.get("history", 10)),
                               c1=float(opt_cfg.get("c1", 1e-4)), c2=float(opt_cfg.get("c2", 0.9)),

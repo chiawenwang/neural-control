@@ -12,10 +12,13 @@
 # (newton.initial_equilibrium), no ready motion.
 #
 # 2026-11-24: the pegs switched to the paper's smooth contact model (peg.model:
-# smooth). P1 was rebuilt and re-checked with it (train_shape.py targets): all
-# design criteria hold except that the start rod's SURFACE is 27.3 mm from the
-# clamp-side peg (30.3 mm from the centerline). P2 and P3 below still carry
-# their node-model descriptions; rebuild them before use.
+# smooth) and the fixed clamp to an untwisted start (see start:). P1-P3 were
+# rebuilt and re-checked with both (train_shape.py targets): every design
+# criterion holds -- start rod surface >= 27 mm from both pegs (27.2 / 34.4),
+# no peg touched before 48 % of the motion, both touched at the end, max
+# penetration <= 0.14 mm, no snap. Without the pegs the designed motions end
+# 35 / 51 / 45 mm (P1 / P2 / P3) from their targets. The descriptions below
+# are those of the earlier (node, twisted) build.
 #
 # Pegs and targets were FOUND and CHECKED by
 #   python scripts/check_targets.py --config configs/task_shape_pegs_3d.yaml --mode shape
@@ -48,9 +51,16 @@ rod:
   max_newton_iter: 200
   gravity: [0.0, 0.0, -9.81]
 start:
-  u_left_3d:  [0.0, 0.0, 0.0, 0.0, 1.5708]   # (x, y, z, theta, phi): tangent straight up
+  # The fixed clamp points up. Its elevation is 1.5707, just BELOW pi/2: the
+  # yaw reference of a clamp (rodframes.gripper_director) is singular at a
+  # vertical tangent, and the earlier 1.5708 (pi/2 + 3.7e-6) lay just past it,
+  # which flipped the reference by pi and left the start rod with half a turn
+  # of twist (Phi = pi, 0.46 J against 0.17 J of bending) -- an accident of
+  # rounding. At 1.5707 (0.006 deg from vertical) the rod starts untwisted
+  # (Phi = 0) and |Psi| stays below 0.5 rad on P1-P3. Changed 2026-11-24.
+  u_left_3d:  [0.0, 0.0, 0.0, 0.0, 1.5707]   # (x, y, z, theta, phi): tangent straight up
   u_right_3d: [0.62, 0.0, 0.62, 0.0, 0.0]    # horizontal gripper, tangent +x
-  u_left_twist:  [0.0, 0.0, 0.0, 0.0, 1.5708, 0.0]
+  u_left_twist:  [0.0, 0.0, 0.0, 0.0, 1.5707, 0.0]
   u_right_twist: [0.62, 0.0, 0.62, 0.0, 0.0, 0.0]
 task:
   # Common initialization (train.init: designed): the designed motion of the
@@ -74,7 +84,7 @@ task:
   shape_targets:                # straight moves u0 -> u0 + du of the right gripper (x, y, z, theta, phi, yaw)
     P1:
       du: [-0.0821, -0.1843, -0.0367, -0.0124, 0.1182, 0.0000]
-      description: "straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact: touching from steps [51, 51], nodes [8-9] and [18-20], 2.9 / 2.5 N, max penetration 0.12 mm; without pegs it ends 14.7 mm from the target)"
+      description: "straight move du = [-0.082, -0.184, -0.037, -0.012, 0.118, 0.0] onto both pegs (smooth contact, untwisted start: touching from steps [49, 48], nodes [8-9] and [18-20], 3.4 / 2.8 N, max penetration 0.14 mm; without pegs it ends 35 mm from the target)"
     P2:
       du: [-0.0851, 0.1299, 0.0326, -0.0160, 0.3858, 0.0000]
       description: "straight move du = [-0.085, 0.13, 0.033, -0.016, 0.386, 0.0] onto both pegs (touching from steps [64, 63], nodes [8, 19])"
@@ -125,9 +135,9 @@ train:
   max_penetration: 5.0e-4       # [m] admissible penetration of the rod surface
   workspace: reject             # reject: a command outside the box is a failed trial | record: only logged
   adam:
-    lr: 3.0e-4                  # chosen 2026-11-24 by `train_shape.py sweep` on P1, seed 0, frozen
-                                # tangent: 1e-4 -> 3.91 mm, 3e-4 -> 1.20 mm (both solved), 1e-3 -> 32.4,
-                                # 3e-3 -> 56.3 (20 infeasible), 1e-2 -> 36.5 mm (20 infeasible)
+    lr: 3.0e-4                  # PROVISIONAL fallback. `jobs` uses OUT/adam_lr.json from
+                                # `sweep --pick` when it exists -- rerun the sweep: the earlier
+                                # choice (3e-4) was made on the twisted start (see start:).
   lbfgs:
     history: 10
     c1: 1.0e-4                  # Armijo

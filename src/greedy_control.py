@@ -76,14 +76,19 @@ def shape_sensitivity(env, J, u, cols):
 
 
 def _holonomy(env):
+    """The holonomy of the current state, lifted (continuous across +-pi) when
+    the energy tracks its branch (energy.DERElasticEnergy3DTwist.holonomy);
+    otherwise its principal value."""
     if not getattr(env, "twist", False):
         return None
+    if hasattr(env.energy, "holonomy"):
+        return float(env.energy.holonomy(env.q))
     from rodframes import holonomy
     return float(holonomy(env.positions()))
 
 
 def greedy_shape_control(env, u0, J0, target_fn, cols, angle_cols=(), opts=None, log=print,
-                         log_every=10):
+                         log_every=10, nodes=None):
     """Drive the rod from its current equilibrium toward ``target_fn(1.0)`` greedily.
 
     ``env`` holds the start state (settled at ``u0``, Jacobian ``J0``).
@@ -116,12 +121,16 @@ def greedy_shape_control(env, u0, J0, target_fn, cols, angle_cols=(), opts=None,
     final = np.asarray(target_fn(1.0), dtype=float)
     homotopy = o["schedule"] == "homotopy"
 
+    # ``nodes``: the nodes the objective averages over (all of them by default;
+    # the free nodes for the shape task's loss).
+    sel = slice(None) if nodes is None else np.asarray(nodes)
+
     def objective(X, u, tgt):
-        e = float(np.mean(np.sum((X - tgt) ** 2, axis=1)))
+        e = float(np.mean(np.sum((X[sel] - tgt[sel]) ** 2, axis=1)))
         return e + float(reg @ (u[cols] - u_ref_at(lam)) ** 2), e
 
     def rms(X, tgt):
-        return float(np.sqrt(np.mean(np.sum((X - tgt) ** 2, axis=1))))
+        return float(np.sqrt(np.mean(np.sum((X[sel] - tgt[sel]) ** 2, axis=1))))
 
     u = np.asarray(u0, dtype=float).copy()
     J = J0
@@ -172,8 +181,11 @@ def greedy_shape_control(env, u0, J0, target_fn, cols, angle_cols=(), opts=None,
 
         # LM direction in normalized units: d (scaled) -> du = scale * d
         G = shape_sensitivity(env, J, u, cols) * scale[None, :]
-        n = X.shape[0]
-        r = (X - tgt).ravel()
+        if nodes is not None:
+            rows = (3 * np.asarray(nodes)[:, None] + np.arange(3)[None, :]).ravel()
+            G = G[rows]
+        n = X[sel].shape[0]
+        r = (X[sel] - tgt[sel]).ravel()
         R = n * reg * scale ** 2                         # the penalty's curvature, normalized
         A = G.T @ G
         A = A + float(o["damping"]) * np.trace(A) / nc * np.eye(nc) + np.diag(R)
