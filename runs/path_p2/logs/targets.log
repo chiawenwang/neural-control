@@ -1,0 +1,8 @@
+Rod: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2
+Horizon: 200 steps, nv = 51, mid node 25 at [0.161, -0.0, 0.4586], 2 peg(s), contact model smooth
+Start rod: clearance to the pegs [15.1, 36.2] mm (rod surface), holonomy +0.000 rad
+[P2] P2, between two pegs: the rod is pressed onto peg A (clamp side, outside the arc) and runs above peg B (gripper side, inside the arc); the designed motion swings the gripper tangent up and back
+   build contact: tracker on the sine rms 0.000 mm (0 held steps); designed motion vs reference 0.000 mm; reference vs free-rod path rms 1.6 mm (max 3.5)
+   path length 155 mm; contact from step [116, None] (42 % of the steps, 1 transitions, at the end [True, False]), final force [2.05, 0.0] N, max penetration 0.021 mm, mid node >= 316 mm from the pegs, snaps none, self clearance 34.0 mm
+   the same motion without the pegs: mid node 1.6 mm (rms) from the reference
+   criteria: all OK

@@ -1,0 +1,30 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1795618577.404836    6292 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+I0000 00:00:1795618577.521399    6292 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1795618581.653026    6292 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+Run log -> /content/neural-control/experiments/path_pegs2_3d/runs/20261125-145614-P2_net_state_adam_s1
+Task: 3D path tracking, target P2 -- P2, between two pegs: the rod is pressed onto peg A (clamp side, outside the arc) and runs above peg B (gripper side, inside the arc); the designed motion swings the gripper tangent up and back
+Trajectory: net (P = 4678), init designed (fit rms 7.72e-04)
+Objective: trajectory (mid node, 200 terms); snap-through: rejected (infeasible trial)
+Gradient: state   Optimizer: adam {'lr': 0.0003}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Initial trajectory: rms 15.21 mm, max 21.61 mm, contact 60 % of the steps, snaps 0
+[P2_net_state_adam_s1 it 010] rms=  15.335 mm  rollouts=11  snaps=0  pen=0.084 mm  t=  334.3s  
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 154); failures 1/20, rollouts 13
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 153); failures 2/20, rollouts 14
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 152); failures 3/20, rollouts 15
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 151); failures 4/20, rollouts 16
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 150); failures 5/20, rollouts 17
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 149); failures 6/20, rollouts 18
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 149); failures 7/20, rollouts 19
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 148); failures 8/20, rollouts 20
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 148); failures 9/20, rollouts 21
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 147); failures 10/20, rollouts 22
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 147); failures 11/20, rollouts 23
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 146); failures 12/20, rollouts 24
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 146); failures 13/20, rollouts 25
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 145); failures 14/20, rollouts 26
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 145); failures 15/20, rollouts 27
+[P2_net_state_adam_s1 it 011] FAILED rollout (newton_failed at step 145); failures 16/20, rollouts 28

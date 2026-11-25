@@ -1,0 +1,26 @@
+== 1. targets
+Rod: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2
+Horizon: 200 steps, nv = 51, mid node 25 at [0.161, -0.0, 0.4586], 2 peg(s), contact model smooth
+Start rod: clearance to the pegs [15.1, 36.2] mm (rod surface), holonomy +0.000 rad
+[P2] P2, between two pegs: the rod is pressed onto peg A (clamp side, outside the arc) and runs above peg B (gripper side, inside the arc); the designed motion swings the gripper tangent up and back
+   build contact: tracker on the sine rms 0.000 mm (0 held steps); designed motion vs reference 0.000 mm; reference vs free-rod path rms 1.6 mm (max 3.5)
+   path length 155 mm; contact from step [116, None] (42 % of the steps, 1 transitions, at the end [True, False]), final force [2.05, 0.0] N, max penetration 0.021 mm, mid node >= 316 mm from the pegs, snaps none, self clearance 34.0 mm
+   the same motion without the pegs: mid node 1.6 mm (rms) from the reference
+   criteria: all OK
+== 2a. common initializations (one per seed, in parallel)
+[init P2 s0] rms 14.52 mm (band 10-20), attempt 0, scale 0.370, contact 32 % of the steps, onset [135, None], 29s
+[init P2 s1] rms 15.21 mm (band 10-20), attempt 0, scale 0.744, contact 60 % of the steps, onset [79, None], 30s
+[init P2 s2] rms 14.61 mm (band 10-20), attempt 0, scale 1.000, contact 34 % of the steps, onset [133, None], 15s
+[init P2 s3] rms 14.79 mm (band 10-20), attempt 0, scale 0.582, contact 32 % of the steps, onset [135, None], 34s
+[init P2 s4] rms 14.51 mm (band 10-20), attempt 0, scale 0.461, contact 34 % of the steps, onset [133, None], 34s
+== 2b. gradient check
+[check P2] initial rms 14.52 mm, P = 4678, Newton tol 1.27e-07
+   gradient cost: state 92 ms / 200 solves; proxy 89 ms / 200 solves
+   dir 0: fd -5.681954e-04  state -5.681954e-04 (rel err 6.98e-11)  proxy -7.789392e-04 (rel err 3.71e-01)
+   dir 1: fd +7.819823e-04  state +7.819823e-04 (rel err 3.63e-10)  proxy +8.274009e-04 (rel err 5.81e-02)
+   dir 2: fd +1.874383e-03  state +1.874383e-03 (rel err 4.44e-10)  proxy +1.987428e-03 (rel err 6.03e-02)
+   dir 3: fd +1.860086e-03  state +1.860086e-03 (rel err 6.13e-10)  proxy +2.030285e-03 (rel err 9.15e-02)
+   state: median rel err 4.03e-10, max 6.13e-10;  proxy median 7.59e-02
+   proxy vs state per rate: first contact at step 135; median rel diff before 0.09789384786697311, after 5.146e-02, last rate 0.00e+00
+   -> runs/path_p2/checks/check_P2_net_s0.json
+== 3. main runs and baselines
