@@ -1,0 +1,60 @@
+# 3D path tracking with contact (task P)
+
+Solved: tracking RMS of the mid node over all steps <= solve_rms and the motion admissible (every step converged and stable, NO snap-through flagged, every pose in the workspace, max penetration <= train.max_penetration, no cap or self-contact). 'rollouts' counts every rollout, failed ones and line-search trials included; 'snap rej.' the trials rejected by the snap rule.
+
+| target | param | gradient | optimizer | seed | init rms [mm] | final rms [mm] | final max [mm] | end err [mm] | on peg [%] | solved | updates | rollouts | failed | snap rej. | max pen. [mm] | time [s] | stop |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| P2 | endpose20 | state | lbfgs | 0 | 14.519 | 14.195 | 20.452 | 3.041 | 32 | no | 124 | 500 | 0 | 0 | 0.010 | 5261 | rollout budget (500) used |
+| P2 | endpose20 | state | lbfgs | 1 | 15.210 | 15.162 | 21.577 | 0.812 | 60 | no | 94 | 440 | 0 | 0 | 0.027 | 4244 | line search found no admissible decrease |
+| P2 | endpose20 | state | lbfgs | 2 | 14.608 | 14.375 | 21.287 | 1.803 | 34 | no | 111 | 439 | 0 | 0 | 0.018 | 4443 | line search found no admissible decrease |
+| P2 | endpose20 | state | lbfgs | 3 | 14.785 | 14.357 | 21.404 | 3.464 | 30 | no | 117 | 500 | 0 | 0 | 0.014 | 5087 | rollout budget (500) used |
+| P2 | endpose20 | state | lbfgs | 4 | 14.510 | 14.423 | 22.325 | 1.894 | 34 | no | 108 | 361 | 2 | 0 | 0.010 | 3558 | line search found no admissible decrease |
+| P2 | endpose60 | state | lbfgs | 0 | 14.519 | 12.955 | 20.452 | 5.031 | 32 | no | 99 | 225 | 0 | 0 | 0.010 | 2232 | line search found no admissible decrease |
+| P2 | endpose60 | state | lbfgs | 1 | 15.210 | 15.046 | 21.577 | 5.847 | 60 | no | 60 | 166 | 0 | 0 | 0.028 | 1581 | line search found no admissible decrease |
+| P2 | endpose60 | state | lbfgs | 2 | 14.608 | 13.756 | 21.287 | 4.494 | 34 | no | 89 | 281 | 0 | 0 | 0.000 | 2797 | line search found no admissible decrease |
+| P2 | endpose60 | state | lbfgs | 3 | 14.785 | 13.671 | 21.404 | 4.183 | 32 | no | 104 | 417 | 2 | 0 | 0.018 | 3976 | line search found no admissible decrease |
+| P2 | endpose60 | state | lbfgs | 4 | 14.510 | 13.703 | 22.325 | 4.679 | 34 | no | 83 | 211 | 0 | 0 | 0.006 | 2020 | line search found no admissible decrease |
+| P2 | greedy | state | greedy | 0 | - | 1.113 | 4.437 | 0.011 | 42 | yes | 200 | 4 | 0 | 0 | 0.466 | 35 | end of the path |
+| P2 | net | proxy | adam | 0 | 14.522 | 0.300 | 1.422 | 0.574 | 42 | yes | 499 | 500 | 0 | 0 | 0.021 | 4805 | rollout budget (500) used |
+| P2 | net | proxy | adam | 1 | 15.213 | 0.277 | 0.964 | 0.621 | 41 | yes | 499 | 500 | 0 | 0 | 0.024 | 4787 | rollout budget (500) used |
+| P2 | net | proxy | adam | 2 | 14.608 | 0.179 | 0.537 | 0.312 | 42 | yes | 499 | 500 | 0 | 0 | 0.020 | 4835 | rollout budget (500) used |
+| P2 | net | proxy | adam | 3 | 14.768 | 0.378 | 2.286 | 0.717 | 42 | yes | 499 | 500 | 0 | 0 | 0.021 | 4831 | rollout budget (500) used |
+| P2 | net | proxy | adam | 4 | 14.513 | 9.935 | 15.359 | 6.803 | 58 | no | 10 | 31 | 20 | 0 | 0.483 | 404 | 20 failed rollouts (last: newton_failed at step 161) |
+| P2 | net | proxy | lbfgs | 0 | 14.522 | 0.291 | 1.281 | 0.432 | 42 | yes | 190 | 500 | 0 | 0 | 0.021 | 4760 | rollout budget (500) used |
+| P2 | net | proxy | lbfgs | 1 | 15.213 | 0.191 | 0.948 | 0.144 | 42 | yes | 197 | 500 | 1 | 0 | 0.021 | 4744 | rollout budget (500) used |
+| P2 | net | proxy | lbfgs | 2 | 14.608 | 0.155 | 0.656 | 0.244 | 42 | yes | 208 | 500 | 0 | 0 | 0.019 | 4757 | rollout budget (500) used |
+| P2 | net | proxy | lbfgs | 3 | 14.768 | 0.376 | 2.194 | 0.646 | 42 | yes | 168 | 500 | 0 | 0 | 0.021 | 4807 | rollout budget (500) used |
+| P2 | net | proxy | lbfgs | 4 | 14.513 | 0.458 | 1.061 | 1.061 | 42 | yes | 61 | 500 | 1 | 0 | 0.015 | 4809 | rollout budget (500) used |
+| P2 | net | state | adam | 0 | 14.522 | 0.293 | 1.399 | 0.509 | 42 | yes | 499 | 500 | 0 | 0 | 0.021 | 4794 | rollout budget (500) used |
+| P2 | net | state | adam | 1 | 15.213 | 0.216 | 1.035 | 0.399 | 42 | yes | 499 | 500 | 0 | 0 | 0.023 | 4709 | rollout budget (500) used |
+| P2 | net | state | adam | 2 | 14.608 | 0.168 | 0.542 | 0.232 | 42 | yes | 499 | 500 | 0 | 0 | 0.020 | 4693 | rollout budget (500) used |
+| P2 | net | state | adam | 3 | 14.768 | 0.376 | 2.269 | 0.709 | 42 | yes | 499 | 500 | 0 | 0 | 0.021 | 4845 | rollout budget (500) used |
+| P2 | net | state | adam | 4 | 14.513 | 5.908 | 10.167 | 5.585 | 55 | no | 9 | 30 | 20 | 0 | 2.665 | 395 | 20 failed rollouts (last: newton_failed at step 156) |
+| P2 | net | state | lbfgs | 0 | 14.522 | 0.255 | 1.582 | 0.410 | 42 | yes | 451 | 500 | 0 | 0 | 0.021 | 4790 | rollout budget (500) used |
+| P2 | net | state | lbfgs | 1 | 15.213 | 0.135 | 1.147 | 0.080 | 42 | yes | 430 | 500 | 1 | 0 | 0.021 | 4762 | rollout budget (500) used |
+| P2 | net | state | lbfgs | 2 | 14.608 | 0.100 | 0.615 | 0.130 | 42 | yes | 221 | 249 | 0 | 0 | 0.020 | 2375 | rms 0.0999 mm <= stop_rms 0.1 mm |
+| P2 | net | state | lbfgs | 3 | 14.768 | 0.358 | 2.180 | 0.301 | 42 | yes | 451 | 500 | 0 | 0 | 0.022 | 4769 | rollout budget (500) used |
+| P2 | net | state | lbfgs | 4 | 14.513 | 0.100 | 0.965 | 0.053 | 42 | yes | 304 | 350 | 1 | 0 | 0.021 | 3368 | rms 0.1000 mm <= stop_rms 0.1 mm |
+| P2 | rates | state | lbfgs | 0 | 14.519 | 0.089 | 0.348 | 0.348 | 42 | yes | 17 | 26 | 0 | 0 | 0.020 | 247 | rms 0.0886 mm <= stop_rms 0.1 mm |
+| P2 | rates | state | lbfgs | 1 | 15.210 | 0.097 | 0.459 | 0.459 | 42 | yes | 59 | 69 | 0 | 0 | 0.018 | 660 | rms 0.0974 mm <= stop_rms 0.1 mm |
+| P2 | rates | state | lbfgs | 2 | 14.608 | 0.096 | 0.578 | 0.578 | 42 | yes | 35 | 47 | 0 | 0 | 0.020 | 451 | rms 0.0957 mm <= stop_rms 0.1 mm |
+| P2 | rates | state | lbfgs | 3 | 14.785 | 0.097 | 0.592 | 0.592 | 42 | yes | 37 | 48 | 0 | 0 | 0.020 | 463 | rms 0.0968 mm <= stop_rms 0.1 mm |
+| P2 | rates | state | lbfgs | 4 | 14.510 | 0.098 | 0.293 | 0.269 | 42 | yes | 40 | 51 | 0 | 0 | 0.019 | 482 | rms 0.0976 mm <= stop_rms 0.1 mm |
+
+## Per method
+
+| param | gradient | optimizer | runs | solved | median final rms [mm] | median rollouts | failed rollouts (total) | snap rejections (total) |
+|---|---|---|---|---|---|---|---|---|
+| endpose20 | state | lbfgs | 5 | 0 | 14.375 | 440 | 2 | 0 |
+| endpose60 | state | lbfgs | 5 | 0 | 13.703 | 225 | 2 | 0 |
+| greedy | state | greedy | 1 | 1 | 1.113 | 4 | 0 | 0 |
+| net | proxy | adam | 5 | 4 | 0.300 | 500 | 20 | 0 |
+| net | proxy | lbfgs | 5 | 5 | 0.291 | 500 | 2 | 0 |
+| net | state | adam | 5 | 4 | 0.293 | 500 | 20 | 0 |
+| net | state | lbfgs | 5 | 5 | 0.135 | 500 | 2 | 0 |
+| rates | state | lbfgs | 5 | 5 | 0.097 | 48 | 0 | 0 |
+
+![curves](curves.png)
+
+
+report -> runs/path_p2/report.md

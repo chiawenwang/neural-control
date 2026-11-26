@@ -1,0 +1,108 @@
+Run log -> /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-155624-P2_endpose20_state_lbfgs_s1
+Task: 3D path tracking, target P2 -- P2, between two pegs: the rod is pressed onto peg A (clamp side, outside the arc) and runs above peg B (gripper side, inside the arc); the designed motion swings the gripper tangent up and back
+Trajectory: endpose20 (P = 6), init designed + end pose offset 0
+Objective: trajectory (mid node, 200 terms); snap-through: rejected (infeasible trial)
+Gradient: state   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Initial trajectory: rms 15.21 mm, max 21.58 mm, contact 60 % of the steps, snaps 0
+[P2_endpose20_state_lbfgs_s1 it 001] rms=  15.202 mm  rollouts=3  snaps=0  pen=0.027 mm  t=   28.8s  alpha=2 ls=2
+[P2_endpose20_state_lbfgs_s1 it 002] rms=  15.168 mm  rollouts=4  snaps=0  pen=0.027 mm  t=   38.5s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 003] rms=  15.166 mm  rollouts=5  snaps=0  pen=0.027 mm  t=   48.1s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 004] rms=  15.165 mm  rollouts=6  snaps=0  pen=0.027 mm  t=   57.7s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 005] rms=  15.165 mm  rollouts=10  snaps=0  pen=0.027 mm  t=   96.3s  alpha=8 ls=4
+[P2_endpose20_state_lbfgs_s1 it 006] rms=  15.165 mm  rollouts=11  snaps=0  pen=0.027 mm  t=  105.9s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 007] rms=  15.165 mm  rollouts=12  snaps=0  pen=0.027 mm  t=  115.5s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 008] rms=  15.165 mm  rollouts=13  snaps=0  pen=0.027 mm  t=  125.1s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 009] rms=  15.165 mm  rollouts=14  snaps=0  pen=0.027 mm  t=  134.8s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 010] rms=  15.165 mm  rollouts=15  snaps=0  pen=0.027 mm  t=  144.4s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 011] rms=  15.165 mm  rollouts=16  snaps=0  pen=0.027 mm  t=  154.0s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 012] rms=  15.165 mm  rollouts=17  snaps=0  pen=0.027 mm  t=  163.6s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 013] rms=  15.165 mm  rollouts=18  snaps=0  pen=0.027 mm  t=  173.2s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 014] rms=  15.165 mm  rollouts=19  snaps=0  pen=0.027 mm  t=  182.7s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 015] rms=  15.165 mm  rollouts=20  snaps=0  pen=0.027 mm  t=  192.3s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 016] rms=  15.165 mm  rollouts=21  snaps=0  pen=0.027 mm  t=  201.9s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 017] rms=  15.165 mm  rollouts=22  snaps=0  pen=0.027 mm  t=  211.4s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 018] rms=  15.165 mm  rollouts=24  snaps=0  pen=0.027 mm  t=  230.6s  alpha=0.107 ls=2
+[P2_endpose20_state_lbfgs_s1 it 019] rms=  15.164 mm  rollouts=25  snaps=0  pen=0.027 mm  t=  240.1s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 020] rms=  15.164 mm  rollouts=26  snaps=0  pen=0.027 mm  t=  249.7s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 021] rms=  15.164 mm  rollouts=27  snaps=0  pen=0.027 mm  t=  259.3s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 022] rms=  15.164 mm  rollouts=28  snaps=0  pen=0.027 mm  t=  268.8s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 023] rms=  15.164 mm  rollouts=29  snaps=0  pen=0.027 mm  t=  278.4s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 024] rms=  15.164 mm  rollouts=30  snaps=0  pen=0.027 mm  t=  288.0s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 025] rms=  15.164 mm  rollouts=31  snaps=0  pen=0.027 mm  t=  297.6s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 026] rms=  15.164 mm  rollouts=32  snaps=0  pen=0.027 mm  t=  307.1s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 027] rms=  15.164 mm  rollouts=33  snaps=0  pen=0.027 mm  t=  316.7s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 028] rms=  15.164 mm  rollouts=34  snaps=0  pen=0.027 mm  t=  326.2s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 029] rms=  15.164 mm  rollouts=35  snaps=0  pen=0.027 mm  t=  335.8s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 030] rms=  15.164 mm  rollouts=36  snaps=0  pen=0.027 mm  t=  345.4s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 031] rms=  15.164 mm  rollouts=37  snaps=0  pen=0.027 mm  t=  355.0s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 032] rms=  15.164 mm  rollouts=38  snaps=0  pen=0.027 mm  t=  364.6s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 033] rms=  15.164 mm  rollouts=39  snaps=0  pen=0.027 mm  t=  374.2s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 034] rms=  15.164 mm  rollouts=40  snaps=0  pen=0.027 mm  t=  383.8s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 035] rms=  15.164 mm  rollouts=41  snaps=0  pen=0.027 mm  t=  393.4s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 036] rms=  15.164 mm  rollouts=43  snaps=0  pen=0.027 mm  t=  412.6s  alpha=2 ls=2
+[P2_endpose20_state_lbfgs_s1 it 037] rms=  15.164 mm  rollouts=44  snaps=0  pen=0.027 mm  t=  422.2s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 038] rms=  15.164 mm  rollouts=45  snaps=0  pen=0.027 mm  t=  431.9s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 039] rms=  15.164 mm  rollouts=46  snaps=0  pen=0.027 mm  t=  441.5s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 040] rms=  15.164 mm  rollouts=47  snaps=0  pen=0.027 mm  t=  451.1s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 041] rms=  15.164 mm  rollouts=48  snaps=0  pen=0.027 mm  t=  460.7s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 042] rms=  15.164 mm  rollouts=49  snaps=0  pen=0.027 mm  t=  470.4s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 043] rms=  15.164 mm  rollouts=50  snaps=0  pen=0.027 mm  t=  480.0s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 044] rms=  15.164 mm  rollouts=52  snaps=0  pen=0.027 mm  t=  499.3s  alpha=0.484 ls=2
+[P2_endpose20_state_lbfgs_s1 it 045] rms=  15.164 mm  rollouts=53  snaps=0  pen=0.027 mm  t=  509.8s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 046] rms=  15.164 mm  rollouts=55  snaps=0  pen=0.027 mm  t=  529.5s  alpha=0.395 ls=2
+[P2_endpose20_state_lbfgs_s1 it 047] rms=  15.164 mm  rollouts=56  snaps=0  pen=0.027 mm  t=  539.1s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 048] rms=  15.164 mm  rollouts=58  snaps=0  pen=0.027 mm  t=  558.2s  alpha=0.528 ls=2
+[P2_endpose20_state_lbfgs_s1 it 049] rms=  15.163 mm  rollouts=59  snaps=0  pen=0.027 mm  t=  567.7s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 050] rms=  15.163 mm  rollouts=60  snaps=0  pen=0.027 mm  t=  577.3s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 051] rms=  15.163 mm  rollouts=62  snaps=0  pen=0.027 mm  t=  596.7s  alpha=0.357 ls=2
+[P2_endpose20_state_lbfgs_s1 it 052] rms=  15.163 mm  rollouts=63  snaps=0  pen=0.027 mm  t=  606.4s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 053] rms=  15.162 mm  rollouts=64  snaps=0  pen=0.027 mm  t=  616.0s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 054] rms=  15.162 mm  rollouts=66  snaps=0  pen=0.027 mm  t=  636.1s  alpha=0.521 ls=2
+[P2_endpose20_state_lbfgs_s1 it 055] rms=  15.162 mm  rollouts=67  snaps=0  pen=0.027 mm  t=  645.7s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 056] rms=  15.162 mm  rollouts=68  snaps=0  pen=0.027 mm  t=  655.4s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 057] rms=  15.162 mm  rollouts=69  snaps=0  pen=0.027 mm  t=  665.3s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 058] rms=  15.162 mm  rollouts=70  snaps=0  pen=0.027 mm  t=  674.9s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 059] rms=  15.162 mm  rollouts=71  snaps=0  pen=0.027 mm  t=  684.7s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 060] rms=  15.162 mm  rollouts=72  snaps=0  pen=0.027 mm  t=  694.4s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 061] rms=  15.162 mm  rollouts=73  snaps=0  pen=0.027 mm  t=  704.3s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 062] rms=  15.162 mm  rollouts=74  snaps=0  pen=0.027 mm  t=  714.0s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 063] rms=  15.162 mm  rollouts=75  snaps=0  pen=0.027 mm  t=  723.7s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 064] rms=  15.162 mm  rollouts=76  snaps=0  pen=0.027 mm  t=  733.3s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 065] rms=  15.162 mm  rollouts=77  snaps=0  pen=0.027 mm  t=  742.9s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 066] rms=  15.162 mm  rollouts=78  snaps=0  pen=0.027 mm  t=  752.5s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 067] rms=  15.162 mm  rollouts=79  snaps=0  pen=0.027 mm  t=  762.1s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 068] rms=  15.162 mm  rollouts=80  snaps=0  pen=0.027 mm  t=  771.6s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 069] rms=  15.162 mm  rollouts=81  snaps=0  pen=0.027 mm  t=  781.3s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 070] rms=  15.162 mm  rollouts=82  snaps=0  pen=0.027 mm  t=  790.9s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 071] rms=  15.162 mm  rollouts=102  snaps=0  pen=0.027 mm  t=  987.3s  alpha=0.000496 ls=20
+[P2_endpose20_state_lbfgs_s1 it 072] rms=  15.162 mm  rollouts=142  snaps=0  pen=0.027 mm  t= 1378.9s  alpha=0.000488 ls=20
+[P2_endpose20_state_lbfgs_s1 it 073] rms=  15.162 mm  rollouts=143  snaps=0  pen=0.027 mm  t= 1388.6s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 074] rms=  15.162 mm  rollouts=144  snaps=0  pen=0.027 mm  t= 1398.2s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 075] rms=  15.162 mm  rollouts=145  snaps=0  pen=0.027 mm  t= 1407.8s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 076] rms=  15.162 mm  rollouts=148  snaps=0  pen=0.027 mm  t= 1436.7s  alpha=4 ls=3
+[P2_endpose20_state_lbfgs_s1 it 077] rms=  15.162 mm  rollouts=149  snaps=0  pen=0.027 mm  t= 1446.3s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 078] rms=  15.162 mm  rollouts=150  snaps=0  pen=0.027 mm  t= 1456.1s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 079] rms=  15.162 mm  rollouts=151  snaps=0  pen=0.027 mm  t= 1465.7s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 080] rms=  15.162 mm  rollouts=152  snaps=0  pen=0.027 mm  t= 1475.4s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 081] rms=  15.162 mm  rollouts=153  snaps=0  pen=0.027 mm  t= 1485.3s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 082] rms=  15.162 mm  rollouts=154  snaps=0  pen=0.027 mm  t= 1495.5s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 083] rms=  15.162 mm  rollouts=155  snaps=0  pen=0.027 mm  t= 1505.1s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 084] rms=  15.162 mm  rollouts=156  snaps=0  pen=0.027 mm  t= 1514.8s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 085] rms=  15.162 mm  rollouts=157  snaps=0  pen=0.027 mm  t= 1524.4s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 086] rms=  15.162 mm  rollouts=177  snaps=0  pen=0.027 mm  t= 1717.3s  alpha=1 ls=20
+[P2_endpose20_state_lbfgs_s1 it 087] rms=  15.162 mm  rollouts=199  snaps=0  pen=0.027 mm  t= 1930.7s  alpha=2 ls=2
+[P2_endpose20_state_lbfgs_s1 it 088] rms=  15.162 mm  rollouts=200  snaps=0  pen=0.027 mm  t= 1940.3s  alpha=1 ls=1
+[P2_endpose20_state_lbfgs_s1 it 089] rms=  15.162 mm  rollouts=240  snaps=0  pen=0.027 mm  t= 2325.9s  alpha=0.125 ls=20
+[P2_endpose20_state_lbfgs_s1 it 090] rms=  15.162 mm  rollouts=280  snaps=0  pen=0.027 mm  t= 2709.3s  alpha=6.1e-05 ls=20
+[P2_endpose20_state_lbfgs_s1 it 091] rms=  15.162 mm  rollouts=300  snaps=0  pen=0.027 mm  t= 2900.6s  alpha=1.91e-06 ls=20
+[P2_endpose20_state_lbfgs_s1 it 092] rms=  15.162 mm  rollouts=340  snaps=0  pen=0.027 mm  t= 3285.2s  alpha=0.0312 ls=20
+[P2_endpose20_state_lbfgs_s1 it 093] rms=  15.162 mm  rollouts=380  snaps=0  pen=0.027 mm  t= 3669.7s  alpha=0.125 ls=20
+[P2_endpose20_state_lbfgs_s1 it 094] rms=  15.162 mm  rollouts=400  snaps=0  pen=0.027 mm  t= 3860.9s  alpha=7.63e-06 ls=20
+[P2_endpose20_state_lbfgs_s1] stopped: line search found no admissible decrease
+[tro_style] /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-155624-P2_endpose20_state_lbfgs_s1/P2_endpose20_state_lbfgs_s1_path.{pdf,svg}  3.50 x 4.57 in (88.9 x 116.1 mm), font: Times New Roman
+[tro_style] /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-155624-P2_endpose20_state_lbfgs_s1/P2_endpose20_state_lbfgs_s1_error.{pdf,svg}  3.50 x 1.49 in (88.9 x 37.8 mm), font: Times New Roman
+Saved 200-frame animation to /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-155624-P2_endpose20_state_lbfgs_s1/P2_endpose20_state_lbfgs_s1.gif
+[tro_style] /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-155624-P2_endpose20_state_lbfgs_s1/P2_endpose20_state_lbfgs_s1_rms.{pdf,svg}  3.50 x 1.77 in (88.9 x 44.9 mm), font: Times New Roman
+Run summary -> /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-155624-P2_endpose20_state_lbfgs_s1/summary.json  (finished)
+[P2_endpose20_state_lbfgs_s1] final rms 15.162 mm (best 15.162 mm), solved False, 94 updates, 440 rollouts, 0 failed (0 by the snap rule), 4244s -> /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-155624-P2_endpose20_state_lbfgs_s1

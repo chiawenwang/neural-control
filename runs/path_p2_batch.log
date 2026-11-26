@@ -1,0 +1,67 @@
+== 1. targets
+Rod: soft_strip: R_outer=0.003 m, r_inner=0 m, E=2e+09 Pa, rho=1200 kg/m^3, nu=0.4  ->  EI=0.127 N*m^2, EA=5.65e+04 N, GJ=0.0909 N*m^2
+Horizon: 200 steps, nv = 51, mid node 25 at [0.161, 0.0, 0.4586], 2 peg(s), contact model smooth
+Start rod: clearance to the pegs [15.1, 36.2] mm (rod surface), holonomy -0.000 rad
+[P2] P2, between two pegs: the rod is pressed onto peg A (clamp side, outside the arc) and runs above peg B (gripper side, inside the arc); the designed motion swings the gripper tangent up and back
+   build contact: tracker on the sine rms 0.000 mm (0 held steps); designed motion vs reference 0.000 mm; reference vs free-rod path rms 1.6 mm (max 3.5)
+   path length 155 mm; contact from step [116, None] (42 % of the steps, 1 transitions, at the end [True, False]), final force [2.05, 0.0] N, max penetration 0.021 mm, mid node >= 316 mm from the pegs, snaps none, self clearance 34.0 mm
+   the same motion without the pegs: mid node 1.6 mm (rms) from the reference
+   criteria: all OK
+== 2a. common initializations (one per seed, in parallel)
+[init P2 s0] rms 14.52 mm (band 10-20), attempt 0, scale 0.370, contact 32 % of the steps, onset [135, None], 18s
+[init P2 s1] rms 15.21 mm (band 10-20), attempt 0, scale 0.744, contact 60 % of the steps, onset [79, None], 18s
+[init P2 s2] rms 14.61 mm (band 10-20), attempt 0, scale 1.000, contact 34 % of the steps, onset [133, None], 9s
+[init P2 s3] rms 14.79 mm (band 10-20), attempt 0, scale 0.582, contact 32 % of the steps, onset [135, None], 19s
+[init P2 s4] rms 14.51 mm (band 10-20), attempt 0, scale 0.461, contact 34 % of the steps, onset [133, None], 18s
+== 2b. gradient check
+[check P2] initial rms 14.52 mm, P = 4678, Newton tol 1.27e-07
+   gradient cost: state 50 ms / 200 solves; proxy 49 ms / 200 solves
+   dir 0: fd +2.849439e-04  state +2.849439e-04 (rel err 2.27e-10)  proxy +2.299526e-04 (rel err 1.93e-01)
+   dir 1: fd -8.903574e-04  state -8.903574e-04 (rel err 5.15e-10)  proxy -9.366281e-04 (rel err 5.20e-02)
+   dir 2: fd +5.916964e-04  state +5.916964e-04 (rel err 2.29e-09)  proxy +6.489819e-04 (rel err 9.68e-02)
+   dir 3: fd +7.347080e-04  state +7.347079e-04 (rel err 1.22e-09)  proxy +8.065172e-04 (rel err 9.77e-02)
+   state: median rel err 8.69e-10, max 2.29e-09;  proxy median 9.73e-02
+   proxy vs state per rate: first contact at step 135; median rel diff before 0.09876647006696834, after 5.178e-02, last rate 0.00e+00
+   -> runs/path_p2/checks/check_P2_net_s0.json
+== 3. main runs and baselines
+== 4. greedy
+== 5. figures
+== 6. verify and report
+ok   P2_endpose20_state_lbfgs_s0: final rms 14.195 mm, solved False, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_endpose20_state_lbfgs_s1: final rms 15.162 mm, solved False, 440 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P2_endpose20_state_lbfgs_s2: final rms 14.375 mm, solved False, 439 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P2_endpose20_state_lbfgs_s3: final rms 14.357 mm, solved False, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_endpose20_state_lbfgs_s4: final rms 14.423 mm, solved False, 361 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P2_endpose60_state_lbfgs_s0: final rms 12.955 mm, solved False, 225 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P2_endpose60_state_lbfgs_s1: final rms 15.046 mm, solved False, 166 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P2_endpose60_state_lbfgs_s2: final rms 13.756 mm, solved False, 281 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P2_endpose60_state_lbfgs_s3: final rms 13.671 mm, solved False, 417 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P2_endpose60_state_lbfgs_s4: final rms 13.703 mm, solved False, 211 rollouts, snap rejections 0, stop: line search found no admissible decrease
+ok   P2_greedy_state_greedy_s0: final rms 1.113 mm, solved True, 4.0 rollouts, snap rejections 0, stop: end of the path
+ok   P2_net_proxy_adam_s0: final rms 0.300 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_proxy_adam_s1: final rms 0.277 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_proxy_adam_s2: final rms 0.179 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_proxy_adam_s3: final rms 0.378 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_proxy_adam_s4: final rms 9.935 mm, solved False, 31 rollouts, snap rejections 0, stop: 20 failed rollouts (last: newton_failed at step 161)
+ok   P2_net_proxy_lbfgs_s0: final rms 0.291 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_proxy_lbfgs_s1: final rms 0.191 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_proxy_lbfgs_s2: final rms 0.155 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_proxy_lbfgs_s3: final rms 0.376 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_proxy_lbfgs_s4: final rms 0.458 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_state_adam_s0: final rms 0.293 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_state_adam_s1: final rms 0.216 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_state_adam_s2: final rms 0.168 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_state_adam_s3: final rms 0.376 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_state_adam_s4: final rms 5.908 mm, solved False, 30 rollouts, snap rejections 0, stop: 20 failed rollouts (last: newton_failed at step 156)
+ok   P2_net_state_lbfgs_s0: final rms 0.255 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_state_lbfgs_s1: final rms 0.135 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_state_lbfgs_s2: final rms 0.100 mm, solved True, 249 rollouts, snap rejections 0, stop: rms 0.0999 mm <= stop_rms 0.1 mm
+ok   P2_net_state_lbfgs_s3: final rms 0.358 mm, solved True, 500 rollouts, snap rejections 0, stop: rollout budget (500) used
+ok   P2_net_state_lbfgs_s4: final rms 0.100 mm, solved True, 350 rollouts, snap rejections 0, stop: rms 0.1000 mm <= stop_rms 0.1 mm
+ok   P2_rates_state_lbfgs_s0: final rms 0.089 mm, solved True, 26 rollouts, snap rejections 0, stop: rms 0.0886 mm <= stop_rms 0.1 mm
+ok   P2_rates_state_lbfgs_s1: final rms 0.097 mm, solved True, 69 rollouts, snap rejections 0, stop: rms 0.0974 mm <= stop_rms 0.1 mm
+ok   P2_rates_state_lbfgs_s2: final rms 0.096 mm, solved True, 47 rollouts, snap rejections 0, stop: rms 0.0957 mm <= stop_rms 0.1 mm
+ok   P2_rates_state_lbfgs_s3: final rms 0.097 mm, solved True, 48 rollouts, snap rejections 0, stop: rms 0.0968 mm <= stop_rms 0.1 mm
+ok   P2_rates_state_lbfgs_s4: final rms 0.098 mm, solved True, 51 rollouts, snap rejections 0, stop: rms 0.0976 mm <= stop_rms 0.1 mm
+36 runs, 0 with problems
+done: runs/path_p2/report.md

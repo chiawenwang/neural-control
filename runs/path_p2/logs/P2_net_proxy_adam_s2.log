@@ -1,0 +1,65 @@
+Run log -> /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-141406-P2_net_proxy_adam_s2
+Task: 3D path tracking, target P2 -- P2, between two pegs: the rod is pressed onto peg A (clamp side, outside the arc) and runs above peg B (gripper side, inside the arc); the designed motion swings the gripper tangent up and back
+Trajectory: net (P = 4678), init designed (fit rms 3.46e-04)
+Objective: trajectory (mid node, 200 terms); snap-through: rejected (infeasible trial)
+Gradient: proxy   Optimizer: adam {'lr': 0.0003}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Initial trajectory: rms 14.61 mm, max 21.46 mm, contact 34 % of the steps, snaps 0
+[P2_net_proxy_adam_s2 it 010] rms=   7.701 mm  rollouts=11  snaps=0  pen=0.032 mm  t=  106.2s  
+[P2_net_proxy_adam_s2 it 020] rms=   3.510 mm  rollouts=21  snaps=0  pen=0.037 mm  t=  202.4s  
+[P2_net_proxy_adam_s2 it 030] rms=   2.236 mm  rollouts=31  snaps=0  pen=0.021 mm  t=  298.1s  
+[P2_net_proxy_adam_s2 it 040] rms=   2.254 mm  rollouts=41  snaps=0  pen=0.024 mm  t=  393.9s  
+[P2_net_proxy_adam_s2 it 050] rms=   1.020 mm  rollouts=51  snaps=0  pen=0.021 mm  t=  489.7s  
+[P2_net_proxy_adam_s2 it 060] rms=   1.031 mm  rollouts=61  snaps=0  pen=0.022 mm  t=  587.6s  
+[P2_net_proxy_adam_s2 it 070] rms=   0.775 mm  rollouts=71  snaps=0  pen=0.019 mm  t=  683.7s  
+[P2_net_proxy_adam_s2 it 080] rms=   0.600 mm  rollouts=81  snaps=0  pen=0.020 mm  t=  779.9s  
+[P2_net_proxy_adam_s2 it 090] rms=   0.515 mm  rollouts=91  snaps=0  pen=0.019 mm  t=  876.1s  
+[P2_net_proxy_adam_s2 it 100] rms=   0.463 mm  rollouts=101  snaps=0  pen=0.019 mm  t=  972.1s  
+[P2_net_proxy_adam_s2 it 110] rms=   0.426 mm  rollouts=111  snaps=0  pen=0.019 mm  t= 1068.2s  
+[P2_net_proxy_adam_s2 it 120] rms=   0.397 mm  rollouts=121  snaps=0  pen=0.019 mm  t= 1164.3s  
+[P2_net_proxy_adam_s2 it 130] rms=   0.376 mm  rollouts=131  snaps=0  pen=0.018 mm  t= 1260.5s  
+[P2_net_proxy_adam_s2 it 140] rms=   0.358 mm  rollouts=141  snaps=0  pen=0.018 mm  t= 1356.8s  
+[P2_net_proxy_adam_s2 it 150] rms=   0.342 mm  rollouts=151  snaps=0  pen=0.019 mm  t= 1452.8s  
+[P2_net_proxy_adam_s2 it 160] rms=   0.328 mm  rollouts=161  snaps=0  pen=0.019 mm  t= 1548.9s  
+[P2_net_proxy_adam_s2 it 170] rms=   0.316 mm  rollouts=171  snaps=0  pen=0.019 mm  t= 1645.1s  
+[P2_net_proxy_adam_s2 it 180] rms=   0.305 mm  rollouts=181  snaps=0  pen=0.019 mm  t= 1741.4s  
+[P2_net_proxy_adam_s2 it 190] rms=   0.294 mm  rollouts=191  snaps=0  pen=0.019 mm  t= 1837.6s  
+[P2_net_proxy_adam_s2 it 200] rms=   0.285 mm  rollouts=201  snaps=0  pen=0.019 mm  t= 1935.3s  
+[P2_net_proxy_adam_s2 it 210] rms=   0.277 mm  rollouts=211  snaps=0  pen=0.019 mm  t= 2032.6s  
+[P2_net_proxy_adam_s2 it 220] rms=   0.270 mm  rollouts=221  snaps=0  pen=0.019 mm  t= 2129.6s  
+[P2_net_proxy_adam_s2 it 230] rms=   0.263 mm  rollouts=231  snaps=0  pen=0.019 mm  t= 2225.7s  
+[P2_net_proxy_adam_s2 it 240] rms=   0.257 mm  rollouts=241  snaps=0  pen=0.019 mm  t= 2321.8s  
+[P2_net_proxy_adam_s2 it 250] rms=   0.251 mm  rollouts=251  snaps=0  pen=0.019 mm  t= 2418.1s  
+[P2_net_proxy_adam_s2 it 260] rms=   0.246 mm  rollouts=261  snaps=0  pen=0.019 mm  t= 2514.2s  
+[P2_net_proxy_adam_s2 it 270] rms=   0.242 mm  rollouts=271  snaps=0  pen=0.019 mm  t= 2610.5s  
+[P2_net_proxy_adam_s2 it 280] rms=   0.237 mm  rollouts=281  snaps=0  pen=0.019 mm  t= 2706.6s  
+[P2_net_proxy_adam_s2 it 290] rms=   0.234 mm  rollouts=291  snaps=0  pen=0.019 mm  t= 2807.0s  
+[P2_net_proxy_adam_s2 it 300] rms=   0.230 mm  rollouts=301  snaps=0  pen=0.019 mm  t= 2903.9s  
+[P2_net_proxy_adam_s2 it 310] rms=   0.226 mm  rollouts=311  snaps=0  pen=0.020 mm  t= 3005.4s  
+[P2_net_proxy_adam_s2 it 320] rms=   0.223 mm  rollouts=321  snaps=0  pen=0.020 mm  t= 3103.0s  
+[P2_net_proxy_adam_s2 it 330] rms=   0.220 mm  rollouts=331  snaps=0  pen=0.020 mm  t= 3200.0s  
+[P2_net_proxy_adam_s2 it 340] rms=   0.217 mm  rollouts=341  snaps=0  pen=0.020 mm  t= 3298.3s  
+[P2_net_proxy_adam_s2 it 350] rms=   0.214 mm  rollouts=351  snaps=0  pen=0.020 mm  t= 3396.3s  
+[P2_net_proxy_adam_s2 it 360] rms=   0.211 mm  rollouts=361  snaps=0  pen=0.020 mm  t= 3493.0s  
+[P2_net_proxy_adam_s2 it 370] rms=   0.209 mm  rollouts=371  snaps=0  pen=0.020 mm  t= 3589.2s  
+[P2_net_proxy_adam_s2 it 380] rms=   0.206 mm  rollouts=381  snaps=0  pen=0.020 mm  t= 3685.6s  
+[P2_net_proxy_adam_s2 it 390] rms=   0.204 mm  rollouts=391  snaps=0  pen=0.020 mm  t= 3782.0s  
+[P2_net_proxy_adam_s2 it 400] rms=   0.201 mm  rollouts=401  snaps=0  pen=0.020 mm  t= 3878.4s  
+[P2_net_proxy_adam_s2 it 410] rms=   0.199 mm  rollouts=411  snaps=0  pen=0.020 mm  t= 3975.0s  
+[P2_net_proxy_adam_s2 it 420] rms=   0.196 mm  rollouts=421  snaps=0  pen=0.020 mm  t= 4071.5s  
+[P2_net_proxy_adam_s2 it 430] rms=   0.194 mm  rollouts=431  snaps=0  pen=0.020 mm  t= 4167.7s  
+[P2_net_proxy_adam_s2 it 440] rms=   0.192 mm  rollouts=441  snaps=0  pen=0.020 mm  t= 4263.9s  
+[P2_net_proxy_adam_s2 it 450] rms=   0.189 mm  rollouts=451  snaps=0  pen=0.020 mm  t= 4361.1s  
+[P2_net_proxy_adam_s2 it 460] rms=   0.187 mm  rollouts=461  snaps=0  pen=0.020 mm  t= 4458.0s  
+[P2_net_proxy_adam_s2 it 470] rms=   0.185 mm  rollouts=471  snaps=0  pen=0.020 mm  t= 4554.7s  
+[P2_net_proxy_adam_s2 it 480] rms=   0.183 mm  rollouts=481  snaps=0  pen=0.020 mm  t= 4650.9s  
+[P2_net_proxy_adam_s2 it 490] rms=   0.180 mm  rollouts=491  snaps=0  pen=0.020 mm  t= 4747.2s  
+[P2_net_proxy_adam_s2] stopped: rollout budget (500) used
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-141406-P2_net_proxy_adam_s2/P2_net_proxy_adam_s2_path.{pdf,svg}  3.50 x 4.44 in (88.9 x 112.9 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-141406-P2_net_proxy_adam_s2/P2_net_proxy_adam_s2_error.{pdf,svg}  3.50 x 1.49 in (88.9 x 37.8 mm), font: Liberation Serif
+Saved 200-frame animation to /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-141406-P2_net_proxy_adam_s2/P2_net_proxy_adam_s2.gif
+[tro_style] /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-141406-P2_net_proxy_adam_s2/P2_net_proxy_adam_s2_rms.{pdf,svg}  3.50 x 1.80 in (88.9 x 45.8 mm), font: Liberation Serif
+Run summary -> /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-141406-P2_net_proxy_adam_s2/summary.json  (finished)
+[P2_net_proxy_adam_s2] final rms 0.179 mm (best 0.179 mm), solved True, 499 updates, 500 rollouts, 0 failed (0 by the snap rule), 4835s -> /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-141406-P2_net_proxy_adam_s2

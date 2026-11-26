@@ -1,0 +1,13 @@
+Greedy on P2: step cap 0.001696 (from ['P2_net_state_lbfgs_s0.npz', 'P2_net_state_lbfgs_s1.npz', 'P2_net_state_lbfgs_s2.npz', 'P2_net_state_lbfgs_s3.npz', 'P2_net_state_lbfgs_s4.npz']), alphas (1.0, 0.5, 0.25), damping 0.03
+  step   25/200  error   0.01 mm  alpha 1.00  u [ 0.613 -0.004  0.608  0.028  0.055  0.   ]  4s
+  step   50/200  error   0.01 mm  alpha 1.00  u [ 0.607 -0.007  0.595  0.053  0.118  0.   ]  7s
+  step   75/200  error   1.09 mm  alpha 1.00  u [ 0.602 -0.009  0.591  0.077  0.189  0.001]  12s
+  step  100/200  error   2.84 mm  alpha 1.00  u [ 0.597 -0.011  0.594  0.098  0.286  0.002]  19s
+  step  125/200  error   0.01 mm  alpha 1.00  u [ 0.565 -0.018  0.589  0.149  0.293  0.004]  25s
+  step  150/200  error   0.01 mm  alpha 1.00  u [ 0.538 -0.024  0.592  0.194  0.257  0.003]  28s
+  step  175/200  error   0.01 mm  alpha 1.00  u [ 0.515 -0.029  0.595  0.236  0.226  0.001]  32s
+  step  200/200  error   0.01 mm  alpha 1.00  u [ 0.496 -0.034  0.598  0.274  0.199 -0.002]  35s
+[tro_style] runs/path_p2/P2_greedy_state_greedy_s0_path.{pdf,svg}  3.50 x 4.59 in (88.9 x 116.6 mm), font: Times New Roman
+[tro_style] runs/path_p2/P2_greedy_state_greedy_s0_error.{pdf,svg}  3.50 x 1.51 in (88.9 x 38.3 mm), font: Times New Roman
+Saved 200-frame animation to runs/path_p2/P2_greedy_state_greedy_s0.gif
+[P2_greedy_state_greedy_s0] 200 steps, 0 held, rejected {'newton': 0, 'unstable': 0, 'error': 0, 'snap': 0, 'tunnel': 0, 'workspace_clip': 0}; final rms 1.113 mm, max 4.44 mm, solved True, admissible True, replay deviation 0.0, 35s -> runs/path_p2

@@ -1,0 +1,35 @@
+Run log -> /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-125226-P2_net_state_adam_s4
+Task: 3D path tracking, target P2 -- P2, between two pegs: the rod is pressed onto peg A (clamp side, outside the arc) and runs above peg B (gripper side, inside the arc); the designed motion swings the gripper tangent up and back
+Trajectory: net (P = 4678), init designed (fit rms 4.28e-04)
+Objective: trajectory (mid node, 200 terms); snap-through: rejected (infeasible trial)
+Gradient: state   Optimizer: adam {'lr': 0.0003}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Initial trajectory: rms 14.51 mm, max 22.17 mm, contact 34 % of the steps, snaps 0
+[P2_net_state_adam_s4 it 003] FAILED rollout (newton_failed at step 155); failures 1/20, rollouts 5
+[P2_net_state_adam_s4 it 003] FAILED rollout (newton_failed at step 156); failures 2/20, rollouts 6
+[P2_net_state_adam_s4 it 004] FAILED rollout (newton_failed at step 150); failures 3/20, rollouts 8
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 143); failures 4/20, rollouts 14
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 144); failures 5/20, rollouts 15
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 145); failures 6/20, rollouts 16
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 147); failures 7/20, rollouts 17
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 148); failures 8/20, rollouts 18
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 149); failures 9/20, rollouts 19
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 150); failures 10/20, rollouts 20
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 151); failures 11/20, rollouts 21
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 151); failures 12/20, rollouts 22
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 152); failures 13/20, rollouts 23
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 153); failures 14/20, rollouts 24
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 154); failures 15/20, rollouts 25
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 154); failures 16/20, rollouts 26
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 155); failures 17/20, rollouts 27
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 155); failures 18/20, rollouts 28
+[P2_net_state_adam_s4 it 009] FAILED rollout (newton_failed at step 156); failures 19/20, rollouts 29
+[P2_net_state_adam_s4] stopped: 20 failed rollouts (last: newton_failed at step 156)
+/home/sciarm20/miniconda3/envs/neural-control/lib/python3.14/contextlib.py:141: UserWarning: tro_style: 'Times New Roman' is not installed, using 'Liberation Serif' (/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf). Liberation Serif / TeX Gyre Termes / Nimbus Roman have the same metrics, but the PDF embeds the fallback. Linux: install ttf-mscorefonts-installer, then delete ~/.cache/matplotlib.
+  return next(self.gen)
+[tro_style] /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-125226-P2_net_state_adam_s4/P2_net_state_adam_s4_path.{pdf,svg}  3.50 x 4.29 in (88.9 x 109.0 mm), font: Liberation Serif
+[tro_style] /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-125226-P2_net_state_adam_s4/P2_net_state_adam_s4_error.{pdf,svg}  3.50 x 1.49 in (88.9 x 37.8 mm), font: Liberation Serif
+Saved 200-frame animation to /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-125226-P2_net_state_adam_s4/P2_net_state_adam_s4.gif
+[tro_style] /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-125226-P2_net_state_adam_s4/P2_net_state_adam_s4_rms.{pdf,svg}  3.50 x 1.81 in (88.9 x 45.9 mm), font: Liberation Serif
+Run summary -> /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-125226-P2_net_state_adam_s4/summary.json  (finished)
+[P2_net_state_adam_s4] final rms 5.908 mm (best 4.259 mm), solved False, 9 updates, 30 rollouts, 20 failed (0 by the snap rule), 395s -> /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-125226-P2_net_state_adam_s4

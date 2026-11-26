@@ -1,0 +1,73 @@
+Run log -> /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-154410-P2_rates_state_lbfgs_s1
+Task: 3D path tracking, target P2 -- P2, between two pegs: the rod is pressed onto peg A (clamp side, outside the arc) and runs above peg B (gripper side, inside the arc); the designed motion swings the gripper tangent up and back
+Trajectory: rates (P = 1200), init designed (fit rms 0.00e+00)
+Objective: trajectory (mid node, 200 terms); snap-through: rejected (infeasible trial)
+Gradient: state   Optimizer: lbfgs {'history': 10, 'c1': 0.0001, 'c2': 0.9, 'max_ls': 20, 'first_step': 0.1}
+Stop: rms <= 0.1 mm | 500 updates | 500 rollouts | 20 failed rollouts;  workspace: reject
+Initial trajectory: rms 15.21 mm, max 21.58 mm, contact 60 % of the steps, snaps 0
+[P2_rates_state_lbfgs_s1 it 001] rms=  13.767 mm  rollouts=7  snaps=0  pen=0.024 mm  t=   66.9s  alpha=32 ls=6
+[P2_rates_state_lbfgs_s1 it 002] rms=   7.304 mm  rollouts=8  snaps=0  pen=0.000 mm  t=   76.5s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 003] rms=   6.391 mm  rollouts=9  snaps=0  pen=0.000 mm  t=   86.4s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 004] rms=   2.002 mm  rollouts=10  snaps=0  pen=0.013 mm  t=   95.9s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 005] rms=   1.812 mm  rollouts=11  snaps=0  pen=0.013 mm  t=  105.5s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 006] rms=   1.657 mm  rollouts=12  snaps=0  pen=0.013 mm  t=  115.0s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 007] rms=   1.287 mm  rollouts=13  snaps=0  pen=0.013 mm  t=  124.6s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 008] rms=   1.082 mm  rollouts=14  snaps=0  pen=0.012 mm  t=  134.2s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 009] rms=   0.876 mm  rollouts=15  snaps=0  pen=0.011 mm  t=  143.7s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 010] rms=   0.771 mm  rollouts=16  snaps=0  pen=0.010 mm  t=  153.2s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 011] rms=   0.703 mm  rollouts=17  snaps=0  pen=0.009 mm  t=  162.9s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 012] rms=   0.638 mm  rollouts=18  snaps=0  pen=0.008 mm  t=  172.6s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 013] rms=   0.631 mm  rollouts=20  snaps=0  pen=0.008 mm  t=  191.9s  alpha=0.104 ls=2
+[P2_rates_state_lbfgs_s1 it 014] rms=   0.588 mm  rollouts=21  snaps=0  pen=0.007 mm  t=  201.4s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 015] rms=   0.569 mm  rollouts=22  snaps=0  pen=0.007 mm  t=  211.0s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 016] rms=   0.546 mm  rollouts=23  snaps=0  pen=0.007 mm  t=  220.6s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 017] rms=   0.531 mm  rollouts=24  snaps=0  pen=0.007 mm  t=  230.1s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 018] rms=   0.507 mm  rollouts=25  snaps=0  pen=0.007 mm  t=  239.6s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 019] rms=   0.454 mm  rollouts=26  snaps=0  pen=0.009 mm  t=  249.2s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 020] rms=   0.437 mm  rollouts=27  snaps=0  pen=0.011 mm  t=  258.7s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 021] rms=   0.403 mm  rollouts=28  snaps=0  pen=0.010 mm  t=  268.3s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 022] rms=   0.390 mm  rollouts=29  snaps=0  pen=0.010 mm  t=  277.8s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 023] rms=   0.364 mm  rollouts=30  snaps=0  pen=0.011 mm  t=  287.4s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 024] rms=   0.331 mm  rollouts=31  snaps=0  pen=0.013 mm  t=  296.9s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 025] rms=   0.313 mm  rollouts=33  snaps=0  pen=0.014 mm  t=  316.0s  alpha=0.316 ls=2
+[P2_rates_state_lbfgs_s1 it 026] rms=   0.287 mm  rollouts=34  snaps=0  pen=0.015 mm  t=  325.5s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 027] rms=   0.276 mm  rollouts=35  snaps=0  pen=0.015 mm  t=  335.0s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 028] rms=   0.268 mm  rollouts=36  snaps=0  pen=0.015 mm  t=  344.5s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 029] rms=   0.257 mm  rollouts=37  snaps=0  pen=0.015 mm  t=  354.1s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 030] rms=   0.238 mm  rollouts=38  snaps=0  pen=0.015 mm  t=  363.6s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 031] rms=   0.221 mm  rollouts=39  snaps=0  pen=0.015 mm  t=  373.2s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 032] rms=   0.209 mm  rollouts=40  snaps=0  pen=0.016 mm  t=  382.7s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 033] rms=   0.202 mm  rollouts=41  snaps=0  pen=0.016 mm  t=  392.3s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 034] rms=   0.197 mm  rollouts=42  snaps=0  pen=0.016 mm  t=  401.8s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 035] rms=   0.193 mm  rollouts=43  snaps=0  pen=0.016 mm  t=  411.4s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 036] rms=   0.190 mm  rollouts=44  snaps=0  pen=0.016 mm  t=  420.9s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 037] rms=   0.184 mm  rollouts=45  snaps=0  pen=0.016 mm  t=  430.4s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 038] rms=   0.182 mm  rollouts=46  snaps=0  pen=0.016 mm  t=  439.9s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 039] rms=   0.178 mm  rollouts=47  snaps=0  pen=0.016 mm  t=  449.5s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 040] rms=   0.174 mm  rollouts=48  snaps=0  pen=0.016 mm  t=  459.0s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 041] rms=   0.169 mm  rollouts=49  snaps=0  pen=0.017 mm  t=  468.5s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 042] rms=   0.163 mm  rollouts=50  snaps=0  pen=0.017 mm  t=  478.0s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 043] rms=   0.159 mm  rollouts=51  snaps=0  pen=0.017 mm  t=  487.7s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 044] rms=   0.156 mm  rollouts=52  snaps=0  pen=0.017 mm  t=  497.4s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 045] rms=   0.153 mm  rollouts=53  snaps=0  pen=0.017 mm  t=  507.0s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 046] rms=   0.149 mm  rollouts=54  snaps=0  pen=0.017 mm  t=  516.5s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 047] rms=   0.141 mm  rollouts=55  snaps=0  pen=0.018 mm  t=  526.1s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 048] rms=   0.140 mm  rollouts=57  snaps=0  pen=0.018 mm  t=  545.2s  alpha=0.37 ls=2
+[P2_rates_state_lbfgs_s1 it 049] rms=   0.136 mm  rollouts=58  snaps=0  pen=0.018 mm  t=  554.8s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 050] rms=   0.134 mm  rollouts=59  snaps=0  pen=0.018 mm  t=  564.3s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 051] rms=   0.131 mm  rollouts=60  snaps=0  pen=0.018 mm  t=  573.9s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 052] rms=   0.130 mm  rollouts=61  snaps=0  pen=0.018 mm  t=  583.5s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 053] rms=   0.125 mm  rollouts=62  snaps=0  pen=0.018 mm  t=  593.1s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 054] rms=   0.121 mm  rollouts=63  snaps=0  pen=0.018 mm  t=  602.7s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 055] rms=   0.118 mm  rollouts=64  snaps=0  pen=0.018 mm  t=  612.2s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 056] rms=   0.115 mm  rollouts=65  snaps=0  pen=0.018 mm  t=  621.8s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 057] rms=   0.110 mm  rollouts=66  snaps=0  pen=0.018 mm  t=  631.4s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 058] rms=   0.105 mm  rollouts=67  snaps=0  pen=0.018 mm  t=  641.0s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1 it 059] rms=   0.101 mm  rollouts=68  snaps=0  pen=0.018 mm  t=  650.6s  alpha=1 ls=1
+[P2_rates_state_lbfgs_s1] stopped: rms 0.0974 mm <= stop_rms 0.1 mm
+[tro_style] /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-154410-P2_rates_state_lbfgs_s1/P2_rates_state_lbfgs_s1_path.{pdf,svg}  3.50 x 4.47 in (88.9 x 113.5 mm), font: Times New Roman
+[tro_style] /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-154410-P2_rates_state_lbfgs_s1/P2_rates_state_lbfgs_s1_error.{pdf,svg}  3.50 x 1.49 in (88.9 x 37.8 mm), font: Times New Roman
+Saved 200-frame animation to /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-154410-P2_rates_state_lbfgs_s1/P2_rates_state_lbfgs_s1.gif
+[tro_style] /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-154410-P2_rates_state_lbfgs_s1/P2_rates_state_lbfgs_s1_rms.{pdf,svg}  3.50 x 1.78 in (88.9 x 45.3 mm), font: Times New Roman
+Run summary -> /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-154410-P2_rates_state_lbfgs_s1/summary.json  (finished)
+[P2_rates_state_lbfgs_s1] final rms 0.097 mm (best 0.097 mm), solved True, 59 updates, 69 rollouts, 0 failed (0 by the snap rule), 660s -> /home/sciarm20/neural-control/experiments/path_pegs2_3d/runs/20261125-154410-P2_rates_state_lbfgs_s1

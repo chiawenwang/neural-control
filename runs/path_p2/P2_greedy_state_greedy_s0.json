@@ -1,0 +1,109 @@
+{
+ "task": "path",
+ "status": "done",
+ "target_name": "P2",
+ "config": "configs/task_path_pegs2_3d.yaml",
+ "param": "greedy",
+ "grad_method": "state",
+ "optimizer": "greedy",
+ "optimizer_settings": {
+  "damping": 0.03,
+  "angle_scale": 0.2,
+  "max_step": 0.03,
+  "alphas": [
+   1.0,
+   0.5,
+   0.25
+  ],
+  "cap": 0.0016961119721529362
+ },
+ "reject_snap": true,
+ "seed": 0,
+ "P": 0,
+ "init": {
+  "init": "u0 (no trajectory)"
+ },
+ "nv": 51,
+ "N": 200,
+ "mid_node": 25,
+ "step_cap_source": [
+  "P2_net_state_lbfgs_s0.npz",
+  "P2_net_state_lbfgs_s1.npz",
+  "P2_net_state_lbfgs_s2.npz",
+  "P2_net_state_lbfgs_s3.npz",
+  "P2_net_state_lbfgs_s4.npz"
+ ],
+ "stop": "end of the path",
+ "train_time": 35.209150552749634,
+ "updates": 200,
+ "rollouts": 4.0,
+ "evaluations": 200,
+ "failures": 0,
+ "failure_reasons": [],
+ "rejected": {
+  "newton": 0,
+  "unstable": 0,
+  "error": 0,
+  "snap": 0,
+  "tunnel": 0,
+  "workspace_clip": 0
+ },
+ "held_steps": 0,
+ "snap_rejections": 0,
+ "init_rms": null,
+ "final_rms": 0.0011132613579199198,
+ "final_ok": true,
+ "final_loss": 1.2393508510377038e-06,
+ "final_max_err": 0.004436504448734729,
+ "final_end_err": 1.0507824293499298e-05,
+ "final_contact_fraction": 0.415,
+ "final_contact_transitions": 1,
+ "final_touching_at_end": true,
+ "final_onset": [
+  117,
+  62
+ ],
+ "final_snaps": 0,
+ "final_snap_steps": [],
+ "final_max_penetration": 0.0004657562064664736,
+ "final_max_strain": 5.6608795300450154e-05,
+ "final_max_abs_holonomy": 0.1896774492578337,
+ "final_ws_violation": 0.0,
+ "final_min_self_clearance": 0.03396307049967389,
+ "final_final_touching": [
+  true,
+  false
+ ],
+ "final_final_force": [
+  2.2939288890775957,
+  0.0
+ ],
+ "best_rms": 0.0011132613579199198,
+ "replay_max_deviation": 0.0,
+ "solved": true,
+ "admissible": true,
+ "admissibility": {
+  "all_steps_stable": true,
+  "in_workspace": true,
+  "no_self_contact": true,
+  "penetration_le_max": true,
+  "no_cap_contact": true,
+  "no_snap": true
+ },
+ "iterates": [
+  {
+   "eval": 0,
+   "rms": 0.0011132613579199198
+  }
+ ],
+ "evals": {},
+ "target": {
+  "description": "P2, between two pegs: the rod is pressed onto peg A (clamp side, outside the arc) and runs above peg B (gripper side, inside the arc); the designed motion swings the gripper tangent up and back",
+  "build": "contact",
+  "onset_step": [
+   116,
+   null
+  ],
+  "criteria_ok": true
+ }
+}
