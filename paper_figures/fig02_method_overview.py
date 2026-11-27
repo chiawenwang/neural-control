@@ -22,11 +22,13 @@ The figure is a schematic and reads no data.  Symbols follow
 ("IEEE T-RO figure style", ``src/tro_style.py``): drawn at its final size
 (data units are inches), Times / stix, 8 pt symbols in the nodes and titles,
 7 pt labels, Okabe-Ito colours plus line style (readable in grayscale),
-editable text in PDF (TrueType) and SVG (``<text>``), ``gid`` on every element.
+editable text in PDF (TrueType) and SVG (``<text>``), ``gid`` on every element;
+framed legend; no symbol or label on a line (``check_layout`` tests every text
+against every line, frame edge and node, and fails the run otherwise).
 
 Run from anywhere::
 
-    python paper_figures/fig_method_overview/fig02_method_overview.py
+    python paper_figures/fig02_method_overview/fig02_method_overview.py
 
 Writes ``fig02_method_overview.{pdf,svg,png}`` next to this file.  Include with
 ``\\includegraphics[width=\\textwidth]{...}`` in a ``figure*``; do not rescale.
@@ -52,7 +54,7 @@ import tro_style as ts  # noqa: E402
 STEM = HERE / "fig02_method_overview"
 
 # ---------------------------------------------------------------- canvas (inches)
-W, H = ts.DBL_W, 2.14
+W, H = ts.DBL_W, 1.96
 
 # ---------------------------------------------------------------- look
 FS_NODE = ts.FS_LABEL           # 8 pt: symbols in the nodes, titles
@@ -84,18 +86,18 @@ def m(s):
 
 
 # ---------------------------------------------------------------- layout
-CARRY = (0.06, 0.56)                 # carry-in column x0, x1
-FRAME = (0.72, 5.62)                 # step frame x0, x1
-FRAME_Y = (0.28, 1.54)
-LSBOX = (6.02, 7.10)                 # line search box x0, x1
-COL = (1.22, 2.42, 3.80, 5.02)       # node columns
-ROW = (1.30, 0.90, 0.50)             # top (forward), middle, bottom (adjoint)
-Y_XI = 1.78                          # xi node
-Y_TOP = 1.98                         # outer loop, top
-Y_BOT = 0.12                         # outer loop, bottom
+CARRY = (0.06, 0.54)                 # carry-in column x0, x1
+FRAME = (0.68, 5.36)                 # step frame x0, x1
+FRAME_Y = (0.15, 1.28)
+LSBOX = (5.80, 7.04)                 # line search box x0, x1
+COL = (1.16, 2.40, 3.70, 4.98)       # node columns
+ROW = (1.075, 0.715, 0.355)          # top (forward), middle, bottom (adjoint)
+Y_XI = 1.575                         # xi node (its edge label sits above the frame)
+Y_TOP = 1.77                         # outer loop, top
+Y_BOT = 0.05                         # outer loop, bottom
 
 # ---------------------------------------------------------------- helpers
-_TEXTS, _NODES = [], []
+_TEXTS, _NODES, _SEGS = [], [], []   # texts, node boxes, straight line pieces
 
 
 def text(ax, gid, x0, y0, s, size=FS_EDGE, ha="center", va="center", color=ts.BLACK, **kw):
@@ -120,6 +122,7 @@ def node(ax, gid, cx, cy, s, kind="forward", w=NODE_W, h=NODE_H):
 def path(ax, gid, pts, kind, arrow=True):
     """Polyline through ``pts``; arrow head on the last segment."""
     k = KIND[kind]
+    _SEGS.extend((gid, p0, p1) for p0, p1 in zip(pts[:-1], pts[1:]))
     if len(pts) > 2:
         xs, ys = zip(*pts[:-1])
         ln = Line2D(xs, ys, color=k["color"], linewidth=k["lw"], linestyle=k["ls"],
@@ -149,14 +152,15 @@ def hedge(ax, gid, b0, b1, y, kind, lab=None, below=None):
         text(ax, f"{gid}_lab2", xm, y - 0.04, below, va="top", color=ts.GRAY)
 
 
-def vedge(ax, gid, b0, b1, x0, kind, lab=None, side="right"):
-    """Vertical edge from node box ``b0`` down to node box ``b1``."""
+def vedge(ax, gid, b0, b1, x0, kind, lab=None, side="right", lab_y=None):
+    """Vertical edge from node box ``b0`` down to node box ``b1``; the label
+    beside it at mid-height, or at ``lab_y`` (e.g. to keep it off a frame)."""
     g = 0.015
     p0, p1 = (x0, b0[1] - g), (x0, b1[3] + g)
     path(ax, gid, [p0, p1], kind)
     if lab:
         dx = 0.045 if side == "right" else -0.045
-        text(ax, f"{gid}_lab", x0 + dx, 0.5 * (p0[1] + p1[1]), lab,
+        text(ax, f"{gid}_lab", x0 + dx, 0.5 * (p0[1] + p1[1]) if lab_y is None else lab_y, lab,
              ha="left" if side == "right" else "right")
 
 
@@ -176,6 +180,9 @@ def draw():
                            edgecolor=edge, linewidth=LW_FRAME, zorder=1)
         p.set_gid(gid)
         ax.add_patch(p)
+        (fy0, fy1) = FRAME_Y
+        _SEGS.extend([(gid, (x0, fy0), (x1, fy0)), (gid, (x0, fy1), (x1, fy1)),
+                      (gid, (x0, fy0), (x0, fy1)), (gid, (x1, fy0), (x1, fy1))])
     text(ax, "step_title", FRAME[1], FRAME_Y[1] + 0.035, r"homotopy step $k=1,\dots,M$",
          size=FS_NODE, ha="right", va="bottom")
 
@@ -199,12 +206,13 @@ def draw():
     hedge(ax, "e_zx", n_z, n_x, rt, "forward", m(rf"{G}({x},{z}_k)=\mathbf{{0}}"),
           below="Newton from " + m(rf"{x}_{{k-1}}"))
     hedge(ax, "e_xl", n_x, n_l, rt, "forward", m(r"\ell"))
-    vedge(ax, "e_xi_u", n_xi, n_u, c1, "forward", m(rf"\Delta\lambda\,{ud}(\lambda_{{k-1}};{xi})"))
+    vedge(ax, "e_xi_u", n_xi, n_u, c1, "forward", m(rf"\Delta\lambda\,{ud}(\lambda_{{k-1}};{xi})"),
+          lab_y=0.5 * (FRAME_Y[1] + n_xi[1]))     # between frame top and xi: off the frame
     vedge(ax, "e_uJ", n_u, n_J, c1, "forward", m(rf"\mathrm{{d}}/\mathrm{{d}}{xi}"))
     vedge(ax, "e_xG", n_x, n_G, c3, "forward", m(rf"\nabla^2_{{{x}{x}}}E"))
 
     # ---------------- adjoint (bottom row, right to left)
-    vedge(ax, "e_la", n_l, n_a, c4, "adjoint", m(rf"w_k\neq0:\ \partial/\partial{x}_k"))
+    vedge(ax, "e_la", n_l, n_a, c4, "adjoint", m(rf"w_k\neq0:\ \partial/\partial{x}_k"), side="left")
     hedge(ax, "e_aeta", n_a, n_eta, rb, "adjoint", m(rf"{Gx}^{{-1}}"))
     hedge(ax, "e_etapi", n_eta, n_pi, rb, "adjoint", m(rf"-{B}_k{T}{Gz}{T}"))
     hedge(ax, "e_pizeta", n_pi, n_zeta, rb, "adjoint", m(rf"+\,w_k{pi}_k{T}{J}_k"))
@@ -238,10 +246,14 @@ def draw():
          m(rf"{xi}\leftarrow{xi}+\tau{d}") + "  (next rollout)", va="bottom")
 
     # ---------------- legend (colour + line style + width)
-    lx, ly = 0.06, 1.90
+    lx, ly, dy = 0.13, 1.80, 0.115
+    fr = FancyBboxPatch((0.06, ly - 2 * dy - 0.085), 0.80, 2 * dy + 0.17, boxstyle="square,pad=0",
+                        facecolor="white", edgecolor=ts.BLACK, linewidth=0.5, zorder=1)
+    fr.set_gid("legend_frame")
+    ax.add_patch(fr)
     for i, (k, s) in enumerate((("forward", "forward"), ("adjoint", "adjoint"),
                                 ("loop", "outer loop"))):
-        yy = ly - i * 0.115
+        yy = ly - i * dy
         st = KIND[k]
         ln = Line2D([lx, lx + 0.20], [yy, yy], color=st["color"], linestyle=st["ls"],
                     linewidth=st["lw"] * 1.3)
@@ -265,6 +277,12 @@ def check_layout(fig):
     for (g0, b0), (g1, b1) in itertools.combinations(boxes.items(), 2):
         if b0.overlaps(b1):
             bad.append(f"{g0} overlaps {g1}")
+    e = 0.01                                    # in: clearance between a text and a line
+    for g, bb in boxes.items():
+        for gs, (xa, ya), (xb, yb) in _SEGS:
+            if (min(xa, xb) < bb.x1 + e and max(xa, xb) > bb.x0 - e
+                    and min(ya, yb) < bb.y1 + e and max(ya, yb) > bb.y0 - e):
+                bad.append(f"{g} on line {gs}")
     for g, bb in boxes.items():
         for gn, (x0, y0, x1, y1) in _NODES:
             inside = g.startswith(gn + "_") or (gn == "n_ls" and g.startswith("ls_"))

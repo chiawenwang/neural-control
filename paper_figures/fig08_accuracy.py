@@ -1,15 +1,17 @@
-"""Fig. 9 (fig:accuracy) -- gradient accuracy and cost, double column (7.16 in).
+"""Fig. 8 (fig:accuracy) -- gradient accuracy and cost, double column (7.16 in).
 
-(a) Directional derivatives of the loss along four random unit directions in
-    xi, relative error against central finite differences: state-based
-    gradient vs. frozen tangent, one column of points per scene. Filled
-    triangles: the frozen tangent has the wrong sign.
-(b) Per-rate relative difference of the frozen tangent from the state-based
-    gradient along lambda, ||G_hat_j - G_j|| / ||G_j||, one small panel per
-    scene, with the pegs (solid) and without them (dashed, S only); dotted:
-    first peg contact of the initial rollout.
-(c) Wall time of one gradient (after the rollout), state-based vs. frozen
-    tangent; the number of adjoint solves is written (vertically) above each bar.
+(a) e_FD: relative error of the directional derivatives of the loss along
+    four random unit directions in xi against central finite differences,
+    state-based gradient vs. frozen tangent, one column of points per scene;
+    filled triangles: the frozen tangent has the wrong sign.
+(b1)-(b4) e_rate: per-rate relative difference ||g_hat_j - g_j|| / ||g_j|| of
+    the frozen tangent from the state-based gradient along lambda, one panel
+    per scene (S1, S2, P1, P2), with the pegs (solid) and without them
+    (dashed, S only); dotted: first peg contact of the initial rollout.
+(c) t_grad: wall time of one gradient (after the rollout), state-based vs.
+    frozen tangent; numbers above the bars: adjoint solves.
+Axis labels are symbols with the unit in parentheses (defined in Sec. VII-C of the paper);
+legends are per panel, framed; reference lines are labelled in the plot.
 
 Data: the gradient checks of the code repository, seed 0, at the common
 initialization of each scene (written by ``scripts/train_shape.py check`` and
@@ -24,14 +26,17 @@ initialization of each scene (written by ``scripts/train_shape.py check`` and
 Scenes whose check file is missing are skipped, so the figure grows from
 three to four scenes without editing this script.
 
-Style: ``src/tro_style.py`` (IEEE T-RO rules: Times 8/7 pt, Okabe-Ito, 0.5 pt
-axes, editable text in PDF and SVG). Colours used here and to be kept in the
+Style: ``src/tro_style.py`` + project rules "IEEE T-RO figure style": panel
+letters 10 pt, labels 8 pt, ticks/legend/annotations 7 pt Times; symbols as
+axis labels, no words or formulas; closed axes boxes, ticks inward on all four
+sides; framed legend per panel; Okabe-Ito plus marker/line style (grayscale);
+editable text in PDF and SVG; nothing outside the page. Colours used here and to be kept in the
 other result figures: state-based (ours) = blue ``#0072B2``, frozen tangent =
 vermilion ``#D55E00``.
 
-Run from anywhere:  python paper_figures/fig09_accuracy/fig09_accuracy.py [out_dir]
-Writes fig09_accuracy.{pdf,svg,png} next to this script (or into out_dir).
-LaTeX: \\includegraphics[width=\\textwidth]{figures/fig09_accuracy.pdf} in figure*.
+Run from anywhere:  python paper_figures/fig08_accuracy/fig08_accuracy.py [out_dir]
+Writes fig08_accuracy.{pdf,svg,png} next to this script (or into out_dir).
+LaTeX: \\includegraphics[width=\\textwidth]{figures/fig08_accuracy.pdf} in figure*.
 """
 from __future__ import annotations
 
@@ -43,7 +48,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 # repository root = first ancestor holding runs/ and src/ (works whether this
-# script sits in paper_figures/ or in paper_figures/fig09_accuracy/)
+# script sits in paper_figures/ or in paper_figures/fig08_accuracy/)
 REPO = next(p for p in HERE.parents if (p / "runs").is_dir() and (p / "src").is_dir())
 sys.path.insert(0, str(REPO / "src"))
 
@@ -73,7 +78,7 @@ DASH_NOPEG = (0, (3.0, 1.5))
 DOT_CONTACT = (0, (1.0, 1.5))
 MS = 3.6                       # marker size (pt)
 
-FIG_H = 1.95                   # in, before fit_width (which keeps the aspect)
+FIG_H = 1.62                   # in, before fit_width (which keeps the aspect)
 
 # layout (inches). The horizontal positions are not fixed: tight_row() measures
 # the labels of every panel and fills the 7.16 in so that the gap between the
@@ -81,7 +86,7 @@ FIG_H = 1.95                   # in, before fit_width (which keeps the aspect)
 Y0, H_AX = 0.30, 1.30          # bottom and height of every axes
 MARGIN = 0.02                  # in, left/right of the outermost text
 GAP = 0.10                     # in, between the content of (a), (b) and (c)
-GAP_B = 0.08                   # in, between the small panels of (b)
+GAP_B = 0.13                   # in, between the small panels of (b)
 WEIGHT_A, WEIGHT_B_EACH, WEIGHT_C = 0.95, 0.80, 0.85   # share of the axes width
 
 
@@ -90,7 +95,7 @@ def load():
     for name, rel in SCENES:
         f = REPO / rel
         if not f.exists():
-            print(f"[fig09] {name}: {rel} not found -- skipped")
+            print(f"[fig08] {name}: {rel} not found -- skipped")
             continue
         d = json.load(open(f))
         if "per_rate_pegs" in d:            # shape task (S): with and without pegs
@@ -112,13 +117,92 @@ def load():
             n_state=int(d["state_adjoint_solves"]), n_proxy=int(d["proxy_adjoint_solves"]),
         ))
         s = out[-1]
-        print(f"[fig09] {name}: M={s['M']}, onset {s['onset']}, state rel err median "
+        print(f"[fig08] {name}: M={s['M']}, onset {s['onset']}, state rel err median "
               f"{np.median(s['e_state']):.2e}, proxy {np.median(s['e_proxy']):.3f}, "
               f"wrong sign {int(np.sum(s['fd'] * s['proxy'] < 0))}/{s['fd'].size}, "
               f"grad {s['t_state']:.2f} / {s['t_proxy']:.2f} ms")
     if not out:
         raise SystemExit("no check file found")
     return out
+
+
+FS_LETTER = 10                 # pt, panel letters (a), (b), (c)
+LEGEND_GAP = 3.0               # pt, between the x-axis labels and the legend
+
+
+def panel_letter(ax, letter):
+    """``(a)`` alone, 10 pt, regular, top left of the panel's content: its left
+    edge follows the y-axis label (also after resizing), its baseline sits just
+    above the axes. No panel title -- the caption says what the panel shows."""
+    return ax.annotate(letter, xy=(0, 1), xycoords=(ax.yaxis.label, "axes fraction"),
+                       xytext=(0, 3), textcoords="offset points", ha="left", va="bottom",
+                       fontsize=FS_LETTER, fontweight="normal", annotation_clip=False)
+
+
+def letter_at_left(fig, ax, letter):
+    """Panel letter above an axes without a y label: left edge = leftmost text
+    of the panel (tick labels) or the axes; re-placed when ts.save resizes."""
+    t = fig.text(0, 0, letter, ha="left", va="bottom", fontsize=FS_LETTER)
+
+    def place():
+        fig.canvas.draw()
+        inv = fig.transFigure.inverted()
+        b = ax.get_tightbbox(fig.canvas.get_renderer()).transformed(inv)
+        g = 3.0 / 72.0 / fig.get_size_inches()[1]
+        t.set_position((b.x0, ax.get_position().y1 + g))
+
+    fig._tro_place = getattr(fig, "_tro_place", []) + [place]
+    place()
+    return t
+
+
+def box(ax):
+    """Closed axes box: all four spines, ticks inward on all four sides."""
+    for sp in ax.spines.values():
+        sp.set_visible(True)
+        sp.set_linewidth(0.5)
+    ax.tick_params(which="both", direction="in", top=True, right=True)
+
+
+def leader_label(ax, text, xy_text, xy, color, ha="left", va="center"):
+    """In-plot label with a thin leader line (0.5 pt, colour of the element,
+    no arrowhead) from the edge of the text to the point xy on the element."""
+    return ax.annotate(text, xy=xy, xytext=xy_text, fontsize=ts.FS_TICK, color=color,
+                       ha=ha, va=va, linespacing=0.95, annotation_clip=False,
+                       arrowprops=dict(arrowstyle="-", lw=0.5, color=color,
+                                       shrinkA=1.0, shrinkB=0.0))
+
+
+def framed_legend(ax, handles, **kw):
+    """Legend of one panel inside its axes, in a thin black frame."""
+    leg = ax.legend(handles=handles, frameon=True, fancybox=False, framealpha=1.0,
+                    edgecolor=ts.BLACK, borderpad=0.35, handletextpad=0.4,
+                    labelspacing=0.25, handlelength=1.4, borderaxespad=0.4,
+                    fontsize=ts.FS_TICK, **kw)
+    leg.get_frame().set_linewidth(0.5)
+    return leg
+
+
+def legend_bottom(fig, axes, handles, ncol):
+    """One frameless legend centred below the drawn content of ``axes``; its
+    position is recomputed whenever ts.save resizes the figure."""
+    from matplotlib.legend_handler import HandlerTuple
+    from matplotlib.transforms import Bbox
+    leg = fig.legend(handles=handles, labels=[h.get_label() for h in handles],
+                     loc="upper center", ncol=ncol,
+                     handler_map={ts._Group: HandlerTuple(ndivide=None, pad=0.0)})
+
+    def place():
+        fig.canvas.draw()
+        r = fig.canvas.get_renderer()
+        inv = fig.transFigure.inverted()
+        bb = Bbox.union([a.get_tightbbox(r) for a in axes]).transformed(inv)
+        g = LEGEND_GAP / 72.0 / fig.get_size_inches()[1]
+        leg.set_bbox_to_anchor((bb.x0, bb.y0 - g, bb.width, 0.0), transform=fig.transFigure)
+
+    fig._tro_place = getattr(fig, "_tro_place", []) + [place]
+    place()
+    return leg
 
 
 def log_axis(ax, lo, hi, every=1):
@@ -149,9 +233,12 @@ def panel_a(ax, S):
     ax.set_xticks(x, [s["name"] for s in S])
     ax.set_xlim(-0.55, len(S) - 0.45)
     ax.tick_params(axis="x", length=0)
-    ax.set_ylabel("Relative error vs. FD")
+    ax.set_ylabel(r"$e_{\mathrm{FD}}$")
     ts.style_2d(ax)
-    ts.panel_title(ax, "(a)", "Directional derivatives")
+    box(ax)
+    ax.tick_params(axis="x", which="both", length=0)
+    framed_legend(ax, legend_a(), loc="center", bbox_to_anchor=(0.5, 0.5))
+    panel_letter(ax, "(a)")
 
 
 def panel_b(fig, S, h):
@@ -170,25 +257,34 @@ def panel_b(fig, S, h):
         ax.plot(lam, r, color=C_PROXY, lw=LW_DATA, zorder=3)
         if i == 0:
             log_axis(ax, 1e-3, 1e1)
-            ax.set_ylim(1e-3, 3e1)                        # headroom for the scene label
-            ax.set_ylabel(r"$\|\hat{\mathbf{g}}_j-\mathbf{g}_j\|\,/\,\|\mathbf{g}_j\|$")
+            ax.set_ylim(1e-3, 3e1)
+            ax.set_ylabel(r"$e_{\mathrm{rate}}$")
         else:
             ax.tick_params(axis="y", labelleft=False)
         ax.set_xlim(0, 1)
         ax.set_xticks([0, 0.5, 1], ["0", "0.5", "1"])
         ax.set_xlabel(r"$\lambda$", labelpad=1.0)
         ts.style_2d(ax)
-        ax.text(0.97, 0.97, s["name"], transform=ax.transAxes, ha="right", va="top",
-                fontsize=ts.FS_TICK)
+        box(ax)
+        # direct labels (once): with / without pegs in the S1 panel,
+        # first contact in the P1 panel
+        def at(curve, x):                             # value of a curve at lambda = x
+            return float(np.interp(x, lam, np.nan_to_num(curve, nan=1e-3)))
+        if s["name"] == "S1":
+            leader_label(ax, "with pegs", (0.06, 9.0), (0.32, at(s["rel"], 0.32)), C_PROXY)
+            leader_label(ax, "without\npegs", (0.06, 3.0e-3),
+                         (0.30, at(s["rel_nopeg"], 0.30)), C_NOPEG)
+        if s["name"] == "P1":
+            leader_label(ax, "first\ncontact", (lc - 0.12, 4.0e-3), (lc, 1.5e-2), ts.BLACK,
+                         ha="right")
         axes.append(ax)
-    ts.panel_title(axes[0], "(b)", "Per-rate difference of the frozen tangent")
     return axes
 
 
 def panel_c(ax, S):
     x = np.arange(len(S))
     bw = 0.40
-    y_lo, y_hi = 0.1, 250
+    y_lo, y_hi = 0.1, 2000
     ts_ = np.array([s["t_state"] for s in S])
     tp_ = np.array([s["t_proxy"] for s in S])
     # Bars start at the lower axis limit, not at 0: on a log axis a bar from 0
@@ -203,14 +299,16 @@ def panel_c(ax, S):
                           (x[i] + bw / 2, s["t_proxy"], s["n_proxy"])):
             ax.text(xc, t * 1.25, f"{nn}", ha="center", va="bottom", rotation=90,
                     fontsize=ts.FS_TICK - 1)
-    log_axis(ax, y_lo, 1e2)
+    log_axis(ax, y_lo, 1e3)
     ax.set_ylim(y_lo, y_hi)
     ax.set_xticks(x, [s["name"] for s in S])
     ax.set_xlim(-0.55, len(S) - 0.45)
-    ax.tick_params(axis="x", length=0)
-    ax.set_ylabel("Time per gradient (ms)")
+    ax.set_ylabel(r"$t_{\mathrm{grad}}$ (ms)")
     ts.style_2d(ax)
-    ts.panel_title(ax, "(c)", "Cost")
+    box(ax)
+    ax.tick_params(axis="x", which="both", length=0)
+    framed_legend(ax, legend_c(), loc="upper left")
+    panel_letter(ax, "(c)")
 
 
 def tight_row(fig, groups, weights, h, passes=3):
@@ -249,20 +347,19 @@ def tight_row(fig, groups, weights, h, passes=3):
     return over
 
 
-def legend_handles():
-    state = ts.group_handle(
-        [Line2D([], [], marker="o", ms=MS, mfc=C_STATE, mec=C_STATE, ls="none"),
-         Patch(facecolor=C_STATE, edgecolor=C_STATE, linewidth=0.5)], "State-based (ours)")
-    proxy = ts.group_handle(
-        [Line2D([], [], marker="^", ms=MS + 0.4, mfc="white", mec=C_PROXY, mew=0.7, ls="none"),
-         Line2D([], [], color=C_PROXY, lw=LW_DATA),
-         Patch(facecolor="white", edgecolor=C_PROXY, linewidth=0.7, hatch="//////")],
-        "Frozen tangent")
-    wrong = Line2D([], [], marker="^", ms=MS + 0.4, mfc=C_PROXY, mec=C_PROXY, ls="none",
-                   label="Wrong sign")
-    nopeg = Line2D([], [], color=C_NOPEG, lw=LW_REF, ls=DASH_NOPEG, label="Without pegs")
-    contact = Line2D([], [], color=ts.BLACK, lw=0.6, ls=DOT_CONTACT, label="First contact")
-    return [state, proxy, wrong, nopeg, contact]
+def legend_a():
+    return [Line2D([], [], marker="o", ms=MS, mfc=C_STATE, mec=C_STATE, ls="none",
+                   label="State-based"),
+            Line2D([], [], marker="^", ms=MS + 0.4, mfc="white", mec=C_PROXY, mew=0.7,
+                   ls="none", label="Frozen tangent"),
+            Line2D([], [], marker="^", ms=MS + 0.4, mfc=C_PROXY, mec=C_PROXY, ls="none",
+                   label="Wrong sign")]
+
+
+def legend_c():
+    return [Patch(facecolor=C_STATE, edgecolor=C_STATE, linewidth=0.5, label="State-based"),
+            Patch(facecolor="white", edgecolor=C_PROXY, linewidth=0.7, hatch="//////",
+                  label="Frozen tangent")]
 
 
 def main(out_dir=None):
@@ -278,8 +375,9 @@ def main(out_dir=None):
         panel_c(ax_c, S)
         tight_row(fig, [[ax_a], axes_b, [ax_c]],
                   [WEIGHT_A, WEIGHT_B_EACH * len(axes_b), WEIGHT_C], h)
-        ts.legend_top(fig, None, handles=legend_handles(), ncol=5, gap=2.0)
-        ts.save(fig, out / "fig09_accuracy", width=ts.DBL_W, gray=True)
+        for i, ax in enumerate(axes_b):
+            letter_at_left(fig, ax, f"(b{i + 1})")
+        ts.save(fig, out / "fig08_accuracy", width=ts.DBL_W, gray=True)
         plt.close(fig)
 
 
