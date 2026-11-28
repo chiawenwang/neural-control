@@ -454,57 +454,317 @@ class DERElasticEnergy3D(RodEnergy):
 
 
 ############################
-# Built-in: 3D DER with torsion (Bishop frame + the two gripper yaws)
+# Built-in: 3D DER with torsion (reference frames carried in time)
 ############################
+#
+# The three stencils below are ported line by line from the MAE 263F appendix
+# (github.com/StructuresComp/mae-263F, appendix/gradEs_hessEs.py,
+# gradEb_hessEb.py, gradEt_hessEt.py at commit 7d4a4b1; M. Khalid Jawed,
+# UCLA), including its Panetta et al. 2019 correction of the bending and
+# twisting Hessians.  Each returns the gradient and Hessian of the ENERGY of one
+# stencil over its local DOFs; the bending/twisting ones are ordered
+# ``[node0 (3), theta_e, node1 (3), theta_f, node2 (3)]`` as in 263F.  The only
+# change is ``need_hess``, which returns before the Hessian is built.
+
+def _stretch_grad_hess(node0, node1, l_k, EA, need_hess=True):
+    """``(dE/dq (6,), d2E/dq2 (6, 6))`` of one edge; 263F ``gradEs_hessEs``."""
+    edge = node1 - node0
+    edgeLen = np.linalg.norm(edge)
+    tangent = edge / edgeLen
+    epsX = edgeLen / l_k - 1
+    dF_unit = EA * tangent * epsX
+    dF = np.zeros(6)
+    dF[0:3] = -dF_unit
+    dF[3:6] = dF_unit
+    if not need_hess:
+        return dF, None
+
+    M = EA * ((1 / l_k - 1 / edgeLen) * np.eye(3)
+              + 1 / edgeLen * np.outer(edge, edge) / edgeLen ** 2)
+    dJ = np.zeros((6, 6))
+    dJ[0:3, 0:3] = M
+    dJ[3:6, 3:6] = M
+    dJ[0:3, 3:6] = -M
+    dJ[3:6, 0:3] = -M
+    return dF, dJ
+
+
+def _curvature(node0, node1, node2, m1e, m2e, m1f, m2f):
+    """``(kappa1, kappa2)`` at the turning node; 263F ``computekappa``."""
+    t0 = (node1 - node0) / np.linalg.norm(node1 - node0)
+    t1 = (node2 - node1) / np.linalg.norm(node2 - node1)
+    kb = 2.0 * np.cross(t0, t1) / (1.0 + np.dot(t0, t1))
+    return np.array([0.5 * np.dot(kb, m2e + m2f), -0.5 * np.dot(kb, m1e + m1f)])
+
+
+def _bend_grad_hess(node0, node1, node2, m1e, m2e, m1f, m2f, kappaBar, l_k,
+                    EI1, EI2, need_hess=True):
+    """``(dE/dq (11,), d2E/dq2 (11, 11))`` of one bending stencil; 263F
+    ``gradEb_hessEb`` (Panetta 2019 correction)."""
+    from rodframes import hat as crossMat
+
+    gradKappa = np.zeros((11, 2))
+
+    ee = node1 - node0
+    ef = node2 - node1
+    norm_e = np.linalg.norm(ee)
+    norm_f = np.linalg.norm(ef)
+    te = ee / norm_e
+    tf = ef / norm_f
+
+    # Curvature binormal
+    kb = 2.0 * np.cross(te, tf) / (1.0 + np.dot(te, tf))
+    chi = 1.0 + np.dot(te, tf)
+    tilde_t = (te + tf) / chi
+    tilde_d1 = (m1e + m1f) / chi
+    tilde_d2 = (m2e + m2f) / chi
+
+    # Curvatures
+    kappa1 = 0.5 * np.dot(kb, m2e + m2f)
+    kappa2 = -0.5 * np.dot(kb, m1e + m1f)
+
+    Dkappa1De = 1.0 / norm_e * (-kappa1 * tilde_t + np.cross(tf, tilde_d2))
+    Dkappa1Df = 1.0 / norm_f * (-kappa1 * tilde_t - np.cross(te, tilde_d2))
+    Dkappa2De = 1.0 / norm_e * (-kappa2 * tilde_t - np.cross(tf, tilde_d1))
+    Dkappa2Df = 1.0 / norm_f * (-kappa2 * tilde_t + np.cross(te, tilde_d1))
+    gradKappa[0:3, 0] = -Dkappa1De
+    gradKappa[4:7, 0] = Dkappa1De - Dkappa1Df
+    gradKappa[8:11, 0] = Dkappa1Df
+    gradKappa[0:3, 1] = -Dkappa2De
+    gradKappa[4:7, 1] = Dkappa2De - Dkappa2Df
+    gradKappa[8:11, 1] = Dkappa2Df
+    gradKappa[3, 0] = -0.5 * np.dot(kb, m1e)
+    gradKappa[7, 0] = -0.5 * np.dot(kb, m1f)
+    gradKappa[3, 1] = -0.5 * np.dot(kb, m2e)
+    gradKappa[7, 1] = -0.5 * np.dot(kb, m2f)
+
+    # Gradient of Eb
+    dkappaVector = np.array([kappa1, kappa2]) - kappaBar
+    gradKappa_1 = gradKappa[:, 0]
+    gradKappa_2 = gradKappa[:, 1]
+    dE_dKappa1 = EI1 / l_k * dkappaVector[0]
+    dE_dKappa2 = EI2 / l_k * dkappaVector[1]
+    dF = dE_dKappa1 * gradKappa_1 + dE_dKappa2 * gradKappa_2
+    if not need_hess:
+        return dF, None
+
+    # Hessian of the two curvatures
+    DDkappa1 = np.zeros((11, 11))
+    DDkappa2 = np.zeros((11, 11))
+
+    norm2_e = norm_e ** 2
+    norm2_f = norm_f ** 2
+
+    tt_o_tt = np.outer(tilde_t, tilde_t)
+    tmp = np.cross(tf, tilde_d2)
+    tf_c_d2t_o_tt = np.outer(tmp, tilde_t)
+    tt_o_tf_c_d2t = np.transpose(tf_c_d2t_o_tt)
+    kb_o_d2e = np.outer(kb, m2e)
+    te_o_te = np.outer(te, te)
+    Id3 = np.eye(3)
+
+    D2kappa1De2 = (1.0 / norm2_e * (2 * kappa1 * tt_o_tt - tf_c_d2t_o_tt - tt_o_tf_c_d2t)
+                   - kappa1 / (chi * norm2_e) * (Id3 - te_o_te)
+                   + 1.0 / (2.0 * norm2_e) * kb_o_d2e)
+
+    tmp = np.cross(te, tilde_d2)
+    te_c_d2t_o_tt = np.outer(tmp, tilde_t)
+    tt_o_te_c_d2t = np.transpose(te_c_d2t_o_tt)
+    kb_o_d2f = np.outer(kb, m2f)
+    tf_o_tf = np.outer(tf, tf)
+
+    D2kappa1Df2 = (1.0 / norm2_f * (2 * kappa1 * tt_o_tt + te_c_d2t_o_tt + tt_o_te_c_d2t)
+                   - kappa1 / (chi * norm2_f) * (Id3 - tf_o_tf)
+                   + 1.0 / (2.0 * norm2_f) * kb_o_d2f)
+
+    te_o_tf = np.outer(te, tf)
+    D2kappa1DfDe = (-kappa1 / (chi * norm_e * norm_f) * (Id3 + te_o_tf)
+                    + 1.0 / (norm_e * norm_f) * (2 * kappa1 * tt_o_tt - tf_c_d2t_o_tt
+                                                 + tt_o_te_c_d2t - crossMat(tilde_d2)))
+    D2kappa1DeDf = np.transpose(D2kappa1DfDe)
+
+    tmp = np.cross(tf, tilde_d1)
+    tf_c_d1t_o_tt = np.outer(tmp, tilde_t)
+    tt_o_tf_c_d1t = np.transpose(tf_c_d1t_o_tt)
+    kb_o_d1e = np.outer(kb, m1e)
+
+    D2kappa2De2 = (1.0 / norm2_e * (2.0 * kappa2 * tt_o_tt + tf_c_d1t_o_tt + tt_o_tf_c_d1t)
+                   - kappa2 / (chi * norm2_e) * (Id3 - te_o_te)
+                   - 1.0 / (2.0 * norm2_e) * kb_o_d1e)
+
+    tmp = np.cross(te, tilde_d1)
+    te_c_d1t_o_tt = np.outer(tmp, tilde_t)
+    tt_o_te_c_d1t = np.transpose(te_c_d1t_o_tt)
+    kb_o_d1f = np.outer(kb, m1f)
+
+    D2kappa2Df2 = (1.0 / norm2_f * (2 * kappa2 * tt_o_tt - te_c_d1t_o_tt - tt_o_te_c_d1t)
+                   - kappa2 / (chi * norm2_f) * (Id3 - tf_o_tf)
+                   - 1.0 / (2.0 * norm2_f) * kb_o_d1f)
+
+    D2kappa2DfDe = (-kappa2 / (chi * norm_e * norm_f) * (Id3 + te_o_tf)
+                    + 1.0 / (norm_e * norm_f) * (2 * kappa2 * tt_o_tt + tf_c_d1t_o_tt
+                                                 - tt_o_te_c_d1t + crossMat(tilde_d1)))
+    D2kappa2DeDf = np.transpose(D2kappa2DfDe)
+
+    D2kappa1Dthetae2 = -0.5 * np.dot(kb, m2e)
+    D2kappa1Dthetaf2 = -0.5 * np.dot(kb, m2f)
+    D2kappa2Dthetae2 = 0.5 * np.dot(kb, m1e)
+    D2kappa2Dthetaf2 = 0.5 * np.dot(kb, m1f)
+
+    D2kappa1DeDthetae = 1.0 / norm_e * (0.5 * np.dot(kb, m1e) * tilde_t - 1.0 / chi * np.cross(tf, m1e))
+    D2kappa1DeDthetaf = 1.0 / norm_e * (0.5 * np.dot(kb, m1f) * tilde_t - 1.0 / chi * np.cross(tf, m1f))
+    D2kappa1DfDthetae = 1.0 / norm_f * (0.5 * np.dot(kb, m1e) * tilde_t + 1.0 / chi * np.cross(te, m1e))
+    D2kappa1DfDthetaf = 1.0 / norm_f * (0.5 * np.dot(kb, m1f) * tilde_t + 1.0 / chi * np.cross(te, m1f))
+    D2kappa2DeDthetae = 1.0 / norm_e * (0.5 * np.dot(kb, m2e) * tilde_t - 1.0 / chi * np.cross(tf, m2e))
+    D2kappa2DeDthetaf = 1.0 / norm_e * (0.5 * np.dot(kb, m2f) * tilde_t - 1.0 / chi * np.cross(tf, m2f))
+    D2kappa2DfDthetae = 1.0 / norm_f * (0.5 * np.dot(kb, m2e) * tilde_t + 1.0 / chi * np.cross(te, m2e))
+    D2kappa2DfDthetaf = 1.0 / norm_f * (0.5 * np.dot(kb, m2f) * tilde_t + 1.0 / chi * np.cross(te, m2f))
+
+    for DD, De2, DfDe, DeDf, Df2, Dte2, Dtf2, DeDte, DfDte, DeDtf, DfDtf in (
+            (DDkappa1, D2kappa1De2, D2kappa1DfDe, D2kappa1DeDf, D2kappa1Df2,
+             D2kappa1Dthetae2, D2kappa1Dthetaf2, D2kappa1DeDthetae, D2kappa1DfDthetae,
+             D2kappa1DeDthetaf, D2kappa1DfDthetaf),
+            (DDkappa2, D2kappa2De2, D2kappa2DfDe, D2kappa2DeDf, D2kappa2Df2,
+             D2kappa2Dthetae2, D2kappa2Dthetaf2, D2kappa2DeDthetae, D2kappa2DfDthetae,
+             D2kappa2DeDthetaf, D2kappa2DfDthetaf)):
+        # Curvature terms
+        DD[0:3, 0:3] = De2
+        DD[0:3, 4:7] = -De2 + DfDe
+        DD[0:3, 8:11] = -DfDe
+        DD[4:7, 0:3] = -De2 + DeDf
+        DD[4:7, 4:7] = De2 - DeDf - DfDe + Df2
+        DD[4:7, 8:11] = DfDe - Df2
+        DD[8:11, 0:3] = -DeDf
+        DD[8:11, 4:7] = DeDf - Df2
+        DD[8:11, 8:11] = Df2
+        # Twist terms
+        DD[3, 3] = Dte2
+        DD[7, 7] = Dtf2
+        # Curvature-twist coupled terms
+        DD[0:3, 3] = -DeDte
+        DD[4:7, 3] = DeDte - DfDte
+        DD[8:11, 3] = DfDte
+        DD[3, 0:3] = DD[0:3, 3]
+        DD[3, 4:7] = DD[4:7, 3]
+        DD[3, 8:11] = DD[8:11, 3]
+        DD[0:3, 7] = -DeDtf
+        DD[4:7, 7] = DeDtf - DfDtf
+        DD[8:11, 7] = DfDtf
+        DD[7, 0:3] = DD[0:3, 7]
+        DD[7, 4:7] = DD[4:7, 7]
+        DD[7, 8:11] = DD[8:11, 7]
+
+    # Hessian of Eb
+    d2E_dKappa11 = EI1 / l_k
+    d2E_dKappa22 = EI2 / l_k
+    dJ = (dE_dKappa1 * DDkappa1 + dE_dKappa2 * DDkappa2
+          + d2E_dKappa11 * np.outer(gradKappa_1, gradKappa_1)
+          + d2E_dKappa22 * np.outer(gradKappa_2, gradKappa_2))
+    return dF, dJ
+
+
+def _twist_grad_hess(node0, node1, node2, theta_e, theta_f, refTwist, twistBar,
+                     l_k, GJ, need_hess=True):
+    """``(dE/dq (11,), d2E/dq2 (11, 11))`` of one twisting stencil; 263F
+    ``gradEt_hessEt_panetta``."""
+    from rodframes import hat as crossMat
+
+    gradTwist = np.zeros(11)
+    ee = node1 - node0
+    ef = node2 - node1
+    norm_e = np.linalg.norm(ee)
+    norm_f = np.linalg.norm(ef)
+    norm2_e = norm_e ** 2
+    norm2_f = norm_f ** 2
+    te = ee / norm_e
+    tf = ef / norm_f
+
+    # Curvature binormal
+    kb = 2.0 * np.cross(te, tf) / (1.0 + np.dot(te, tf))
+
+    # Gradient of twist wrt DOFs
+    gradTwist[0:3] = -0.5 / norm_e * kb
+    gradTwist[8:11] = 0.5 / norm_f * kb
+    gradTwist[4:7] = -(gradTwist[0:3] + gradTwist[8:11])
+    gradTwist[3] = -1
+    gradTwist[7] = 1
+
+    integratedTwist = theta_f - theta_e + refTwist - twistBar
+    dE_dTau = GJ / l_k * integratedTwist
+    dF = dE_dTau * gradTwist
+    if not need_hess:
+        return dF, None
+
+    chi = 1.0 + np.dot(te, tf)
+    tilde_t = (te + tf) / chi
+
+    # Hessian of twist wrt DOFs (Panetta 2019).  D2mDfDe is d2m / de^i de^{i-1}.
+    D2mDe2 = -0.5 / norm2_e * (np.outer(kb, (te + tilde_t)) + 2.0 / chi * crossMat(tf))
+    D2mDf2 = -0.5 / norm2_f * (np.outer(kb, (tf + tilde_t)) - 2.0 / chi * crossMat(te))
+    D2mDfDe = 0.5 / (norm_e * norm_f) * (2.0 / chi * crossMat(te) - np.outer(kb, tilde_t))
+    D2mDeDf = 0.5 / (norm_e * norm_f) * (-2.0 / chi * crossMat(tf) - np.outer(kb, tilde_t))
+
+    DDtwist = np.zeros((11, 11))
+    DDtwist[0:3, 0:3] = D2mDe2
+    DDtwist[0:3, 4:7] = -D2mDe2 + D2mDfDe
+    DDtwist[4:7, 0:3] = -D2mDe2 + D2mDeDf
+    DDtwist[4:7, 4:7] = D2mDe2 - (D2mDeDf + D2mDfDe) + D2mDf2
+    DDtwist[0:3, 8:11] = -D2mDfDe
+    DDtwist[8:11, 0:3] = -D2mDeDf
+    DDtwist[8:11, 4:7] = D2mDeDf - D2mDf2
+    DDtwist[4:7, 8:11] = D2mDfDe - D2mDf2
+    DDtwist[8:11, 8:11] = D2mDf2
+
+    d2E_dTau2 = GJ / l_k
+    dJ = dE_dTau * DDtwist + d2E_dTau2 * np.outer(gradTwist, gradTwist)
+    return dF, dJ
+
 
 @register_energy("der3d_twist")
 class DERElasticEnergy3DTwist(RodEnergy):
-    """3D Discrete Elastic Rod *with* torsion, for a naturally straight rod.
+    """3D Discrete Elastic Rod with torsion -- the MAE 263F model.
 
-    This is :class:`DERElasticEnergy3D` plus a twisting term, following the
-    original Discrete Elastic Rods paper (Bergou et al. 2008, sections 5 and 6;
-    see :mod:`rodframes` for the frames and ``reference/``).  The material
-    frame is treated as *quasistatic*: it minimises the elastic energy for the
-    given centreline and gripper yaws.  For a naturally straight rod with
-    isotropic bending -- the only case modelled here -- that minimiser is a
-    uniform twist (eq. 5), so the per-edge material angles are eliminated in
-    closed form and the DOF vector carries just the two clamped gripper yaws
-    behind the positions::
+    Stretching, bending and twisting exactly as in 263F ``getFs``, ``getFb`` and
+    ``getFt``, with one material angle per edge and reference frames carried in
+    time (see :mod:`rodframes`).  The DOF vector is 263F's, permuted so the
+    positions come first and every ``q[:n_pos]`` in the codebase still means
+    the centreline::
 
-        q = [ x0 y0 z0 ... x_{nv-1} y_{nv-1} z_{nv-1} | yaw_l yaw_r ]
-            \\________________ 3 * nv positions _______/ \\__ 2 angles __/
+        q = [ x0 y0 z0 ... x_{nv-1} y_{nv-1} z_{nv-1} | theta^0 ... theta^{ne-1} ]
+            \\________________ 3 * nv positions _______/ \\___ ne edge angles ___/
 
-    Energy (eq. 6)::
+    Energy, summed over edges ``c`` and interior nodes ``i``::
 
-        E = E_stretch(x) + E_bend(x) + (GJ / 2 L_tw) * Phi^2
+        E_s = sum_c (EA l_c / 2) (|e^c| / l_c - 1)^2
+        E_b = sum_i (EI / 2 lv_i) |kappa_i - kappaBar_i|^2
+              kappa_i = ( kb.(m2^{i-1} + m2^i) / 2,  -kb.(m1^{i-1} + m1^i) / 2 )
+        E_t = sum_i (GJ / 2 lv_i) (theta^i - theta^{i-1} + refTwist_i - twistBar_i)^2
 
-        Phi = yaw_r - yaw_l - H(x)        L_tw = (nv - 2) * dL
+    with ``l_c`` the rest edge lengths, ``lv_i`` the rest Voronoi lengths and
+    ``kappaBar`` the curvature of the rest shape, all set by :meth:`reset_frame`.
 
-    ``Phi`` is the rod's total twist and ``H`` the holonomy of the Bishop frame
-    (:func:`rodframes.holonomy`): the angle the twist-free frame loses on its
-    way along the rod, which the yaws have to make up.  ``H`` is where the
-    centreline enters, and it is what couples twisting to bending -- the
-    discrete form of the Calugareanu-White-Fuller relation (link = twist +
-    writhe).  Without it the energy would depend on the yaws alone, the
-    centreline would not respond to them at all, and the gradient of a
-    position-based loss with respect to yaw would be identically zero.
+    Frame state
+    -----------
+    The material frame depends on the reference frame, which is carried from
+    the last accepted state, so the energy is a function of ``q`` *and* that
+    state: ``(q_ref, a1_ref, refTwist_ref)``.  Every evaluation transports
+    ``a1_ref`` in time from ``q_ref`` to ``q`` and resolves the reference twist
+    against ``refTwist_ref`` (as 263F's ``objfun`` does at every Newton
+    iterate), without changing the state.  :meth:`commit` makes ``q`` the new
+    accepted state; it does not change the energy at ``q``.
 
-    Stretching and bending are untouched, so with ``GJ = 0`` this reproduces
-    :class:`DERElasticEnergy3D` exactly.
-
-    Only the *isotropic* case is modelled: the bending stiffness is the same
-    about both cross-section axes, so bending needs no material frame, and
-    an anisotropic or naturally curved rod would need the per-edge angles back
-    as degrees of freedom (eq. 7 of the paper).
+    Hessian
+    -------
+    :meth:`hessian` is 263F's (Panetta-corrected) matrix, which is not
+    symmetric.  The gradient formulas treat the reference frame as moving with
+    ``q`` by parallel transport from ``q`` itself, which is exact only at
+    ``q = q_ref``; there the symmetric part of the matrix is the true second
+    derivative of the energy (checked by ``scripts/check_twist.py``).
+    Symmetrising it is left to the callers.
     """
 
     dim = 3
     has_twist = True
-
-    #: Twist DOFs behind the positions in ``q``: the two gripper yaws, both
-    #: clamped by the control.  The interior angles are eliminated, so the
-    #: Newton solve is over positions alone.
-    n_twist = 2
 
     def __init__(self, EI: float, EA: float, deltaL: float, nv: int,
                  GJ: float = None, poisson: float = 0.3, **_ignored):
@@ -512,20 +772,29 @@ class DERElasticEnergy3DTwist(RodEnergy):
         self.EA = EA
         self.deltaL = deltaL
         self.nv = int(nv)
+        self.ne = self.nv - 1
+        #: Twist DOFs behind the positions in ``q``: one material angle per edge.
+        self.n_twist = self.ne
         # Circular cross-section: J = 2I and G = E / (2(1+nu)), so GJ = EI/(1+nu).
         self.GJ = float(EI / (1.0 + poisson)) if GJ is None else float(GJ)
-        self._bend = DERElasticEnergy3D(EI=EI, EA=EA, deltaL=deltaL)
-        #: Total length the twist is spread over: the Voronoi lengths of the
-        #: interior nodes, the "2 L bar" of the paper.
-        self.L_tw = deltaL * (self.nv - 2)
-        #: Stiffness of the single twist mode, E_twist = (K/2) Phi^2.
-        self.K = self.GJ / self.L_tw
+
+        # Global DOF indices of each bending/twisting stencil, in 263F's local
+        # order [node0, theta_e, node1, theta_f, node2], for interior node c.
+        np_ = 3 * self.nv
+        self._idx_bt = [np.array([3 * c - 3, 3 * c - 2, 3 * c - 1, np_ + c - 1,
+                                  3 * c, 3 * c + 1, 3 * c + 2, np_ + c,
+                                  3 * c + 3, 3 * c + 4, 3 * c + 5])
+                        for c in range(1, self.ne)]
+
+        # Rest geometry and frame state: set by reset_frame().
+        self.refLen = self.voronoiRefLen = self.kappaBar = self.twistBar = None
+        self.q_ref = self.a1_ref = self.refTwist_ref = None
 
     # ---------- layout helpers ----------
 
     @property
     def n_pos(self) -> int:
-        """Number of position DOFs; the two gripper yaws follow them in ``q``."""
+        """Number of position DOFs; the edge angles follow them in ``q``."""
         return 3 * self.nv
 
     @property
@@ -533,84 +802,139 @@ class DERElasticEnergy3DTwist(RodEnergy):
         return 3 * self.nv + self.n_twist
 
     def split(self, q):
-        """``q -> (positions (nv, 3), (yaw_l, yaw_r))``."""
+        """``q -> (positions (nv, 3), theta (ne,))``."""
         q = np.asarray(q, dtype=float)
         return q[:self.n_pos].reshape(-1, 3), q[self.n_pos:]
 
-    # ---------- the twist term ----------
+    # ---------- frame state ----------
 
-    #: Branch reference of the holonomy (paper Sec. VI-A): ``rodframes.holonomy``
-    #: is an angle on (-pi, pi]; the energy uses the 2 pi branch closest to the
-    #: holonomy of the last committed equilibrium, so that Phi stays continuous
-    #: along a rollout even where H crosses +-pi.  None (after a reset): the
-    #: principal branch.  The environment sets it at every committed step
-    #: (:meth:`commit_branch`) and saves it with its state.
-    psi_ref = None
+    def reset_frame(self, rest_nodes):
+        """Start from the rest shape ``rest_nodes`` (nv, 3), with every theta = 0.
 
-    def lift(self, H):
-        """``H`` moved by a multiple of 2 pi to the branch closest to ``psi_ref``."""
-        if self.psi_ref is None:
-            return float(H)
-        return float(H) + 2.0 * np.pi * round((self.psi_ref - float(H)) / (2.0 * np.pi))
+        Sets the rest edge and Voronoi lengths and ``kappaBar`` from it, and the
+        reference frame by parallel transport along the rod, seeded with the
+        left gripper's yaw reference.  The reference twist is then zero.
+        """
+        from rodframes import gripper_director, space_parallel, tangents
+        pos = np.asarray(rest_nodes, dtype=float).reshape(-1, 3).copy()
+        if pos.shape[0] != self.nv:
+            raise ValueError(f"reset_frame: {pos.shape[0]} nodes, expected {self.nv}")
 
-    def holonomy(self, q):
-        """The lifted holonomy ``Psi`` of the centerline in ``q``."""
-        from rodframes import holonomy
-        return self.lift(holonomy(self.split(q)[0]))
+        self.refLen = np.linalg.norm(np.diff(pos, axis=0), axis=1)
+        self.voronoiRefLen = np.empty(self.nv)
+        self.voronoiRefLen[0] = 0.5 * self.refLen[0]
+        self.voronoiRefLen[-1] = 0.5 * self.refLen[-1]
+        self.voronoiRefLen[1:-1] = 0.5 * (self.refLen[:-1] + self.refLen[1:])
 
-    def commit_branch(self, q):
-        """Make the (lifted) holonomy of the committed state the branch reference."""
-        self.psi_ref = self.holonomy(q)
+        a1, a2 = space_parallel(gripper_director(tangents(pos)[0]), pos)
+        # theta = 0, so the material frame is the reference frame.
+        self.kappaBar = np.zeros((self.nv, 2))
+        for c in range(1, self.ne):
+            self.kappaBar[c] = _curvature(pos[c - 1], pos[c], pos[c + 1],
+                                          a1[c - 1], a2[c - 1], a1[c], a2[c])
+        self.twistBar = np.zeros(self.nv)
+
+        self.q_ref = pos
+        self.a1_ref = a1
+        self.refTwist_ref = np.zeros(self.nv)
+
+    def frames(self, q):
+        """``(a1, a2, refTwist, m1, m2)`` at ``q``, carried from the accepted state."""
+        from rodframes import time_parallel, reference_twist, material_directors, tangents
+        if self.q_ref is None:
+            raise RuntimeError("DERElasticEnergy3DTwist: call reset_frame(rest_nodes) first")
+        pos, theta = self.split(q)
+        a1, a2 = time_parallel(self.a1_ref, self.q_ref, pos)
+        ref = reference_twist(a1, tangents(pos), self.refTwist_ref)
+        m1, m2 = material_directors(a1, a2, theta)
+        return a1, a2, ref, m1, m2
+
+    def commit(self, q):
+        """Make ``q`` the accepted state the frames are carried from."""
+        a1, _, ref, _, _ = self.frames(q)
+        self.q_ref = self.split(q)[0].copy()
+        self.a1_ref = a1
+        self.refTwist_ref = ref
+
+    def get_frame_state(self):
+        return {"q_ref": self.q_ref.copy(), "a1_ref": self.a1_ref.copy(),
+                "refTwist_ref": self.refTwist_ref.copy()}
+
+    def set_frame_state(self, state):
+        self.q_ref = np.array(state["q_ref"], dtype=float)
+        self.a1_ref = np.array(state["a1_ref"], dtype=float)
+        self.refTwist_ref = np.array(state["refTwist_ref"], dtype=float)
+
+    # ---------- diagnostics ----------
 
     def total_twist(self, q):
-        """``Phi``: the rod's total twist, in radians."""
-        pos, yaw = self.split(q)
-        return float(yaw[1] - yaw[0] - self.holonomy(q))
+        """The rod's total twist, the sum of the integrated twists, in radians."""
+        _, theta = self.split(q)
+        ref = self.frames(q)[2]
+        return float(theta[-1] - theta[0] + np.sum(ref[1:-1] - self.twistBar[1:-1]))
 
-    def _twist_terms(self, q, need_hess=True):
-        """``(Phi, dH/dx, d2H/dx2)`` -- the pieces every caller below needs.
-
-        The lift is a constant shift of ``H``, so its derivatives are those
-        of the principal value.
-        """
-        from rodframes import holonomy_grad_hess
-        pos, yaw = self.split(q)
-        H, gH, HH = holonomy_grad_hess(pos, need_hess=need_hess)
-        return float(yaw[1] - yaw[0] - self.lift(H)), gH, HH
+    def holonomy(self, q):
+        """Bishop holonomy of the centreline -- geometry only, not in the energy."""
+        from rodframes import holonomy
+        return float(holonomy(self.split(q)[0]))
 
     # ---------- RodEnergy interface ----------
 
     def energy(self, q):
-        E = self._bend.energy(q[:self.n_pos])
-        return float(E + 0.5 * self.K * self.total_twist(q) ** 2)
+        pos, theta = self.split(q)
+        _, _, ref, m1, m2 = self.frames(q)
+        E = 0.0
+        for c in range(self.ne):
+            l_k = self.refLen[c]
+            E += 0.5 * self.EA * l_k * (np.linalg.norm(pos[c + 1] - pos[c]) / l_k - 1.0) ** 2
+        for c in range(1, self.ne):
+            l_k = self.voronoiRefLen[c]
+            dk = _curvature(pos[c - 1], pos[c], pos[c + 1],
+                            m1[c - 1], m2[c - 1], m1[c], m2[c]) - self.kappaBar[c]
+            E += 0.5 * self.EI / l_k * float(dk @ dk)
+            tau = theta[c] - theta[c - 1] + ref[c] - self.twistBar[c]
+            E += 0.5 * self.GJ / l_k * tau ** 2
+        return float(E)
+
+    def _assemble(self, q, need_hess):
+        """``(dE/dq, d2E/dq2 or None)``, assembled stencil by stencil as in 263F."""
+        pos, theta = self.split(q)
+        _, _, ref, m1, m2 = self.frames(q)
+        nd = self.n_dof
+        g = np.zeros(nd)
+        H = np.zeros((nd, nd)) if need_hess else None
+
+        for c in range(self.ne):
+            dF, dJ = _stretch_grad_hess(pos[c], pos[c + 1], self.refLen[c], self.EA,
+                                        need_hess)
+            sl = slice(3 * c, 3 * c + 6)
+            g[sl] += dF
+            if need_hess:
+                H[sl, sl] += dJ
+
+        for c in range(1, self.ne):
+            idx = self._idx_bt[c - 1]
+            l_k = self.voronoiRefLen[c]
+            dFb, dJb = _bend_grad_hess(pos[c - 1], pos[c], pos[c + 1],
+                                       m1[c - 1], m2[c - 1], m1[c], m2[c],
+                                       self.kappaBar[c], l_k, self.EI, self.EI, need_hess)
+            dFt, dJt = _twist_grad_hess(pos[c - 1], pos[c], pos[c + 1],
+                                        theta[c - 1], theta[c], ref[c], self.twistBar[c],
+                                        l_k, self.GJ, need_hess)
+            g[idx] += dFb + dFt
+            if need_hess:
+                H[np.ix_(idx, idx)] += dJb + dJt
+        return g, H
 
     def gradient(self, q):
-        phi, gH, _ = self._twist_terms(q, need_hess=False)
-        np_ = self.n_pos
-        g = np.zeros(self.n_dof)
-        g[:np_] = self._bend.gradient(q[:np_]) - self.K * phi * gH
-        g[np_] = -self.K * phi            # d Phi / d yaw_l = -1
-        g[np_ + 1] = self.K * phi         # d Phi / d yaw_r = +1
-        return g
+        return self._assemble(q, need_hess=False)[0]
 
     def hessian(self, q):
-        phi, gH, HH = self._twist_terms(q)
-        np_, nd = self.n_pos, self.n_dof
-        H = np.zeros((nd, nd))
-        H[:np_, :np_] = (self._bend.hessian(q[:np_])
-                         + self.K * (np.outer(gH, gH) - phi * HH))
+        return self._assemble(q, need_hess=True)[1]
 
-        # d2E/dx d(yaw): dPhi/dx = -gH, dPhi/dyaw = (-1, +1)
-        col = self.K * gH
-        H[:np_, np_] = col
-        H[np_, :np_] = col
-        H[:np_, np_ + 1] = -col
-        H[np_ + 1, :np_] = -col
-
-        # d2E/d(yaw)2
-        H[np_, np_] = H[np_ + 1, np_ + 1] = self.K
-        H[np_, np_ + 1] = H[np_ + 1, np_] = -self.K
-        return H
+    def force_and_jacobian(self, q):
+        g, H = self._assemble(q, need_hess=True)
+        return -g, -H
 
     @property
     def stiffness_scale(self):

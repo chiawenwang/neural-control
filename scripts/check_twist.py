@@ -1,24 +1,29 @@
-"""Validate the torsion model end to end.
+"""Validate the torsion model (``der3d_twist``) against MAE 263F.
 
-Run this after touching src/rodframes.py, the twist energy, or the twist
-boundary map::
+Run this after touching src/rodframes.py or the twist energy::
 
-    python scripts/check_twist.py
+    python scripts/check_twist.py [--ref263f PATH]
 
-Everything the adjoint relies on is checked against finite differences.  The
-exact Hessian matters in particular: an approximate one still lets Newton
-converge but silently corrupts the training gradient, so it is checked
-directly rather than inferred from the solver behaving.
+``PATH`` is a clone of github.com/StructuresComp/mae-263F (default
+``../mae-263F`` next to this repository); its ``src/der/der_functions.py`` is
+the reference the energy is compared with.
+
+The test rod has a curved, non-planar rest shape (so kappaBar and the rest
+lengths are non-trivial), an accepted state ``q_ref`` away from the rest shape,
+and is evaluated at ``q != q_ref``, so the time-parallel transport and the
+reference twist are exercised.
 
 Checks, in order:
-  1. the Bishop holonomy H -- value, gradient and Hessian vs finite differences
-  2. the full twisting energy -- force and Jacobian vs finite differences
-  3. GJ = 0 reduces exactly to the twist-free der3d model
-  4. the 14x12 boundary map d(q_b)/d(u) vs finite differences
-  5. the adjoint dL/du vs finite differences -- including the yaw columns,
-     which is what decides whether yaw is a usable control input, and over
-     several steps, which the 2008 frame makes exact (there is no frame state)
+  a. force and Jacobian vs 263F getFs + getFb + getFt (after the DOF permutation)
+  b. reference frame and reference twist vs 263F computeTimeParallel + getRefTwist
+     (and the reset frame vs computeSpaceParallel)
+  c. after commit, the gradient vs central differences of the energy at q = q_ref
+  d. at q = q_ref, the symmetric part 0.5 (H + H^T) vs second differences of the
+     energy (H itself is not symmetric; its antisymmetric part is reported)
+  e. the energy at q is unchanged by commit(q)
 """
+import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -30,12 +35,22 @@ limit_blas_threads()
 
 import numpy as np
 
-from rodframes import holonomy, holonomy_grad_hess
-from energy import DERElasticEnergy3DTwist, DERElasticEnergy3D
-from SimulatorEnv_3D import SimulatorEnv_3D
-from implicit_grad_tools import boundary_node_jacobian_3d_twist, implicit_final_control_grad
-from env_factory import dloss_dq_free_node, node_tracking_loss
+from energy import DERElasticEnergy3DTwist
+from rodframes import gripper_director, tangents
 
+ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+ap.add_argument("--ref263f", default=str(_ROOT.parent / "mae-263F"),
+                help="clone of github.com/StructuresComp/mae-263F")
+args = ap.parse_args()
+ref_dir = Path(args.ref263f) / "src" / "der"
+if not (ref_dir / "der_functions.py").exists():
+    sys.exit(f"263F reference not found: {ref_dir / 'der_functions.py'} "
+             f"(clone github.com/StructuresComp/mae-263F and pass --ref263f)")
+os.environ.setdefault("MPLBACKEND", "Agg")      # der_functions imports pyplot
+sys.path.insert(0, str(ref_dir))
+import der_functions as R                         # noqa: E402
+
+TOL_EXACT = 1e-12    # same arithmetic, different code: rounding only
 TOL_GRAD = 1e-6      # analytic vs central differences
 TOL_HESS = 1e-4      # vs second differences, whose own truncation floor is ~1e-6
 
@@ -45,169 +60,125 @@ results = []
 def report(name, err, tol):
     ok = err < tol
     results.append(ok)
-    print(f"  [{'ok ' if ok else 'FAIL'}] {name:52s} {err:.3e}  (tol {tol:g})")
+    print(f"  [{'ok ' if ok else 'FAIL'}] {name:56s} {err:.3e}  (tol {tol:g})")
 
 
-# ------------------------------------------------------------- 1. holonomy
-print("\n1. Bishop holonomy H -- value and derivatives vs finite differences")
+def rel(a, b):
+    return float(np.abs(a - b).max() / max(np.abs(b).max(), 1e-30))
+
+
+# ------------------------------------------------------------------ the rod
 rng = np.random.default_rng(7)
-nv, L = 8, 1.0
-dL = L / (nv - 1)
-s = np.arange(nv) * dL
-pos0 = np.stack([s, np.zeros(nv), np.zeros(nv)], 1)
-planar = np.stack([s, np.zeros(nv), 0.15 * np.sin(np.pi * s / L)], 1)
-report("H = 0 on the straight rod", abs(holonomy(pos0)), 1e-12)
-report("H = 0 on a planar (vertical) rod", abs(holonomy(planar)), 1e-12)
+nv = 8
+ne = nv - 1
+EI, EA = 1.0, 20.0          # comparable stretch and bend/twist entries in H
+s = np.linspace(0.0, 1.0, nv)
+rest = np.stack([s, 0.1 * np.sin(np.pi * s), 0.05 * s ** 2], 1)
 
-p = (pos0 + 0.03 * rng.normal(size=(nv, 3))).reshape(-1)
-H, g_an, Hs_an = holonomy_grad_hess(p.reshape(-1, 3))
-print(f"       bent, non-planar rod: H = {H:+.4f} rad  "
-      f"(a planar rod has none -- this is the writhe term)")
+e = DERElasticEnergy3DTwist(EI=EI, EA=EA, deltaL=1.0 / ne, nv=nv)
+e.reset_frame(rest)
+n_pos = e.n_pos
+
+# Accepted state away from the rest shape, then the evaluation point.
+q1 = np.concatenate([(rest + 0.03 * rng.normal(size=rest.shape)).reshape(-1),
+                     0.5 * rng.normal(size=ne)])
+e.commit(q1)
+q2 = q1 + np.concatenate([0.02 * rng.normal(size=n_pos), 0.3 * rng.normal(size=ne)])
+
+# 263F layout: x[4c:4c+3] = node c, x[4c+3] = theta^c.  q_ours = x[perm].
+perm = np.concatenate([np.array([4 * c, 4 * c + 1, 4 * c + 2]) for c in range(nv)]
+                      + [4 * np.arange(ne) + 3])
 
 
-def h_of(z):
-    return holonomy(z.reshape(-1, 3))
+def to263(q):
+    x = np.zeros(4 * nv - 1)
+    x[perm] = q
+    return x
 
 
-eps = 1e-7
-g_fd = np.zeros(3 * nv)
-for k in range(3 * nv):
-    d = np.zeros(3 * nv); d[k] = eps
-    g_fd[k] = (h_of(p + d) - h_of(p - d)) / (2 * eps)
-report("grad(H)", float(np.abs(g_an - g_fd).max() / max(np.abs(g_fd).max(), 1e-30)),
-       TOL_GRAD)
+# ------------------------------------------------- b. frames (checked first)
+print("\nb. reference frame and reference twist vs 263F")
+a1_s, a2_s = R.computeSpaceParallel(gripper_director(tangents(rest)[0]),
+                                    to263(np.concatenate([rest.reshape(-1), np.zeros(ne)])))
+from rodframes import space_parallel                                    # noqa: E402
+a1_o, a2_o = space_parallel(gripper_director(tangents(rest)[0]), rest)
+report("reset frame (a1, a2) vs computeSpaceParallel",
+       max(rel(a1_o, a1_s), rel(a2_o, a2_s)), TOL_EXACT)
 
+state = e.get_frame_state()
+x2 = to263(q2)
+a1_R, a2_R = R.computeTimeParallel(state["a1_ref"].copy(),
+                                   to263(np.concatenate([state["q_ref"].reshape(-1),
+                                                         np.zeros(ne)])), x2)
+tan_R = R.computeTangent(x2)
+ref_R = R.getRefTwist(a1_R, tan_R, state["refTwist_ref"].copy())
+a1, a2, ref, m1, m2 = e.frames(q2)
+report("a1 vs computeTimeParallel", rel(a1, a1_R), TOL_EXACT)
+report("a2 vs computeTimeParallel", rel(a2, a2_R), TOL_EXACT)
+report("refTwist vs getRefTwist", rel(ref, ref_R), TOL_EXACT)
+report("frame state untouched by evaluation",
+       float(np.abs(e.get_frame_state()["refTwist_ref"] - state["refTwist_ref"]).max()),
+       1e-300)
+print(f"       max |refTwist| = {np.abs(ref).max():.3e} rad")
+
+# ------------------------------------------------------- a. force, Jacobian
+print("\na. force and Jacobian vs 263F getFs + getFb + getFt")
+m1_R, m2_R = R.computeMaterialDirectors(a1_R, a2_R, x2[3::4])
+kappaBar_R = R.getKappa(to263(np.concatenate([rest.reshape(-1), np.zeros(ne)])),
+                        a1_s, a2_s)
+refLen = np.linalg.norm(np.diff(rest, axis=0), axis=1)
+vor = np.r_[0.5 * refLen[0], 0.5 * (refLen[:-1] + refLen[1:]), 0.5 * refLen[-1]]
+Fs, Js = R.getFs(x2, EA, refLen)
+Fb, Jb = R.getFb(x2, m1_R, m2_R, kappaBar_R, EI, vor)
+Ft, Jt = R.getFt(x2, ref_R, np.zeros(nv), e.GJ, vor)
+F_R = (Fs + Fb + Ft)[perm]
+J_R = (Js + Jb + Jt)[np.ix_(perm, perm)]
+F, J = e.force_and_jacobian(q2)
+report("kappaBar vs getKappa (rest shape)", rel(e.kappaBar, kappaBar_R), TOL_EXACT)
+report("force F = -dE/dq", rel(F, F_R), TOL_EXACT)
+report("Jacobian J = -d2E/dq2 (as is, non-symmetric)", rel(J, J_R), TOL_EXACT)
+print(f"       |kappaBar|max = {np.abs(e.kappaBar).max():.3e};  DOFs = {e.n_dof} = 3*nv + ne")
+
+# ------------------------------------------------------------- e. commit
+print("\ne. commit(q) leaves the energy at q unchanged")
+E_before = e.energy(q2)
+e.commit(q2)
+E_after = e.energy(q2)
+report("|E_after - E_before| / |E|", abs(E_after - E_before) / abs(E_before), TOL_EXACT)
+
+# --------------------------------------------- c. gradient at q = q_ref
+print("\nc. gradient vs central differences of the energy, at q = q_ref")
+g = e.gradient(q2)
+eps = 1e-6
+g_fd = np.zeros_like(g)
+for k in range(q2.size):
+    d = np.zeros_like(q2); d[k] = eps
+    g_fd[k] = (e.energy(q2 + d) - e.energy(q2 - d)) / (2 * eps)
+report("dE/dq", rel(g, g_fd), TOL_GRAD)
+report("dE/dq, position rows", rel(g[:n_pos], g_fd[:n_pos]), TOL_GRAD)
+report("dE/dq, theta rows", rel(g[n_pos:], g_fd[n_pos:]), TOL_GRAD)
+
+# ----------------------------------------------- d. Hessian at q = q_ref
+print("\nd. symmetric part of the Hessian vs second differences, at q = q_ref")
+H = e.hessian(q2)
+Hsym = 0.5 * (H + H.T)
 h2 = 1e-4
-Hs_fd = np.zeros((3 * nv, 3 * nv))
-for a in range(3 * nv):
-    da = np.zeros(3 * nv); da[a] = h2
-    for b in range(a, 3 * nv):
-        db = np.zeros(3 * nv); db[b] = h2
-        Hs_fd[a, b] = Hs_fd[b, a] = (
-            h_of(p + da + db) - h_of(p + da - db)
-            - h_of(p - da + db) + h_of(p - da - db)) / (4 * h2 * h2)
-report("hess(H)", float(np.abs(Hs_an - Hs_fd).max() / max(np.abs(Hs_fd).max(), 1e-30)),
-       TOL_HESS)
-
-
-# ------------------------------------------------------- 2/3. twisting energy
-print("\n2. twisting energy -- force and Jacobian vs finite differences")
-e_tw = DERElasticEnergy3DTwist(EI=1.0e3, EA=1.0e5, deltaL=dL, nv=nv)
-q = np.concatenate([p, [0.2, -0.5]])        # positions + (yaw_l, yaw_r)
-errs = e_tw.check_gradients(q, eps=1e-6, verbose=False)
-report("dE/dq   (force)", errs["gradient_rel_err"], TOL_GRAD)
-report("d2E/dq2 (Jacobian)", errs["hessian_rel_err"], TOL_GRAD)
-print(f"       GJ = {e_tw.GJ:.4g} = EI / (1 + nu);  DOFs = {e_tw.n_dof} = 3*nv + 2;"
-      f"  total twist Phi = {e_tw.total_twist(q):+.4f} rad")
-
-print("\n3. GJ = 0 must reduce exactly to the twist-free der3d model")
-e_0 = DERElasticEnergy3DTwist(EI=1.0e3, EA=1.0e5, deltaL=dL, nv=nv, GJ=0.0)
-e_3 = DERElasticEnergy3D(EI=1.0e3, EA=1.0e5, deltaL=dL)
-F0, _ = e_0.force_and_jacobian(q)
-F3, _ = e_3.force_and_jacobian(q[:3 * nv])
-report("position force matches der3d", float(np.abs(F0[:3 * nv] - F3).max()), 1e-12)
-report("twist force is identically zero", float(np.abs(F0[3 * nv:]).max()), 1e-12)
-
-
-# ------------------------------------------------------ 4. boundary map
-print("\n4. boundary map d(q_b)/d(u), 14 x 12")
-env = SimulatorEnv_3D(nv=15, rod_length=1.0, twist=True,
-                      R_outer=0.003, r_inner=0.0, E_al=2e9, rho_al=1200)
-u = np.array([0.03, -0.02, 0.05, 0.3, -0.2, 0.7, 0.9, 0.1, -0.04, 0.25, 0.4, -0.6])
-J_an = boundary_node_jacobian_3d_twist(u, env.deltaL)
-J_fd = np.zeros_like(J_an)
-eps = 1e-7
-for i in range(12):
-    d = np.zeros(12); d[i] = eps
-    J_fd[:, i] = (env._control_node_from_pose(u + d)
-                  - env._control_node_from_pose(u - d)) / (2 * eps)
-report("d(q_b)/d(u)", float(np.abs(J_an - J_fd).max()), TOL_GRAD)
-
-
-# ------------------------------------------------------ 5. adjoint dL/du
-print("\n5. adjoint dL/du vs finite differences  (the yaw columns are the point)")
-KW = dict(nv=15, dt=0.01, rod_length=1.0, total_time=0.05, twist=True,
-          R_outer=0.003, r_inner=0.0, E_al=2e9, rho_al=1200)
-target = np.array([0.45, 0.05, 0.10])
-
-
-# The default Newton tolerance (EI / L^2 * 1e-3) is far looser than the 1e-6
-# probe below: it leaves the equilibrium uncertain by more than the difference
-# being measured, and the comparison then reports the solver's slop rather than
-# the adjoint's error. Tighten it so this checks the math.
-TOL_FACTOR = 1e-6
-
-
-def run(u_vec, steps=1):
-    """Hold the control constant so the final state is a function of u alone.
-
-    With the 2008 frame there is no frame state to carry, so this is true for
-    any number of steps: every step re-solves the same equilibrium problem.
-    """
-    env = SimulatorEnv_3D(**KW, max_newton_iter=2000)
-    env.tol *= TOL_FACTOR
-    env.reset()
-    info = None
-    for _ in range(steps):
-        _, _, info = env.step(u_vec)
-    return env, info
-
-
-u0 = np.array([0.0, 0, 0, 0, 0, 0.0, 0.92, 0.05, 0.03, 0.2, 0.3, 0.8])
-env, info = run(u0)
-a_free = dloss_dq_free_node(info["q"], env.free_index, 3, env.mid_node, target)
-g_an = implicit_final_control_grad(info["J"], env.free_index, env.fixed_index,
-                                   a_free, u0, env.deltaL, dim=3, twist=True)
-
-g_fd = np.zeros(12)
-h = 1e-6
-for i in range(6, 12):                     # left end is clamped; vary the right one
-    d = np.zeros(12); d[i] = h
-    _, ip = run(u0 + d)
-    _, im = run(u0 - d)
-    Lp, _ = node_tracking_loss(ip["q"], 3, env.mid_node, target)
-    Lm, _ = node_tracking_loss(im["q"], 3, env.mid_node, target)
-    g_fd[i] = (Lp - Lm) / (2 * h)
-
-np.set_printoptions(precision=6, suppress=True)
-names = ["x_r", "y_r", "z_r", "th_r", "ph_r", "yaw_r"]
-print("       component   adjoint        finite-diff")
-for k, nm in enumerate(names):
-    print(f"       {nm:9s} {g_an[6 + k]:+13.6f} {g_fd[6 + k]:+13.6f}")
-scale = max(np.abs(g_fd[6:]).max(), 1e-30)
-report("dL/du over the whole right end",
-       float(np.abs(g_an[6:] - g_fd[6:]).max() / scale), TOL_GRAD)
-yaw_err = abs(g_an[11] - g_fd[11]) / max(abs(g_fd[11]), 1e-30)
-report("dL/d(yaw) specifically", float(yaw_err), 1e-4)
-
-# The 2010 reference frames were carried forward by parallel transport once a
-# step was committed, so a perturbed control followed a slightly different frame
-# path -- a dependence the single-step implicit gradient could not see, and the
-# check below measured how big it was.  The 2008 frame is a function of the
-# positions, so there is no such drift and this is a plain equality.
-n_steps = 3
-env_m, info_m = run(u0, n_steps)
-a_m = dloss_dq_free_node(info_m["q"], env_m.free_index, 3, env_m.mid_node, target)
-g_m = implicit_final_control_grad(info_m["J"], env_m.free_index, env_m.fixed_index,
-                                  a_m, u0, env_m.deltaL, dim=3, twist=True)
-g_fdm = np.zeros(12)
-for i in range(6, 12):
-    d = np.zeros(12); d[i] = h
-    _, ipm = run(u0 + d, n_steps)
-    _, imm = run(u0 - d, n_steps)
-    Lp, _ = node_tracking_loss(ipm["q"], 3, env_m.mid_node, target)
-    Lm, _ = node_tracking_loss(imm["q"], 3, env_m.mid_node, target)
-    g_fdm[i] = (Lp - Lm) / (2 * h)
-report(f"dL/du after {n_steps} steps (no frame history)",
-       float(np.abs(g_m[6:] - g_fdm[6:]).max() / max(np.abs(g_fdm[6:]).max(), 1e-30)),
-       TOL_GRAD)
-
-if abs(g_fd[11]) < 1e-9:
-    print("       WARNING: dL/d(yaw) is numerically zero -- yaw is not "
-          "influencing the shape, so the bend/twist coupling is not active.")
-else:
-    print(f"       dL/d(yaw) = {g_fd[11]:.4g}, comfortably nonzero: yaw is a live "
-          f"control input.")
+n = q2.size
+H_fd = np.zeros((n, n))
+for a in range(n):
+    da = np.zeros(n); da[a] = h2
+    for b in range(a, n):
+        db = np.zeros(n); db[b] = h2
+        H_fd[a, b] = H_fd[b, a] = (
+            e.energy(q2 + da + db) - e.energy(q2 + da - db)
+            - e.energy(q2 - da + db) + e.energy(q2 - da - db)) / (4 * h2 * h2)
+report("0.5 (H + H^T)", rel(Hsym, H_fd), TOL_HESS)
+report("0.5 (H + H^T), theta-theta block",
+       rel(Hsym[n_pos:, n_pos:], H_fd[n_pos:, n_pos:]), TOL_HESS)
+report("0.5 (H + H^T), position-theta block",
+       rel(Hsym[:n_pos, n_pos:], H_fd[:n_pos, n_pos:]), TOL_HESS)
+print(f"       for scale: H itself vs second differences   {rel(H, H_fd):.3e}"
+      f"   |H - H^T| / |H| = {np.abs(H - H.T).max() / np.abs(H).max():.3e}")
 
 print("\n" + "=" * 72)
 print(f"{sum(results)}/{len(results)} checks passed"

@@ -1,89 +1,44 @@
 # -*- coding: utf-8 -*-
-"""Bishop frames and the twist holonomy, for the 3D rod with torsion.
+"""Reference and material frames of the 3D rod with torsion.
 
-This follows the *original* Discrete Elastic Rods formulation (Bergou et al.,
-SIGGRAPH 2008 -- ``reference/Discrete elastic rods.pdf``), not the
-time-parallel reference frames of the later Discrete Viscous Threads (2010).
-The difference is where the frame comes from:
+The frames follow the Discrete Elastic Rods implementation of MAE 263F
+(github.com/StructuresComp/mae-263F, ``src/der/der_functions.py``), i.e. the
+time-parallel reference frames of Bergou et al., *Discrete Viscous Threads*:
 
-* **2008 (here).**  The Bishop frame is rebuilt from the *current* positions:
-  one director ``u^0`` on the first edge, then *parallel transport along the
-  rod* onto every later edge (sec. 4.2.2).  Because each director is by
-  definition the transport of the previous one, the per-node reference twist
-  vanishes identically; the twist of the rod is the angle between the
-  *material* frames at its two ends, and the centreline enters through the
-  **holonomy** of that transport chain (sec. 6).  The frame is a function of
-  the configuration -- there is nothing to carry between steps.
-* **2010.**  Every edge keeps its own director, carried from the previous step
-  by parallel transport *in time*; the mismatch between the two is a per-node
-  reference twist ``psi_i`` added to each local twist.  That needs frame state,
-  makes the twist depend on the path the rod took, and measures the gripper's
-  yaw against a frame that has itself been drifting.
-
-Material frame and the quasistatic twist
-----------------------------------------
-Each edge's material frame is the Bishop director rotated by an angle
-``theta^i`` about the edge tangent.  Section 5 treats those angles as
-quasistatic: they minimise the elastic energy for the given centreline and
-boundary conditions.  For a naturally straight rod with isotropic bending --
-the only case this repository models -- the minimiser is *uniform* twist
-(eq. 5), so the angles can be eliminated in closed form and the whole twisting
-energy collapses onto a single scalar (eq. 6)::
-
-    E_twist = (GJ / 2 L_tw) * Phi^2 ,     L_tw = sum of the Voronoi lengths
-
-where ``Phi`` is the total twist of the rod: the angle between the material
-frames the two grippers prescribe, *measured in the Bishop frame*::
-
-    Phi = yaw_r - yaw_l - H(x)
-
-``H`` is the holonomy of the transport chain (:func:`holonomy`).  That is the
-one and only place the centreline enters the twisting energy, and it is what
-couples twisting to bending: hold the yaws fixed and bend the rod, and the
-rod twists.  Without it the energy would depend on the yaws alone, the
-centreline would not respond to them, and the gradient of a position-based
-loss with respect to yaw would be identically zero.
+* **Reference frame.**  Every edge ``i`` carries its own adapted frame
+  ``(a1^i, a2^i, t^i)``.  At reset it is built by parallel transport *along the
+  rod* (:func:`space_parallel`), seeded on the first edge with the gripper's
+  yaw reference :func:`gripper_director`.  After that it is carried *in time*:
+  when the centreline moves from the last accepted state to a new one, each
+  edge's ``a1`` is parallel transported from its old tangent to its new one
+  (:func:`time_parallel`).  The frame is therefore state, owned by the energy
+  (``energy.DERElasticEnergy3DTwist``), which keeps the accepted state and
+  rebuilds the frame from it at every evaluation.
+* **Reference twist.**  Neighbouring reference frames are not parallel
+  transports of each other any more; the mismatch at interior node ``i`` is
+  the reference twist ``refTwist_i`` (:func:`reference_twist`), added to the
+  local twist ``theta^i - theta^{i-1}``.  It is resolved against the previous
+  value so it is continuous across +-pi.
+* **Material frame.**  Edge ``i``'s material frame is its reference frame
+  rotated by the edge's own angle ``theta^i`` about the tangent
+  (:func:`material_directors`).  The angles are degrees of freedom, one per
+  edge, behind the positions in ``q``.
 
 Where the gripper's yaw is measured from
 ----------------------------------------
-A yaw command is an angle of the wrist, so it is measured from a frame that
-depends on the gripper's own orientation, not on the rod's history:
-:func:`gripper_director` gives that reference direction for an end tangent,
-the vector perpendicular to the tangent in the vertical plane through it (it
-is ``+z`` for the rod's straight rest pose).  Both ends use it: the first
-edge's Bishop director *is* the left gripper's reference direction, so the
-left yaw is ``theta^0`` outright, and the right yaw is measured from the same
-reference at the far end -- which is why ``H`` appears in ``Phi`` above.
+A yaw command is an angle of the wrist, measured from a frame that depends on
+the gripper's own orientation: :func:`gripper_director` is that reference
+direction for an end tangent, the vector perpendicular to the tangent in the
+vertical plane through it (``+z`` for the straight rest pose).  It seeds the
+reference frame at reset, so ``theta^0 = yaw`` there.
 
-That frame spins about the tangent as the tangent moves (by ``sin(phi) dtheta``
-in the azimuth/elevation chart the controls use), and :func:`director_spin`
-is that rate.  It is the end-edge counterpart of the per-node holonomy, and it
-is what makes a gripper that only *tilts* still twist the rod.
-
-Derivatives
------------
-:func:`holonomy_grad_hess` returns ``H`` with its exact gradient and Hessian
-with respect to every node.  The gradient has three parts: the classical
-per-node holonomy ``kb / 2L`` of the transport chain (:func:`psi_grad_hess`,
-eq. 9), and the spin of the reference frame at each of the two end edges.
-Everything here is checked against finite differences of a direct
-parallel-transport evaluation by ``scripts/check_twist.py``.
-
-One subtlety, and it matters: differentiating the ``kb/(2L)`` expression once
-more does **not** by itself give the Hessian -- the naive Jacobian of that
-expression carries a spurious antisymmetric part and is off by more than 100%.
-The true Hessian is its **symmetric part**.  ``psi_grad_hess`` returns that,
-and ``scripts/check_twist.py`` verifies the assembled Hessian of ``H`` against
-a second-difference Hessian, which is symmetric by construction.
-
-Limits
-------
-``H`` is an angle, returned on the branch ``(-pi, pi]``.  A rod wound past a
-half turn of holonomy (a looped, writhing configuration) would wrap, and the
-energy would jump while its gradient stayed continuous.  The configurations
-these tasks reach stay far from that.  The reference frame is singular where
-the azimuth/elevation chart of the controls is, i.e. for an end edge pointing
-straight up or down.
+Bishop holonomy (diagnostic only)
+---------------------------------
+:func:`bishop_directors`, :func:`holonomy` and their derivatives below belong
+to the previous quasistatic-twist model, where the holonomy of the Bishop
+frame entered the twisting energy.  The energy no longer uses them; they stay
+until the callers that log the holonomy are cleaned up.  ``holonomy`` is still
+a well-defined geometric quantity of the centreline.
 """
 from __future__ import annotations
 
@@ -235,6 +190,79 @@ def _spin_grad_jac(p_a, p_b):
     g = np.concatenate([-w / n, w / n])
     J = np.block([[Jg, -Jg], [-Jg, Jg]])
     return g, J
+
+
+# ------------------------------------------------------- the reference frame
+
+def rotate_axis_angle(v, z, theta):
+    """``v`` rotated by ``theta`` about the unit axis ``z`` (Rodrigues)."""
+    if theta == 0:
+        return v
+    c, s = np.cos(theta), np.sin(theta)
+    return c * v + s * _cross3(z, v) + float(np.dot(z, v)) * (1.0 - c) * z
+
+
+def space_parallel(a1_first, pos):
+    """``(a1, a2)`` of every edge, by parallel transport along the rod.
+
+    ``a1`` on the first edge is ``a1_first``; every later edge gets the
+    previous one transported across the node between them.  Used once, at
+    reset, to start the reference frame.
+    """
+    t = tangents(np.asarray(pos, dtype=float))
+    a1 = np.empty_like(t)
+    a2 = np.empty_like(t)
+    u = np.asarray(a1_first, dtype=float)
+    a1[0] = u
+    a2[0] = _cross3(t[0], u)
+    for c in range(1, len(t)):
+        u = parallel_transport(u, t[c - 1], t[c])
+        u = u - np.dot(u, t[c]) * t[c]
+        u = u / np.linalg.norm(u)
+        a1[c] = u
+        a2[c] = _cross3(t[c], u)
+    return a1, a2
+
+
+def time_parallel(a1_old, pos_old, pos):
+    """``(a1, a2)`` carried in time from the centreline ``pos_old`` to ``pos``.
+
+    Each edge's ``a1`` is parallel transported from that edge's old tangent to
+    its new one -- no information passes between edges.
+    """
+    t_old = tangents(np.asarray(pos_old, dtype=float))
+    t = tangents(np.asarray(pos, dtype=float))
+    a1 = np.empty_like(t)
+    a2 = np.empty_like(t)
+    for c in range(len(t)):
+        u = parallel_transport(a1_old[c], t_old[c], t[c])
+        u = u - np.dot(u, t[c]) * t[c]
+        u = u / np.linalg.norm(u)
+        a1[c] = u
+        a2[c] = _cross3(t[c], u)
+    return a1, a2
+
+
+def reference_twist(a1, t, guess):
+    """Reference twist at every node, shape ``(nv,)``; the end entries are 0.
+
+    At interior node ``c`` it is the angle from ``a1^{c-1}`` transported across
+    the node to ``a1^c``, about ``t^c``, resolved on the 2 pi branch nearest
+    ``guess[c]``.  Returns a new array: ``guess`` is left untouched.
+    """
+    ref = np.array(guess, dtype=float, copy=True)
+    for c in range(1, len(t)):
+        ut = parallel_transport(a1[c - 1], t[c - 1], t[c])
+        ut = rotate_axis_angle(ut, t[c], ref[c])
+        ref[c] = ref[c] + signed_angle(ut, a1[c], t[c])
+    return ref
+
+
+def material_directors(a1, a2, theta):
+    """``(m1, m2)``: the reference frame rotated by ``theta`` about each tangent."""
+    c = np.cos(theta)[:, None]
+    s = np.sin(theta)[:, None]
+    return c * a1 + s * a2, -s * a1 + c * a2
 
 
 # ------------------------------------------------------------- the Bishop frame
